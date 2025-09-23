@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AppInsightsSettings">
+    <option name="selectedTabId" value="Firebase Crashlytics" />
+    <option name="tabSettings">
+      <map>
+        <entry key="Firebase Crashlytics">
+          <value>
+            <InsightsFilterSettings>
+              <option name="connection">
+                <ConnectionSetting>
+                  <option name="appId" value="com.mustakim.bokbok" />
+                  <option name="mobileSdkAppId" value="1:5720343497:android:8f903047cab5bb6c3c5e18" />
+                  <option name="projectId" value="bokbok-8b961" />
+                  <option name="projectNumber" value="5720343497" />
+                </ConnectionSetting>
+              </option>
+              <option name="failureTypes">
+                <list>
+                  <option value="ANR" />
+                </list>
+              </option>
+              <option name="signal" value="SIGNAL_UNSPECIFIED" />
+              <option name="timeIntervalDays" value="THIRTY_DAYS" />
+              <option name="visibilityType" value="ALL" />
+            </InsightsFilterSettings>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

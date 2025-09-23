@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "5720343497",
+    "firebase_url": "https://bokbok-8b961-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "bokbok-8b961",
+    "storage_bucket": "bokbok-8b961.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:5720343497:android:8f903047cab5bb6c3c5e18",
+        "android_client_info": {
+          "package_name": "com.mustakim.bokbok"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBo0ehUqCIExEjE3kkttdO7j8nx8cfttU4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

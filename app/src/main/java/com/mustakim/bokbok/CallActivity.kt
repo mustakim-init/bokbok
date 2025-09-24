@@ -34,6 +34,9 @@ class CallActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("bokbok_prefs", Context.MODE_PRIVATE) }
 
+    // Track whether we've started SCO (so we can stop it later)
+    private var isSCOStarted = false
+
     // Receiver for headset/Bluetooth
     private val audioDeviceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -45,7 +48,8 @@ class CallActivity : AppCompatActivity() {
 
                 BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothHeadset.EXTRA_STATE, -1)
-                    if (state == BluetoothHeadset.STATE_CONNECTED) setEarpieceMode() else setSpeakerMode()
+                    // PATCH: route to Bluetooth properly instead of treating it as just earpiece
+                    if (state == BluetoothHeadset.STATE_CONNECTED) setBluetoothMode() else setSpeakerMode()
                 }
             }
         }
@@ -126,7 +130,10 @@ class CallActivity : AppCompatActivity() {
 
         // Check for headphones on start and set audio routing - FIXED DEPRECATED METHODS
         val hasHeadphones = hasHeadphonesConnected()
-        if (hasHeadphones) setEarpieceMode() else setSpeakerMode()
+        if (hasHeadphones) {
+            // If headphones include Bluetooth, prefer Bluetooth routing
+            if (isBluetoothConnected()) setBluetoothMode() else setEarpieceMode()
+        } else setSpeakerMode()
 
         // Buttons
         muteButton.setOnClickListener {
@@ -136,7 +143,7 @@ class CallActivity : AppCompatActivity() {
                 .show()
         }
 
-        // mute button also serves as fallback PTT: if PTT enabled and user holds the mute button, talk.
+        // mute button also serves as fallback PTT
         muteButton.setOnTouchListener { v, event ->
             val isPtt = prefs.getBoolean(SettingsActivity.PREF_PTT, false)
             if (!isPtt) return@setOnTouchListener false
@@ -160,7 +167,7 @@ class CallActivity : AppCompatActivity() {
             updatePttUi()
         }
 
-        // Floating PTT button behavior: press-to-talk + draggable
+        // Floating PTT draggable button
         var initialX = 0f
         var initialY = 0f
         var initialTouchX = 0f
@@ -173,7 +180,6 @@ class CallActivity : AppCompatActivity() {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
 
-                    // Start talking
                     webRtcClient?.setLocalMicEnabled(true)
                     v.alpha = 1.0f
                     (v as Button).text = "🔊"
@@ -183,23 +189,17 @@ class CallActivity : AppCompatActivity() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
-
-                    // Calculate new position with bounds checking
                     val newX = initialX + dx
                     val newY = initialY + dy
-
                     val parent = v.parent as ViewGroup
                     val maxX = parent.width - v.width
                     val maxY = parent.height - v.height
-
-                    // Constrain to parent bounds
                     v.x = newX.coerceIn(0f, maxX.toFloat())
                     v.y = newY.coerceIn(0f, maxY.toFloat())
                     true
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    // Stop talking
                     webRtcClient?.setLocalMicEnabled(false)
                     v.alpha = 0.75f
                     (v as Button).text = "🎤"
@@ -210,15 +210,10 @@ class CallActivity : AppCompatActivity() {
             }
         }
 
-        settingsButton.setOnClickListener {
-            SettingsActivity.open(this)
-        }
+        settingsButton.setOnClickListener { SettingsActivity.open(this) }
+        leaveButton.setOnClickListener { cleanupAndFinish(svcIntent) }
 
-        leaveButton.setOnClickListener {
-            cleanupAndFinish(svcIntent)
-        }
-
-        // receive volume SeekBar - live update and persist
+        // receive volume SeekBar
         receiveVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (!fromUser) return
@@ -228,22 +223,18 @@ class CallActivity : AppCompatActivity() {
                 prefs.edit().putInt(SettingsActivity.PREF_RECEIVE_VOL, v).apply()
                 applyReceiveVolume()
             }
-
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // create and init WebRTCClient with error handling
+        // create and init WebRTCClient
         try {
             webRtcClient = WebRTCClient(this, roomId)
             val wantsNoiseSupp = prefs.getBoolean(SettingsActivity.PREF_NOISE_SUPP, true)
             webRtcClient?.setNoiseSuppression(wantsNoiseSupp)
 
-            // Set connection status callback before init
             webRtcClient?.setOnConnectionStatusChanged { remoteId, status ->
-                runOnUiThread {
-                    connectionInfo.text = "Peer $remoteId: $status"
-                }
+                updateConnectionStatusWithTurnInfo(remoteId, status)
             }
 
             webRtcClient?.init(onReady = {
@@ -258,8 +249,6 @@ class CallActivity : AppCompatActivity() {
                         participants.clear()
                         participants.addAll(list)
                         participantAdapter.notifyDataSetChanged()
-
-                        // Update connection info
                         val infoText = if (list.isEmpty()) "No other participants"
                         else "${list.size} participant(s) connected"
                         connectionInfo.text = infoText
@@ -274,9 +263,11 @@ class CallActivity : AppCompatActivity() {
                     }
                 }
 
-                // apply volume after client ready
                 applyReceiveVolume()
                 applyPttMode()
+                // Start TURN debug + monitoring
+                setupTurnServerDebugging()
+                monitorConnectionQuality()
             })
         } catch (e: Exception) {
             runOnUiThread {
@@ -289,7 +280,58 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
-    // New method to check for headphones using modern API
+    // ========= ADDED TURN SERVER DEBUGGING & MONITORING =========
+
+    private fun setupTurnServerDebugging() {
+        // Add a long-press listener on the Settings button
+        findViewById<Button>(R.id.settingsButton)?.setOnLongClickListener {
+            val status = webRtcClient?.getTurnServerStatus() ?: "No client"
+            Toast.makeText(this, "TURN: $status", Toast.LENGTH_LONG).show()
+            Log.d("TurnDebug", status)
+            true
+        }
+    }
+
+
+    private fun monitorConnectionQuality() {
+        val handler = Handler(Looper.getMainLooper())
+        val monitorRunnable = object : Runnable {
+            override fun run() {
+                webRtcClient?.let { client ->
+                    val status = client.getTurnServerStatus()
+                    Log.d("ConnectionMonitor", "TURN Status: $status")
+
+                    if (participants.isNotEmpty()) {
+                        val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
+                        val currentText = connectionInfo.text.toString()
+                        if (currentText.contains("GATHERING") ||
+                            currentText.contains("CONNECTING") ||
+                            currentText.contains("CHECKING")) {
+                            handler.postDelayed({
+                                if (connectionInfo.text.toString() == currentText) {
+                                    Log.w("ConnectionMonitor", "Connection stuck, forcing TURN escalation")
+                                    client.forceTurnServerEscalation()
+                                }
+                            }, 20_000L)
+                        }
+                    }
+                }
+                handler.postDelayed(this, 10_000L)
+            }
+        }
+        handler.postDelayed(monitorRunnable, 5_000L)
+    }
+
+    private fun updateConnectionStatusWithTurnInfo(remoteId: String, status: String) {
+        runOnUiThread {
+            val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
+            val turnStatus = webRtcClient?.getTurnServerStatus() ?: ""
+            connectionInfo.text = "Peer $remoteId: $status\n$turnStatus"
+            Log.d("ConnectionStatus", "Peer $remoteId: $status, TURN: $turnStatus")
+        }
+    }
+
+// New method to check for headphones using modern API
     private fun hasHeadphonesConnected(): Boolean {
         val am = audioManager ?: return false
 
@@ -306,6 +348,21 @@ class CallActivity : AppCompatActivity() {
             // Fallback for older Android versions
             @Suppress("DEPRECATION")
             am.isWiredHeadsetOn || am.isBluetoothA2dpOn
+        }
+    }
+
+    // Helper to detect Bluetooth specifically
+    private fun isBluetoothConnected(): Boolean {
+        val am = audioManager ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            devices.any { device ->
+                device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            am.isBluetoothA2dpOn
         }
     }
 
@@ -403,6 +460,16 @@ class CallActivity : AppCompatActivity() {
         val am = audioManager ?: return
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
+        // stop SCO if it was started
+        try {
+            if (isSCOStarted || am.isBluetoothScoOn) {
+                am.stopBluetoothSco()
+                isSCOStarted = false
+            }
+        } catch (e: Exception) {
+            Log.w("CallActivity", "Error stopping SCO in setSpeakerMode: ${e.message}")
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Modern API for Android 12+
             try {
@@ -426,6 +493,16 @@ class CallActivity : AppCompatActivity() {
         val am = audioManager ?: return
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
+        // stop SCO just in case
+        try {
+            if (isSCOStarted || am.isBluetoothScoOn) {
+                am.stopBluetoothSco()
+                isSCOStarted = false
+            }
+        } catch (e: Exception) {
+            Log.w("CallActivity", "Error stopping SCO in setEarpieceMode: ${e.message}")
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Modern API for Android 12+
             try {
@@ -444,6 +521,29 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    // NEW: Properly route audio to Bluetooth SCO for voice headsets
+    private fun setBluetoothMode() {
+        val am = audioManager ?: return
+        try {
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+            // Start SCO and mark it; Android routes mic+audio for voice
+            if (!isSCOStarted) {
+                am.startBluetoothSco()
+                isSCOStarted = true
+            }
+            // Flag for legacy APIs
+            try { am.isBluetoothScoOn = true } catch (_: Exception) {}
+
+            // Turn speaker off
+            try { am.isSpeakerphoneOn = false } catch (_: Exception) {}
+
+            Log.d("CallActivity", "Audio routed to Bluetooth headset (SCO started=${isSCOStarted})")
+        } catch (e: Exception) {
+            Log.e("CallActivity", "Failed to route audio to Bluetooth: ${e.message}", e)
+        }
+    }
+
     private fun cleanupAndFinish(svcIntent: Intent) {
         if (isCleaningUp) return // Prevent multiple cleanup calls
         isCleaningUp = true
@@ -456,6 +556,19 @@ class CallActivity : AppCompatActivity() {
         try { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) } catch (_: Exception) {}
         abandonAudioFocus()
         try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) {}
+
+        // Ensure SCO is stopped if we started it
+        try {
+            audioManager?.let { am ->
+                if (isSCOStarted || am.isBluetoothScoOn) {
+                    am.stopBluetoothSco()
+                    isSCOStarted = false
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("CallActivity", "Error stopping SCO in cleanup: ${e.message}")
+        }
+
         finish()
     }
 
@@ -477,6 +590,11 @@ class CallActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         applyDuckSetting()
+
+        // If Bluetooth headset is connected, ensure SCO is started so audio is routed correctly
+        if (isBluetoothConnected()) {
+            setBluetoothMode()
+        }
     }
 
     override fun onDestroy() {
@@ -495,6 +613,18 @@ class CallActivity : AppCompatActivity() {
             try {
                 unregisterReceiver(audioDeviceReceiver)
             } catch (_: Exception) {
+            }
+
+            // Ensure SCO is stopped
+            try {
+                audioManager?.let { am ->
+                    if (isSCOStarted || am.isBluetoothScoOn) {
+                        am.stopBluetoothSco()
+                        isSCOStarted = false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("CallActivity", "Error stopping SCO onDestroy: ${e.message}")
             }
 
             // Only call endCall if we haven't already cleaned up

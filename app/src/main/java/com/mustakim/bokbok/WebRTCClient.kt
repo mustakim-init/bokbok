@@ -30,6 +30,12 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private val peerConnectionLock = Any()
 
+    // --- NEW: TurnServerManager + connection monitoring fields ---
+    private val turnServerManager = TurnServerManager()
+    private val connectionTimeouts = ConcurrentHashMap<String, Long>()
+    private val maxConnectionTimeoutMs = 15_000L // 15 seconds
+    // -------------------------------------------------------------
+
     fun setNoiseSuppression(enabled: Boolean) {
         noiseSuppressionEnabled = enabled
         Log.d(TAG, "Noise suppression set to $enabled (restart call to fully re-create audio source)")
@@ -188,12 +194,12 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private fun createPeerConnection(remoteId: String): PeerConnection? {
         val f = factory ?: return null
-        val rtcConfig = PeerConnection.RTCConfiguration(listOf(
-            PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-            // Add more STUN servers for reliability
-            PeerConnection.IceServer.builder("stun:stun.stunprotocol.org:3478").createIceServer()
-        )).apply {
+
+        // ---------- PATCHED: Use TurnServerManager to provide STUN + TURN servers ----------
+        val iceServers = turnServerManager.getIceServersForCurrentTier()
+        // ----------------------------------------------------------------------------------
+
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
@@ -201,7 +207,25 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             // Gaming optimizations
             iceTransportsType = PeerConnection.IceTransportsType.ALL
             keyType = PeerConnection.KeyType.ECDSA
+
+            // Aggressive timeouts for faster failover (we will monitor & retry)
+            try {
+                // These fields may not exist on all WebRTC builds; set defensively
+                val connTimeoutField = this::class.java.getDeclaredField("iceConnectionReceivingTimeout")
+                connTimeoutField.isAccessible = true
+                connTimeoutField.setInt(this, 5000)
+            } catch (_: Throwable) {}
+
+            try {
+                val inactiveTimeoutField = this::class.java.getDeclaredField("iceInactiveTimeout")
+                inactiveTimeoutField.isAccessible = true
+                inactiveTimeoutField.setInt(this, 8000)
+            } catch (_: Throwable) {}
         }
+        // ---------------------------------------------------------------------------------------
+
+        // Track connection attempt start time for timeout logic
+        connectionTimeouts[remoteId] = System.currentTimeMillis()
 
         val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {
@@ -209,10 +233,47 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             }
 
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                Log.d(TAG, "ICE state for $remoteId: $state")
+                Log.d(TAG, "ICE state for $remoteId: $state (TURN tier: ${turnServerManager.getCurrentTier()})")
+                when (state) {
+                    PeerConnection.IceConnectionState.CONNECTED,
+                    PeerConnection.IceConnectionState.COMPLETED -> {
+                        // Connection successful - reset to tier 1 for future connections
+                        connectionTimeouts.remove(remoteId)
+                        turnServerManager.resetToTier1()
+                        Log.d(TAG, "Connection successful for $remoteId, reset to tier 1")
+                    }
+
+                    PeerConnection.IceConnectionState.FAILED,
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        // Connection failed - escalate and retry
+                        connectionTimeouts.remove(remoteId)
+                        turnServerManager.forceEscalateToNextTier()
+                        Log.w(TAG, "Connection failed for $remoteId, escalated to tier ${turnServerManager.getCurrentTier()}")
+
+                        if (turnServerManager.getCurrentTier() < 5) {
+                            retryConnectionWithNewTier(remoteId)
+                        }
+                    }
+
+                    else -> {
+                        // If it remains in transitional states for too long, escalate
+                        val startTime = connectionTimeouts[remoteId]
+                        if (startTime != null &&
+                            System.currentTimeMillis() - startTime > maxConnectionTimeoutMs &&
+                            state != PeerConnection.IceConnectionState.CONNECTED &&
+                            state != PeerConnection.IceConnectionState.COMPLETED) {
+
+                            Log.w(TAG, "Connection timeout for $remoteId after ${System.currentTimeMillis() - startTime}ms, escalating")
+                            turnServerManager.forceEscalateToNextTier()
+                            retryConnectionWithNewTier(remoteId)
+                        }
+                    }
+                }
+
                 onConnectionStatusChanged?.let { callback ->
-                    android.os.Handler(Looper.getMainLooper()).post {
-                        callback(remoteId, state?.name ?: "Unknown")
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        val statusWithTier = "${state?.name ?: "Unknown"} (T${turnServerManager.getCurrentTier()})"
+                        callback(remoteId, statusWithTier)
                     }
                 }
             }
@@ -223,6 +284,20 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
                 Log.d(TAG, "ICE gathering for $remoteId: $state")
+
+                if (state == PeerConnection.IceGatheringState.GATHERING) {
+                    val start = connectionTimeouts[remoteId]
+                    if (start != null) {
+                        // If gathering takes too long, escalate to next tier
+                        android.os.Handler(Looper.getMainLooper()).postDelayed({
+                            val currentState = try { peerConnections[remoteId]?.iceGatheringState() } catch (_: Exception) { null }
+                            if (currentState == PeerConnection.IceGatheringState.GATHERING) {
+                                Log.w(TAG, "ICE gathering timeout for $remoteId, forcing escalation")
+                                turnServerManager.forceEscalateToNextTier()
+                            }
+                        }, 10_000L) // 10s gathering timeout
+                    }
+                }
             }
 
             override fun onIceCandidate(candidate: IceCandidate) {
@@ -258,6 +333,27 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             }
         })
         return pc
+    }
+
+    // Retry connection with new TURN tier (close existing and create new peer)
+    private fun retryConnectionWithNewTier(remoteId: String) {
+        executor.execute {
+            try {
+                Log.d(TAG, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}")
+
+                peerConnections[remoteId]?.close()
+                peerConnections.remove(remoteId)
+                remoteAudioTracks.remove(remoteId)
+
+                // Small backoff before retry
+                Thread.sleep(1000)
+
+                createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error retrying connection for $remoteId: ${e.message}", e)
+            }
+        }
     }
 
     private fun handleRemoteSdp(fromId: String, payload: Map<String, Any?>, msgKey: String) {
@@ -372,6 +468,16 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             }
         }
     }
+    // === TURN Server Debug Helpers ===
+    fun getTurnServerStatus(): String {
+        return turnServerManager.getStatusInfo()
+    }
+
+    fun forceTurnServerEscalation() {
+        turnServerManager.forceEscalateToNextTier()
+        Log.d(TAG, "Manual TURN escalation requested -> now tier ${turnServerManager.getCurrentTier()}")
+    }
+
 
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {
         try {

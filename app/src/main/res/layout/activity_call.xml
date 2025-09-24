@@ -12,6 +12,7 @@
         android:padding="8dp"
         android:fillViewport="true">
 
+
         <LinearLayout
             android:orientation="vertical"
             android:gravity="center_horizontal"

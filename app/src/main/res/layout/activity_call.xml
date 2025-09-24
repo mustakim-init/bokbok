@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/call_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -57,21 +58,21 @@
 
             <!-- Control Buttons - Adaptive Layout -->
             <!-- For small screens: 2x2 grid, for larger screens: 1x4 row -->
-            <GridLayout
+            <androidx.gridlayout.widget.GridLayout
                 android:id="@+id/buttonGrid"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:columnCount="2"
-                android:rowCount="2"
+                app:columnCount="2"
+                app:rowCount="2"
                 android:layout_marginBottom="16dp"
-                android:alignmentMode="alignBounds"
-                android:columnOrderPreserved="false">
+                app:alignmentMode="alignBounds"
+                app:columnOrderPreserved="false">
 
                 <Button
                     android:id="@+id/muteButton"
                     android:layout_width="0dp"
                     android:layout_height="56dp"
-                    android:layout_columnWeight="1"
+                    app:layout_columnWeight="1"
                     android:layout_margin="4dp"
                     android:text="Mute"
                     android:textSize="14sp"
@@ -81,7 +82,7 @@
                     android:id="@+id/pttToggle"
                     android:layout_width="0dp"
                     android:layout_height="56dp"
-                    android:layout_columnWeight="1"
+                    app:layout_columnWeight="1"
                     android:layout_margin="4dp"
                     android:textOff="PTT Off"
                     android:textOn="PTT On"
@@ -92,7 +93,7 @@
                     android:id="@+id/settingsButton"
                     android:layout_width="0dp"
                     android:layout_height="56dp"
-                    android:layout_columnWeight="1"
+                    app:layout_columnWeight="1"
                     android:layout_margin="4dp"
                     android:text="Settings"
                     android:textSize="14sp"
@@ -102,14 +103,14 @@
                     android:id="@+id/leaveButton"
                     android:layout_width="0dp"
                     android:layout_height="56dp"
-                    android:layout_columnWeight="1"
+                    app:layout_columnWeight="1"
                     android:layout_margin="4dp"
                     android:backgroundTint="@android:color/holo_red_dark"
                     android:text="Leave"
                     android:textColor="@android:color/white"
                     android:textSize="14sp"
                     android:minWidth="80dp" />
-            </GridLayout>
+            </androidx.gridlayout.widget.GridLayout>
 
             <!-- Participants Section -->
             <TextView

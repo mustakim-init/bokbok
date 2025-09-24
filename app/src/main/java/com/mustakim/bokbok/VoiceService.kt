@@ -7,9 +7,11 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 
 class VoiceService : Service() {
@@ -25,7 +27,6 @@ class VoiceService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Ensure we remain foreground if service restarted
         startAsForeground()
         return START_STICKY
     }
@@ -97,4 +98,14 @@ class VoiceService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    // A safer, alternative function to prompt the user
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            val uri = Uri.parse("package:" + packageName)
+            intent.data = uri
+            startActivity(intent)
+        }
+    }
 }

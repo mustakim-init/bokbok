@@ -3,16 +3,19 @@ package com.mustakim.bokbok
 import android.bluetooth.BluetoothHeadset
 import android.content.*
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.gridlayout.widget.GridLayout
 import kotlin.math.max
 import kotlin.math.min
 
@@ -62,6 +65,8 @@ class CallActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_call)
 
+        setupAdaptiveLayout()
+
         roomId = intent.getStringExtra("ROOM_ID") ?: "unknown"
         findViewById<TextView>(R.id.roomIdText).text = "Room: $roomId"
 
@@ -92,6 +97,7 @@ class CallActivity : AppCompatActivity() {
         val receiveVolume = findViewById<SeekBar>(R.id.receiveVolume)
         val pttFloat = findViewById<Button>(R.id.pttFloatButton)
         val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
+        val volumeValue = findViewById<TextView>(R.id.volumeValue)
 
         // prefs listener
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
@@ -102,11 +108,15 @@ class CallActivity : AppCompatActivity() {
         receiveVolume.max = 200
         updatePttUi()
 
+        // Initialize volume display
+        val initialVol = prefs.getInt(SettingsActivity.PREF_RECEIVE_VOL, 100)
+        volumeValue.text = "${initialVol}%"
+
         // audio focus + ducking default
         applyDuckSetting()
 
-        // Check for headphones on start and set audio routing
-        val hasHeadphones = audioManager?.isWiredHeadsetOn == true || audioManager?.isBluetoothA2dpOn == true
+        // Check for headphones on start and set audio routing - FIXED DEPRECATED METHODS
+        val hasHeadphones = hasHeadphonesConnected()
         if (hasHeadphones) setEarpieceMode() else setSpeakerMode()
 
         // Buttons
@@ -140,48 +150,45 @@ class CallActivity : AppCompatActivity() {
         }
 
         // Floating PTT button behavior: press-to-talk + draggable
-        var lastX = 0f
-        var lastY = 0f
-        var isDragging = false
+        var initialX = 0f
+        var initialY = 0f
+        var initialTouchX = 0f
+        var initialTouchY = 0f
         pttFloat.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    lastX = event.rawX
-                    lastY = event.rawY
-                    isDragging = false
-                    // start talking immediately on down
+                    initialX = v.x
+                    initialY = v.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+
+                    // Start talking
                     webRtcClient.setLocalMicEnabled(true)
                     v.alpha = 1.0f
                     (v as Button).text = "🔊"
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - lastX
-                    val dy = event.rawY - lastY
-                    if (kotlin.math.hypot(dx.toDouble(), dy.toDouble()) > 6.0) {
-                        isDragging = true
-                    }
-                    if (isDragging) {
-                        // Constrain to screen bounds
-                        val newX = v.translationX + dx
-                        val newY = v.translationY + dy
-                        val screenWidth = resources.displayMetrics.widthPixels
-                        val screenHeight = resources.displayMetrics.heightPixels
-                        val buttonWidth = v.width
-                        val buttonHeight = v.height
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
 
-                        v.translationX = max(-v.x, min(newX, screenWidth - v.x - buttonWidth))
-                        v.translationY = max(-v.y, min(newY, screenHeight - v.y - buttonHeight))
+                    // Calculate new position with bounds checking
+                    val newX = initialX + dx
+                    val newY = initialY + dy
 
-                        lastX = event.rawX
-                        lastY = event.rawY
-                    }
+                    val displayMetrics = resources.displayMetrics
+                    val maxX = displayMetrics.widthPixels - v.width
+                    val maxY = displayMetrics.heightPixels - v.height
+
+                    // Constrain to screen bounds
+                    v.x = newX.coerceIn(0f, maxX.toFloat())
+                    v.y = newY.coerceIn(0f, maxY.toFloat())
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    // stop talking
+                    // Stop talking
                     webRtcClient.setLocalMicEnabled(false)
-                    v.alpha = 0.55f
+                    v.alpha = 0.75f
                     (v as Button).text = "🎤"
                     true
                 }
@@ -203,6 +210,7 @@ class CallActivity : AppCompatActivity() {
                 if (!fromUser) return
                 var v = progress
                 if (v < 10) v = 10
+                volumeValue.text = "${v}%"
                 prefs.edit().putInt(SettingsActivity.PREF_RECEIVE_VOL, v).apply()
                 applyReceiveVolume()
             }
@@ -210,43 +218,52 @@ class CallActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // create and init WebRTCClient
-        webRtcClient = WebRTCClient(this, roomId)
-        val wantsNoiseSupp = prefs.getBoolean(SettingsActivity.PREF_NOISE_SUPP, true)
-        webRtcClient.setNoiseSuppression(wantsNoiseSupp)
+        // create and init WebRTCClient with error handling
+        try {
+            webRtcClient = WebRTCClient(this, roomId)
+            val wantsNoiseSupp = prefs.getBoolean(SettingsActivity.PREF_NOISE_SUPP, true)
+            webRtcClient.setNoiseSuppression(wantsNoiseSupp)
 
-        webRtcClient.init(onReady = {
+            webRtcClient.init(onReady = {
+                runOnUiThread {
+                    statusText.text = "Status: Ready"
+                    statusSpinner.visibility = View.GONE
+                    Toast.makeText(this, "Call system ready", Toast.LENGTH_SHORT).show()
+                }
+
+                webRtcClient.setOnParticipantsChanged { list ->
+                    mainHandler.post {
+                        participants.clear()
+                        participants.addAll(list)
+                        participantAdapter.notifyDataSetChanged()
+
+                        // Update connection info
+                        val infoText = if (list.isEmpty()) "No other participants"
+                        else "${list.size} participant(s) connected"
+                        connectionInfo.text = infoText
+                    }
+                }
+
+                webRtcClient.getCurrentParticipants { cur ->
+                    mainHandler.post {
+                        participants.clear()
+                        participants.addAll(cur)
+                        participantAdapter.notifyDataSetChanged()
+                    }
+                }
+
+                // apply volume after client ready
+                applyReceiveVolume()
+                applyPttMode()
+            })
+        } catch (e: Exception) {
             runOnUiThread {
-                statusText.text = "Status: Ready"
+                statusText.text = "Status: Error - Restart app"
                 statusSpinner.visibility = View.GONE
-                Toast.makeText(this, "Call system ready", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Failed to initialize call: ${e.message}", Toast.LENGTH_LONG).show()
+                Log.e("CallActivity", "WebRTC initialization failed", e)
             }
-
-            webRtcClient.setOnParticipantsChanged { list ->
-                mainHandler.post {
-                    participants.clear()
-                    participants.addAll(list)
-                    participantAdapter.notifyDataSetChanged()
-
-                    // Update connection info
-                    val infoText = if (list.isEmpty()) "No other participants"
-                    else "${list.size} participant(s) connected"
-                    connectionInfo.text = infoText
-                }
-            }
-
-            webRtcClient.getCurrentParticipants { cur ->
-                mainHandler.post {
-                    participants.clear()
-                    participants.addAll(cur)
-                    participantAdapter.notifyDataSetChanged()
-                }
-            }
-
-            // apply volume after client ready
-            applyReceiveVolume()
-            applyPttMode()
-        })
+        }
 
         // Set connection status callback
         webRtcClient.setOnConnectionStatusChanged { remoteId, status ->
@@ -254,6 +271,51 @@ class CallActivity : AppCompatActivity() {
                 connectionInfo.text = "Peer $remoteId: $status"
             }
         }
+    }
+
+    // New method to check for headphones using modern API
+    private fun hasHeadphonesConnected(): Boolean {
+        val am = audioManager ?: return false
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Modern API for Android 6.0+
+            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            devices.any { device ->
+                device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            }
+        } else {
+            // Fallback for older Android versions
+            @Suppress("DEPRECATION")
+            am.isWiredHeadsetOn || am.isBluetoothA2dpOn
+        }
+    }
+
+    private fun setupAdaptiveLayout() {
+        val buttonGrid = findViewById<GridLayout>(R.id.buttonGrid)
+        val displayMetrics = resources.displayMetrics
+        val screenWidthPx = displayMetrics.widthPixels
+        val screenWidthDp = screenWidthPx / displayMetrics.density
+
+        // Adjust layout based on screen width
+        if (screenWidthDp < 360) {
+            // Very small screens: 2x2 grid
+            buttonGrid.columnCount = 2
+            buttonGrid.rowCount = 2
+        } else if (screenWidthDp < 480) {
+            // Small screens: 2x2 grid with slightly larger buttons
+            buttonGrid.columnCount = 2
+            buttonGrid.rowCount = 2
+        } else {
+            // Normal and large screens: 4x1 row
+            buttonGrid.columnCount = 4
+            buttonGrid.rowCount = 1
+        }
+
+        // Force layout update
+        buttonGrid.requestLayout()
     }
 
     private fun updatePttUi() {
@@ -288,21 +350,27 @@ class CallActivity : AppCompatActivity() {
     private fun applyDuckSetting() {
         val duck = prefs.getBoolean(SettingsActivity.PREF_DUCK, true)
         val am = audioManager ?: return
+
+        // First abandon any existing focus
+        abandonAudioFocus()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val attr = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
-            val gain = if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK else AudioManager.AUDIOFOCUS_GAIN
+            val gain = if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            else AudioManager.AUDIOFOCUS_GAIN
             focusRequest = AudioFocusRequest.Builder(gain)
                 .setAudioAttributes(attr)
-                .setOnAudioFocusChangeListener { /* no-op */ }
+                .setOnAudioFocusChangeListener { }
                 .build()
             am.requestAudioFocus(focusRequest!!)
         } else {
             @Suppress("DEPRECATION")
-            am.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL,
-                if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK else AudioManager.AUDIOFOCUS_GAIN)
+            am.requestAudioFocus({ }, AudioManager.STREAM_VOICE_CALL,
+                if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+                else AudioManager.AUDIOFOCUS_GAIN)
         }
     }
 
@@ -312,17 +380,49 @@ class CallActivity : AppCompatActivity() {
         webRtcClient.setReceiveVolumeMultiplier(multiplier)
     }
 
+    // Updated speaker mode with modern API
     private fun setSpeakerMode() {
-        audioManager?.let { am ->
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
-            am.isSpeakerphoneOn = true
+        val am = audioManager ?: return
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Modern API for Android 12+
+            try {
+                am.isSpeakerphoneOn = true
+            } catch (e: Exception) {
+                Log.e("CallActivity", "Error setting speakerphone on", e)
+            }
+        } else {
+            // Legacy API with try-catch
+            @Suppress("DEPRECATION")
+            try {
+                am.isSpeakerphoneOn = true
+            } catch (e: Exception) {
+                Log.e("CallActivity", "Error setting speakerphone on (legacy)", e)
+            }
         }
     }
 
+    // Updated earpiece mode with modern API
     private fun setEarpieceMode() {
-        audioManager?.let { am ->
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
-            am.isSpeakerphoneOn = false
+        val am = audioManager ?: return
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Modern API for Android 12+
+            try {
+                am.isSpeakerphoneOn = false
+            } catch (e: Exception) {
+                Log.e("CallActivity", "Error setting speakerphone off", e)
+            }
+        } else {
+            // Legacy API with try-catch
+            @Suppress("DEPRECATION")
+            try {
+                am.isSpeakerphoneOn = false
+            } catch (e: Exception) {
+                Log.e("CallActivity", "Error setting speakerphone off (legacy)", e)
+            }
         }
     }
 
@@ -347,6 +447,10 @@ class CallActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            val svcIntent = Intent(this, VoiceService::class.java)
+            stopService(svcIntent)
+        } catch (_: Exception) {}
         try { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) } catch (_: Exception) {}
         try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) {}
     }

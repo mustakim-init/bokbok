@@ -27,6 +27,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
     private var onConnectionStatusChanged: ((String, String) -> Unit)? = null
 
+    private val peerConnectionLock = Any()
+
     fun setNoiseSuppression(enabled: Boolean) {
         noiseSuppressionEnabled = enabled
         Log.d(TAG, "Noise suppression set to $enabled (restart call to fully re-create audio source)")
@@ -104,11 +106,19 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         }
                     }
 
-                    onReady?.let { android.os.Handler(android.os.Looper.getMainLooper()).post { it() } }
+                    // Add null check before calling onReady
+                    onReady?.let {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            try {
+                                it()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in onReady callback", e)
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "init error: ${e.message}", e)
-                    // Notify UI of initialization error
-                    onReady?.let { android.os.Handler(android.os.Looper.getMainLooper()).post { it() } }
+                    // Don't call onReady on error to prevent crashes
                 }
             }
         }
@@ -119,52 +129,54 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private fun createPeerIfNeeded(remoteId: String, initiator: Boolean = false) {
         executor.execute {
-            try {
-                if (peerConnections.containsKey(remoteId)) return@execute
-                Log.d(TAG, "Creating PeerConnection for $remoteId (initiator=$initiator)")
-                val pc = createPeerConnection(remoteId) ?: return@execute
+            synchronized(peerConnectionLock) {
+                try {
+                    if (peerConnections.containsKey(remoteId)) return@execute
+                    Log.d(TAG, "Creating PeerConnection for $remoteId (initiator=$initiator)")
+                    val pc = createPeerConnection(remoteId) ?: return@execute
 
-                val sendTrack = localAudioTrack
-                if (sendTrack != null) {
-                    val sender = pc.addTrack(sendTrack, listOf("ARDAMS"))
-                    try {
-                        val params = sender.parameters
-                        if (params.encodings.isNotEmpty()) {
-                            // Gaming-optimized bitrates
-                            params.encodings[0].maxBitrateBps = 64000  // Higher quality
-                            params.encodings[0].minBitrateBps = 16000
-                            sender.parameters = params
+                    val sendTrack = localAudioTrack
+                    if (sendTrack != null) {
+                        val sender = pc.addTrack(sendTrack, listOf("ARDAMS"))
+                        try {
+                            val params = sender.parameters
+                            if (params.encodings.isNotEmpty()) {
+                                // Gaming-optimized bitrates
+                                params.encodings[0].maxBitrateBps = 64000  // Higher quality
+                                params.encodings[0].minBitrateBps = 16000
+                                sender.parameters = params
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "set bitrate failed: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "set bitrate failed: ${e.message}")
                     }
-                }
 
-                peerConnections[remoteId] = pc
+                    peerConnections[remoteId] = pc
 
-                if (initiator) {
-                    pc.createOffer(object : SdpObserver {
-                        override fun onCreateSuccess(desc: SessionDescription) {
-                            Log.d(TAG, "Offer created for $remoteId")
-                            pc.setLocalDescription(SimpleSdpObserver(), desc)
-                            signaling.sendSdp(remoteId, desc)
-                        }
-                        override fun onSetSuccess() {}
-                        override fun onCreateFailure(p0: String?) {
-                            Log.e(TAG, "createOffer failed: $p0")
-                            onConnectionStatusChanged?.let { callback ->
-                                android.os.Handler(Looper.getMainLooper()).post {
-                                    callback(remoteId, "Offer failed")
+                    if (initiator) {
+                        pc.createOffer(object : SdpObserver {
+                            override fun onCreateSuccess(desc: SessionDescription) {
+                                Log.d(TAG, "Offer created for $remoteId")
+                                pc.setLocalDescription(SimpleSdpObserver(), desc)
+                                signaling.sendSdp(remoteId, desc)
+                            }
+                            override fun onSetSuccess() {}
+                            override fun onCreateFailure(p0: String?) {
+                                Log.e(TAG, "createOffer failed: $p0")
+                                onConnectionStatusChanged?.let { callback ->
+                                    android.os.Handler(Looper.getMainLooper()).post {
+                                        callback(remoteId, "Offer failed")
+                                    }
                                 }
                             }
-                        }
-                        override fun onSetFailure(p0: String?) {
-                            Log.e(TAG, "setLocalDescription failed: $p0")
-                        }
-                    }, MediaConstraints())
+                            override fun onSetFailure(p0: String?) {
+                                Log.e(TAG, "setLocalDescription failed: $p0")
+                            }
+                        }, MediaConstraints())
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "createPeerIfNeeded error: ${e.message}", e)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "createPeerIfNeeded error: ${e.message}", e)
             }
         }
     }
@@ -378,15 +390,26 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     fun endCall() {
-        try { signaling.leave() } catch (_: Exception) {}
-        try { for ((_, pc) in peerConnections) pc.close(); peerConnections.clear(); remoteAudioTracks.clear() } catch (_: Exception) {}
+        try {
+            synchronized(peerConnectionLock) {
+                signaling.leave()
+                for ((_, pc) in peerConnections) {
+                    try { pc.close() } catch (e: Exception) { Log.w(TAG, "Error closing peer: ${e.message}") }
+                }
+                peerConnections.clear()
+                remoteAudioTracks.clear()
+            }
+        } catch (_: Exception) {}
+
         try { audioSource?.dispose() } catch (_: Exception) {}
         try { localAudioTrack?.dispose() } catch (_: Exception) {}
         try { factory?.dispose() } catch (_: Exception) {}
 
         try {
             executor.shutdown()
-            executor.awaitTermination(2, TimeUnit.SECONDS)
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow()
+            }
         } catch (e: Exception) {
             executor.shutdownNow()
         }

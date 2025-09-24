@@ -1,7 +1,9 @@
 package com.mustakim.bokbok
 
 import android.content.Context
+import android.os.Looper
 import android.util.Log
+import android.widget.TextView
 import org.webrtc.*
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
@@ -162,7 +164,13 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
         val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) { Log.d(TAG, "ICE state for $remoteId: $state") }
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                Log.d(TAG, "ICE state for $remoteId: $state")
+                android.os.Handler(Looper.getMainLooper()).post {
+                    (context as? CallActivity)?.let { it.findViewById<TextView>(R.id.connectionInfo).text = "Peer $remoteId: $state" }
+                }
+            }
+
             override fun onIceConnectionReceivingChange(p0: Boolean) {}
             override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
             override fun onIceCandidate(candidate: IceCandidate) {

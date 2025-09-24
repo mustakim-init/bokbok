@@ -13,6 +13,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.max
+import kotlin.math.min
 
 class CallActivity : AppCompatActivity() {
 
@@ -80,14 +82,16 @@ class CallActivity : AppCompatActivity() {
         participantAdapter = ParticipantAdapter(this, participants)
         findViewById<ListView>(R.id.participantsList).adapter = participantAdapter
 
-        // UI
+        // UI elements
         val muteButton = findViewById<Button>(R.id.muteButton)
         val pttToggle = findViewById<ToggleButton>(R.id.pttToggle)
         val settingsButton = findViewById<Button>(R.id.settingsButton)
         val leaveButton = findViewById<Button>(R.id.leaveButton)
         val statusText = findViewById<TextView>(R.id.statusText)
+        val statusSpinner = findViewById<ProgressBar>(R.id.statusSpinner)
         val receiveVolume = findViewById<SeekBar>(R.id.receiveVolume)
         val pttFloat = findViewById<Button>(R.id.pttFloatButton)
+        val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
 
         // prefs listener
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
@@ -95,10 +99,15 @@ class CallActivity : AppCompatActivity() {
         // initial UI state
         pttToggle.isChecked = prefs.getBoolean(SettingsActivity.PREF_PTT, false)
         receiveVolume.progress = prefs.getInt(SettingsActivity.PREF_RECEIVE_VOL, 100)
+        receiveVolume.max = 200
         updatePttUi()
 
         // audio focus + ducking default
         applyDuckSetting()
+
+        // Check for headphones on start and set audio routing
+        val hasHeadphones = audioManager?.isWiredHeadsetOn == true || audioManager?.isBluetoothA2dpOn == true
+        if (hasHeadphones) setEarpieceMode() else setSpeakerMode()
 
         // Buttons
         muteButton.setOnClickListener {
@@ -143,18 +152,27 @@ class CallActivity : AppCompatActivity() {
                     // start talking immediately on down
                     webRtcClient.setLocalMicEnabled(true)
                     v.alpha = 1.0f
-                    (v as Button).text = "Talk"
+                    (v as Button).text = "🔊"
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 6.0) {
+                    if (kotlin.math.hypot(dx.toDouble(), dy.toDouble()) > 6.0) {
                         isDragging = true
                     }
                     if (isDragging) {
-                        v.translationX = v.translationX + dx
-                        v.translationY = v.translationY + dy
+                        // Constrain to screen bounds
+                        val newX = v.translationX + dx
+                        val newY = v.translationY + dy
+                        val screenWidth = resources.displayMetrics.widthPixels
+                        val screenHeight = resources.displayMetrics.heightPixels
+                        val buttonWidth = v.width
+                        val buttonHeight = v.height
+
+                        v.translationX = max(-v.x, min(newX, screenWidth - v.x - buttonWidth))
+                        v.translationY = max(-v.y, min(newY, screenHeight - v.y - buttonHeight))
+
                         lastX = event.rawX
                         lastY = event.rawY
                     }
@@ -163,8 +181,8 @@ class CallActivity : AppCompatActivity() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     // stop talking
                     webRtcClient.setLocalMicEnabled(false)
-                    v.alpha = 0.65f
-                    (v as Button).text = "PTT"
+                    v.alpha = 0.55f
+                    (v as Button).text = "🎤"
                     true
                 }
                 else -> false
@@ -182,6 +200,7 @@ class CallActivity : AppCompatActivity() {
         // receive volume SeekBar - live update and persist
         receiveVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
                 var v = progress
                 if (v < 10) v = 10
                 prefs.edit().putInt(SettingsActivity.PREF_RECEIVE_VOL, v).apply()
@@ -198,7 +217,8 @@ class CallActivity : AppCompatActivity() {
 
         webRtcClient.init(onReady = {
             runOnUiThread {
-                statusText.text = "Status: ready"
+                statusText.text = "Status: Ready"
+                statusSpinner.visibility = View.GONE
                 Toast.makeText(this, "Call system ready", Toast.LENGTH_SHORT).show()
             }
 
@@ -207,8 +227,14 @@ class CallActivity : AppCompatActivity() {
                     participants.clear()
                     participants.addAll(list)
                     participantAdapter.notifyDataSetChanged()
+
+                    // Update connection info
+                    val infoText = if (list.isEmpty()) "No other participants"
+                    else "${list.size} participant(s) connected"
+                    connectionInfo.text = infoText
                 }
             }
+
             webRtcClient.getCurrentParticipants { cur ->
                 mainHandler.post {
                     participants.clear()
@@ -221,14 +247,30 @@ class CallActivity : AppCompatActivity() {
             applyReceiveVolume()
             applyPttMode()
         })
+
+        // Set connection status callback
+        webRtcClient.setOnConnectionStatusChanged { remoteId, status ->
+            runOnUiThread {
+                connectionInfo.text = "Peer $remoteId: $status"
+            }
+        }
     }
 
     private fun updatePttUi() {
         val pttOn = prefs.getBoolean(SettingsActivity.PREF_PTT, false)
         val pttToggle = findViewById<ToggleButton>(R.id.pttToggle)
         val pttFloat = findViewById<Button>(R.id.pttFloatButton)
+        val muteButton = findViewById<Button>(R.id.muteButton)
+
         pttToggle.isChecked = pttOn
         pttFloat.visibility = if (pttOn) View.VISIBLE else View.GONE
+
+        // Update mute button hint text for PTT mode
+        if (pttOn) {
+            muteButton.hint = "Hold to talk (PTT)"
+        } else {
+            muteButton.hint = ""
+        }
     }
 
     private fun applyPttMode() {

@@ -3,7 +3,6 @@ package com.mustakim.bokbok
 import android.content.Context
 import android.os.Looper
 import android.util.Log
-import android.widget.TextView
 import org.webrtc.*
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
@@ -26,10 +25,15 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     @Volatile private var noiseSuppressionEnabled: Boolean = true
 
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
+    private var onConnectionStatusChanged: ((String, String) -> Unit)? = null
 
     fun setNoiseSuppression(enabled: Boolean) {
         noiseSuppressionEnabled = enabled
         Log.d(TAG, "Noise suppression set to $enabled (restart call to fully re-create audio source)")
+    }
+
+    fun setOnConnectionStatusChanged(callback: (String, String) -> Unit) {
+        onConnectionStatusChanged = callback
     }
 
     fun init(onReady: (() -> Unit)? = null) {
@@ -51,6 +55,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
                         audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", if (noiseSuppressionEnabled) "true" else "false"))
                         audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+                        // Gaming optimizations
+                        audioConstraints.optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
+                        audioConstraints.optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
+
                         audioSource = factory!!.createAudioSource(audioConstraints)
                         localAudioTrack = factory!!.createAudioTrack("ARDAMSa0", audioSource)
                         localAudioTrack?.setEnabled(true)
@@ -73,7 +81,6 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         }
                     }
 
-                    // NOTE: using your existing API name for participants callback
                     signaling.onParticipantsChanged { list ->
                         onParticipantsChanged?.invoke(list)
                         for (rid in list) {
@@ -100,6 +107,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     onReady?.let { android.os.Handler(android.os.Looper.getMainLooper()).post { it() } }
                 } catch (e: Exception) {
                     Log.e(TAG, "init error: ${e.message}", e)
+                    // Notify UI of initialization error
+                    onReady?.let { android.os.Handler(android.os.Looper.getMainLooper()).post { it() } }
                 }
             }
         }
@@ -121,7 +130,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     try {
                         val params = sender.parameters
                         if (params.encodings.isNotEmpty()) {
-                            params.encodings[0].maxBitrateBps = 48000
+                            // Gaming-optimized bitrates
+                            params.encodings[0].maxBitrateBps = 64000  // Higher quality
                             params.encodings[0].minBitrateBps = 16000
                             sender.parameters = params
                         }
@@ -140,8 +150,17 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             signaling.sendSdp(remoteId, desc)
                         }
                         override fun onSetSuccess() {}
-                        override fun onCreateFailure(p0: String?) { Log.e(TAG, "createOffer failed: $p0") }
-                        override fun onSetFailure(p0: String?) {}
+                        override fun onCreateFailure(p0: String?) {
+                            Log.e(TAG, "createOffer failed: $p0")
+                            onConnectionStatusChanged?.let { callback ->
+                                android.os.Handler(Looper.getMainLooper()).post {
+                                    callback(remoteId, "Offer failed")
+                                }
+                            }
+                        }
+                        override fun onSetFailure(p0: String?) {
+                            Log.e(TAG, "setLocalDescription failed: $p0")
+                        }
                     }, MediaConstraints())
                 }
             } catch (e: Exception) {
@@ -154,34 +173,53 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         val f = factory ?: return null
         val rtcConfig = PeerConnection.RTCConfiguration(listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            // Add more STUN servers for reliability
+            PeerConnection.IceServer.builder("stun:stun.stunprotocol.org:3478").createIceServer()
         )).apply {
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            // Gaming optimizations
+            iceTransportsType = PeerConnection.IceTransportsType.ALL
+            keyType = PeerConnection.KeyType.ECDSA
         }
 
         val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+            override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                Log.d(TAG, "Signaling state for $remoteId: $state")
+            }
+
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 Log.d(TAG, "ICE state for $remoteId: $state")
-                android.os.Handler(Looper.getMainLooper()).post {
-                    (context as? CallActivity)?.let { it.findViewById<TextView>(R.id.connectionInfo).text = "Peer $remoteId: $state" }
+                onConnectionStatusChanged?.let { callback ->
+                    android.os.Handler(Looper.getMainLooper()).post {
+                        callback(remoteId, state?.name ?: "Unknown")
+                    }
                 }
             }
 
-            override fun onIceConnectionReceivingChange(p0: Boolean) {}
-            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceConnectionReceivingChange(receiving: Boolean) {
+                Log.d(TAG, "ICE receiving for $remoteId: $receiving")
+            }
+
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                Log.d(TAG, "ICE gathering for $remoteId: $state")
+            }
+
             override fun onIceCandidate(candidate: IceCandidate) {
                 Log.d(TAG, "onIceCandidate -> send to $remoteId")
                 signaling.sendIceCandidate(remoteId, candidate)
             }
-            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
-            override fun onAddStream(p0: MediaStream?) {}
-            override fun onRemoveStream(p0: MediaStream?) {}
-            override fun onDataChannel(p0: DataChannel?) {}
-            override fun onRenegotiationNeeded() {}
+            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+            override fun onAddStream(stream: MediaStream?) {}
+            override fun onRemoveStream(stream: MediaStream?) {}
+            override fun onDataChannel(dataChannel: DataChannel?) {}
+            override fun onRenegotiationNeeded() {
+                Log.d(TAG, "Renegotiation needed for $remoteId")
+            }
+
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                 try {
                     val track = receiver?.track()
@@ -229,8 +267,17 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             signaling.sendSdp(fromId, desc)
                         }
                         override fun onSetSuccess() {}
-                        override fun onCreateFailure(p0: String?) { Log.e(TAG, "createAnswer failed: $p0") }
-                        override fun onSetFailure(p0: String?) {}
+                        override fun onCreateFailure(p0: String?) {
+                            Log.e(TAG, "createAnswer failed: $p0")
+                            onConnectionStatusChanged?.let { callback ->
+                                android.os.Handler(Looper.getMainLooper()).post {
+                                    callback(fromId, "Answer failed")
+                                }
+                            }
+                        }
+                        override fun onSetFailure(p0: String?) {
+                            Log.e(TAG, "setLocalDescription failed: $p0")
+                        }
                     }, MediaConstraints())
                 }
 
@@ -270,6 +317,11 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 peerConnections.remove(remoteId)?.close()
                 remoteAudioTracks.remove(remoteId)
                 Log.d(TAG, "Closed peer $remoteId")
+                onConnectionStatusChanged?.let { callback ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        callback(remoteId, "Disconnected")
+                    }
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "closePeer: ${e.message}")
             }

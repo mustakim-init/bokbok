@@ -98,6 +98,31 @@
             android:layout_marginTop="6dp"
             android:textSize="13sp"
             android:textColor="@android:color/darker_gray"/>
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/volumeLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Volume"
+                android:layout_marginEnd="8dp" />
+
+            <SeekBar
+                android:id="@+id/receiveVolume"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:max="200"
+                android:progress="100" />
+
+        </LinearLayout>
+
     </LinearLayout>
 
     <!-- Floating circular PTT button -->

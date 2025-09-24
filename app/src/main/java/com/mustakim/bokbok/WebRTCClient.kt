@@ -3,6 +3,7 @@ package com.mustakim.bokbok
 import android.content.Context
 import android.util.Log
 import org.webrtc.*
+import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -19,7 +20,15 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     @Volatile private var audioSource: AudioSource? = null
     @Volatile private var localAudioTrack: AudioTrack? = null
 
+    @Volatile private var receiveVolumeMultiplier: Float = 1.0f
+    @Volatile private var noiseSuppressionEnabled: Boolean = true
+
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
+
+    fun setNoiseSuppression(enabled: Boolean) {
+        noiseSuppressionEnabled = enabled
+        Log.d(TAG, "Noise suppression set to $enabled (restart call to fully re-create audio source)")
+    }
 
     fun init(onReady: (() -> Unit)? = null) {
         signaling.whenAuthReady {
@@ -27,27 +36,25 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 try {
                     if (factory == null) {
                         PeerConnectionFactory.initialize(
-                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
-                                .createInitializationOptions()
+                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
                         )
-                        factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+                        val opts = PeerConnectionFactory.Options()
+                        factory = PeerConnectionFactory.builder().setOptions(opts).createPeerConnectionFactory()
                         Log.d(TAG, "PeerConnectionFactory created")
                     }
 
                     if (audioSource == null && factory != null) {
-                        val audioConstraints = MediaConstraints().apply {
-                            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-                            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-                            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-                        }
+                        val audioConstraints = MediaConstraints()
+                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", if (noiseSuppressionEnabled) "true" else "false"))
+                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
                         audioSource = factory!!.createAudioSource(audioConstraints)
                         localAudioTrack = factory!!.createAudioTrack("ARDAMSa0", audioSource)
                         localAudioTrack?.setEnabled(true)
-                        Log.d(TAG, "Local audio track created")
+                        Log.d(TAG, "Local audio track created (noiseSuppression=$noiseSuppressionEnabled)")
                     }
 
-                    // start signaling listeners
                     signaling.start { type, fromId, payload, msgKey ->
                         Log.d(TAG, "Signal recv type=$type from=$fromId payloadKeys=${payload.keys}")
                         when (type) {
@@ -64,26 +71,22 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         }
                     }
 
-                    // participants changes -> UI and create peers
+                    // NOTE: using your existing API name for participants callback
                     signaling.onParticipantsChanged { list ->
-                        Log.d(TAG, "Participants callback: ${list.size} others")
                         onParticipantsChanged?.invoke(list)
                         for (rid in list) {
                             if (rid == signaling.localId) continue
                             if (!peerConnections.containsKey(rid) && peerConnections.size < 5) {
-                                Log.d(TAG, "Creating peer for existing participant $rid")
                                 createPeerIfNeeded(rid, initiator = signaling.shouldInitiateTo(rid))
                             }
                         }
                     }
 
-                    // join room
                     val joined = signaling.join()
                     Log.d(TAG, "join() returned $joined")
 
-                    // additionally fetch current participants immediately and create peers
                     signaling.getParticipantsNow { list ->
-                        Log.d(TAG, "getParticipantsNow returned ${list.size} others")
+                        Log.d(TAG, "getParticipantsNow returned ${list.size}")
                         for (rid in list) {
                             if (rid == signaling.localId) continue
                             if (!peerConnections.containsKey(rid) && peerConnections.size < 5) {
@@ -92,7 +95,6 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         }
                     }
 
-                    // onReady on main thread
                     onReady?.let { android.os.Handler(android.os.Looper.getMainLooper()).post { it() } }
                 } catch (e: Exception) {
                     Log.e(TAG, "init error: ${e.message}", e)
@@ -107,21 +109,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     private fun createPeerIfNeeded(remoteId: String, initiator: Boolean = false) {
         executor.execute {
             try {
-                if (peerConnections.containsKey(remoteId)) {
-                    Log.d(TAG, "Peer already exists for $remoteId")
-                    return@execute
-                }
+                if (peerConnections.containsKey(remoteId)) return@execute
                 Log.d(TAG, "Creating PeerConnection for $remoteId (initiator=$initiator)")
                 val pc = createPeerConnection(remoteId) ?: return@execute
 
-                // add local audio track
                 val sendTrack = localAudioTrack
                 if (sendTrack != null) {
                     val sender = pc.addTrack(sendTrack, listOf("ARDAMS"))
                     try {
                         val params = sender.parameters
                         if (params.encodings.isNotEmpty()) {
-                            params.encodings[0].maxBitrateBps = 32000 // improve audio quality
+                            params.encodings[0].maxBitrateBps = 48000
+                            params.encodings[0].minBitrateBps = 16000
                             sender.parameters = params
                         }
                     } catch (e: Exception) {
@@ -152,11 +151,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     private fun createPeerConnection(remoteId: String): PeerConnection? {
         val f = factory ?: return null
         val rtcConfig = PeerConnection.RTCConfiguration(listOf(
-            // Free STUN servers
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
         )).apply {
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
@@ -184,6 +180,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     if (track is AudioTrack) {
                         track.setEnabled(true)
                         remoteAudioTracks[remoteId] = track
+                        applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
                         Log.d(TAG, "Remote audio track enabled for $remoteId")
                     } else {
                         Log.d(TAG, "onAddTrack: not AudioTrack for $remoteId")
@@ -279,6 +276,45 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             return !newEnabled
         }
         return false
+    }
+
+    fun setLocalMicEnabled(enabled: Boolean) {
+        try {
+            localAudioTrack?.setEnabled(enabled)
+            Log.d(TAG, "setLocalMicEnabled -> $enabled")
+        } catch (e: Exception) {
+            Log.w(TAG, "setLocalMicEnabled failed: ${e.message}")
+        }
+    }
+
+    fun setReceiveVolumeMultiplier(multiplier: Float) {
+        receiveVolumeMultiplier = multiplier
+        executor.execute {
+            for ((_, track) in remoteAudioTracks) {
+                applyVolumeToAudioTrack(track, multiplier)
+            }
+        }
+    }
+
+    private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {
+        try {
+            val method: Method? = try {
+                track.javaClass.getMethod("setVolume", Double::class.javaPrimitiveType ?: Double::class.java)
+            } catch (rnfe: NoSuchMethodException) {
+                try { track.javaClass.getMethod("setVolume", Float::class.javaPrimitiveType ?: Float::class.java) } catch (e: Exception) { null }
+            }
+            method?.let {
+                val paramType = it.parameterTypes[0]
+                if (paramType == java.lang.Double.TYPE) it.invoke(track, multiplier.toDouble())
+                else it.invoke(track, multiplier)
+                Log.d(TAG, "Applied receive multiplier $multiplier to track")
+                return
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "applyVolume reflection failed: ${e.message}")
+        }
+
+        Log.d(TAG, "applyVolumeToAudioTrack: no setVolume API - cannot apply multiplier directly")
     }
 
     fun endCall() {

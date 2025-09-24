@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:orientation="vertical"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="BokBok — Call Settings"
+            android:textStyle="bold"
+            android:textSize="20sp"
+            android:layout_marginBottom="12dp"/>
+
+        <Switch
+            android:id="@+id/switchPushToTalk"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Push-to-talk (PTT)"
+            android:checked="false" />
+
+        <TextView
+            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Hold the button to speak. Great for gaming — stops your game audio from leaking into the mic." />
+
+        <View android:layout_width="match_parent" android:layout_height="8dp"/>
+
+        <Switch
+            android:id="@+id/switchNoiseSupp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Noise suppression (AGC/Echo/NS)"
+            android:checked="true" />
+
+        <TextView
+            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Helps cut keyboard clicks and background clutter. Changes require rejoining a call to fully apply." />
+
+        <View android:layout_width="match_parent" android:layout_height="8dp"/>
+
+        <Switch
+            android:id="@+id/switchDuck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Duck game audio while friends speak"
+            android:checked="true" />
+
+        <TextView
+            android:layout_marginTop="4dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Game audio will lower slightly when someone is speaking so you can actually hear them." />
+
+        <View android:layout_width="match_parent" android:layout_height="8dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Receive volume:" />
+
+        <SeekBar
+            android:id="@+id/seekReceiveVolume"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="200" />
+
+        <TextView
+            android:id="@+id/receiveVolValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="100%"
+            android:gravity="center_horizontal"
+            android:layout_marginTop="6dp"/>
+
+        <View android:layout_width="match_parent" android:layout_height="12dp"/>
+
+        <Button
+            android:id="@+id/btnDone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Save and Close" />
+
+        <View android:layout_width="match_parent" android:layout_height="24dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tips (friendly):"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_marginTop="6dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="• If you want absolute silence from the game while talking, try Push-to-talk and enable ducking. \n• Noise suppression helps but may slightly change voice naturalness. \n• If you change noise suppression, rejoin the call to fully apply it." />
+
+    </LinearLayout>
+</ScrollView>

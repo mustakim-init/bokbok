@@ -1,46 +1,122 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
-    android:gravity="center_horizontal"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/call_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
-
-    <TextView
-        android:id="@+id/roomIdText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Room: "
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:layout_marginTop="8dp"
-        />
+    android:padding="12dp">
 
     <LinearLayout
-        android:orientation="horizontal"
-        android:layout_marginTop="32dp"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center">
+        android:layout_height="match_parent">
 
-        <Button
-            android:id="@+id/muteButton"
+        <TextView
+            android:id="@+id/roomIdText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Mute"/>
+            android:text="Room: "
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp" />
 
-        <Button
-            android:id="@+id/leaveButton"
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Status: connecting..."
+            android:textSize="14sp"
+            android:layout_marginTop="6dp"
+            android:gravity="center_horizontal" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_marginTop="16dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/muteButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mute" />
+
+            <ToggleButton
+                android:id="@+id/pttToggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textOff="PTT Off"
+                android:textOn="PTT On"
+                android:layout_marginStart="12dp" />
+
+            <Button
+                android:id="@+id/settingsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Settings"
+                android:layout_marginStart="12dp" />
+
+            <Button
+                android:id="@+id/leaveButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Leave"
+                android:layout_marginStart="12dp"
+                android:backgroundTint="@android:color/holo_red_dark" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/participantsLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Leave"
-            android:layout_marginStart="24dp"
-            android:backgroundTint="@android:color/holo_red_dark"/>
+            android:text="Participants:"
+            android:textSize="16sp"
+            android:layout_marginTop="18dp" />
+
+        <ListView
+            android:id="@+id/participantsList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp" />
+
+        <LinearLayout
+            android:orientation="horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/volumeLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Receive vol"
+                android:layout_marginEnd="8dp" />
+
+            <SeekBar
+                android:id="@+id/receiveVolume"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:max="200" />
+
+        </LinearLayout>
+
     </LinearLayout>
 
-    <ListView
-        android:id="@+id/participantsList"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"/>
-</LinearLayout>
+    <!-- Small translucent floating push-to-talk button (draggable) -->
+    <Button
+        android:id="@+id/pttFloatButton"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:alpha="0.65"
+        android:backgroundTint="@android:color/holo_blue_dark"
+        android:text="PTT"
+        android:textColor="@android:color/white"
+        android:visibility="gone" />
+
+</FrameLayout>

@@ -27,17 +27,20 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 try {
                     if (factory == null) {
                         PeerConnectionFactory.initialize(
-                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
+                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                                .createInitializationOptions()
                         )
                         factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
                         Log.d(TAG, "PeerConnectionFactory created")
                     }
 
                     if (audioSource == null && factory != null) {
-                        val audioConstraints = MediaConstraints()
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                        val audioConstraints = MediaConstraints().apply {
+                            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+                        }
                         audioSource = factory!!.createAudioSource(audioConstraints)
                         localAudioTrack = factory!!.createAudioTrack("ARDAMSa0", audioSource)
                         localAudioTrack?.setEnabled(true)
@@ -118,7 +121,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     try {
                         val params = sender.parameters
                         if (params.encodings.isNotEmpty()) {
-                            params.encodings[0].maxBitrateBps = 20000
+                            params.encodings[0].maxBitrateBps = 32000 // improve audio quality
                             sender.parameters = params
                         }
                     } catch (e: Exception) {
@@ -149,8 +152,11 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     private fun createPeerConnection(remoteId: String): PeerConnection? {
         val f = factory ?: return null
         val rtcConfig = PeerConnection.RTCConfiguration(listOf(
+            // Free STUN servers
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer()
         )).apply {
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE

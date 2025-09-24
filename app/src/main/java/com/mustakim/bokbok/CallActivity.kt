@@ -29,7 +29,7 @@ class CallActivity : AppCompatActivity() {
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
 
-    // 🎧 Receiver for headset & Bluetooth
+    // 🎧 Receiver for headset & Bluetooth changes
     private val audioDeviceReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -64,7 +64,7 @@ class CallActivity : AppCompatActivity() {
         roomId = intent.getStringExtra("ROOM_ID") ?: "unknown"
         findViewById<TextView>(R.id.roomIdText).text = "Room: $roomId"
 
-        // Start foreground service
+        // Start foreground service for call survival
         val svcIntent = Intent(this, VoiceService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(svcIntent)
@@ -72,12 +72,10 @@ class CallActivity : AppCompatActivity() {
             startService(svcIntent)
         }
 
-        // Audio setup
+        // Setup audio
         audioManager = getSystemService(AudioManager::class.java)
         requestAudioFocus()
-
-        // Default to speaker
-        setSpeakerMode()
+        setSpeakerMode() // default to loudspeaker
 
         // Register for headset/Bluetooth changes
         val filter = IntentFilter().apply {
@@ -86,7 +84,7 @@ class CallActivity : AppCompatActivity() {
         }
         registerReceiver(audioDeviceReceiver, filter)
 
-        // Setup participants list
+        // Participants list UI
         participantAdapter = ParticipantAdapter(this, participants)
         findViewById<ListView>(R.id.participantsList).adapter = participantAdapter
 
@@ -119,6 +117,7 @@ class CallActivity : AppCompatActivity() {
         muteButton.setOnClickListener {
             val muted = webRtcClient.toggleMute()
             muteButton.text = if (muted) "Unmute" else "Mute"
+            Toast.makeText(this, if (muted) "Muted mic" else "Unmuted mic", Toast.LENGTH_SHORT).show()
         }
 
         leaveButton.setOnClickListener {
@@ -126,7 +125,7 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
-    // 🔊 Audio focus
+    // 🔊 Request audio focus
     private fun requestAudioFocus(): Boolean {
         if (audioManager == null) return false
 
@@ -158,10 +157,12 @@ class CallActivity : AppCompatActivity() {
         audioManager?.let { am ->
             am.mode = AudioManager.MODE_IN_COMMUNICATION
             am.isSpeakerphoneOn = true
+            val maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maxVolume, 0)
         }
     }
 
-    // 🔊 Earpiece/headset mode
+    // 🔊 Earpiece/headset/Bluetooth mode
     private fun setEarpieceMode() {
         audioManager?.let { am ->
             am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -170,10 +171,10 @@ class CallActivity : AppCompatActivity() {
     }
 
     private fun cleanupAndFinish(svcIntent: Intent) {
-        try { webRtcClient.endCall() } catch (_: Exception) { }
-        try { stopService(svcIntent) } catch (_: Exception) { }
+        try { webRtcClient.endCall() } catch (_: Exception) {}
+        try { stopService(svcIntent) } catch (_: Exception) {}
         abandonAudioFocus()
-        try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) { }
+        try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) {}
         finish()
     }
 
@@ -190,6 +191,6 @@ class CallActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) { }
+        try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) {}
     }
 }

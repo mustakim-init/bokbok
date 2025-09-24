@@ -7,6 +7,7 @@ import org.webrtc.*
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
 class WebRTCClient(private val context: Context, private val roomId: String) {
@@ -131,6 +132,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         executor.execute {
             synchronized(peerConnectionLock) {
                 try {
+                    if (peerConnections.size >= 8) {  // Reasonable limit for mobile
+                        Log.w(TAG, "Max peer connections reached, ignoring $remoteId")
+                        return@execute
+                    }
                     if (peerConnections.containsKey(remoteId)) return@execute
                     Log.d(TAG, "Creating PeerConnection for $remoteId (initiator=$initiator)")
                     val pc = createPeerConnection(remoteId) ?: return@execute
@@ -389,31 +394,62 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         Log.d(TAG, "applyVolumeToAudioTrack: no setVolume API - cannot apply multiplier directly")
     }
 
-    fun endCall() {
-        try {
+    fun close() {
+        executor.execute {
             synchronized(peerConnectionLock) {
-                signaling.leave()
-                for ((_, pc) in peerConnections) {
-                    try { pc.close() } catch (e: Exception) { Log.w(TAG, "Error closing peer: ${e.message}") }
-                }
+                peerConnections.values.forEach { it.close() }
                 peerConnections.clear()
                 remoteAudioTracks.clear()
             }
-        } catch (_: Exception) {}
-
-        try { audioSource?.dispose() } catch (_: Exception) {}
-        try { localAudioTrack?.dispose() } catch (_: Exception) {}
-        try { factory?.dispose() } catch (_: Exception) {}
-
-        try {
-            executor.shutdown()
-            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                executor.shutdownNow()
-            }
-        } catch (e: Exception) {
-            executor.shutdownNow()
         }
-        try { signaling.close() } catch (_: Exception) {}
+    }
+
+    fun endCall() {
+        try {
+            // Check if executor is already shutdown to avoid RejectedExecutionException
+            if (executor.isShutdown) {
+                Log.d(TAG, "Executor already shutdown, skipping endCall")
+                return
+            }
+
+            executor.execute {
+                try {
+                    synchronized(peerConnectionLock) {
+                        signaling.leave()
+                        for ((_, pc) in peerConnections) {
+                            try { pc.close() } catch (e: Exception) {
+                                Log.w(TAG, "Error closing peer: ${e.message}")
+                            }
+                        }
+                        peerConnections.clear()
+                        remoteAudioTracks.clear()
+                    }
+
+                    try { audioSource?.dispose() } catch (_: Exception) {}
+                    try { localAudioTrack?.dispose() } catch (_: Exception) {}
+                    try { factory?.dispose() } catch (_: Exception) {}
+
+                    try { signaling.close() } catch (_: Exception) {}
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during endCall cleanup", e)
+                } finally {
+                    // Shutdown executor only after all cleanup is done
+                    try {
+                        executor.shutdown()
+                        if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                            executor.shutdownNow()
+                        }
+                    } catch (e: Exception) {
+                        executor.shutdownNow()
+                    }
+                }
+            }
+        } catch (e: RejectedExecutionException) {
+            Log.w(TAG, "Executor rejected task during endCall (already shutting down)", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error in endCall", e)
+        }
         Log.d(TAG, "endCall complete")
     }
 }

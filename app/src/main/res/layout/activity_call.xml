@@ -192,6 +192,7 @@
     <!-- Floating PTT Button -->
     <Button
         android:id="@+id/pttFloatButton"
+        android:contentDescription="Push to talk button"
         android:layout_width="60dp"
         android:layout_height="60dp"
         android:layout_gravity="bottom|end"

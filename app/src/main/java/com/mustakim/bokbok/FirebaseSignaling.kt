@@ -1,5 +1,7 @@
 package com.mustakim.bokbok
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
@@ -141,7 +143,13 @@ class FirebaseSignaling(private val roomId: String) {
     fun onParticipantsChanged(cb: (List<String>) -> Unit) { onParticipantsChanged = cb }
 
     fun sendSdp(toId: String, sdp: SessionDescription) {
-        val my = localId ?: run { Log.w(TAG, "sendSdp: no localId"); return }
+        val my = localId ?: run {
+            Log.w(TAG, "sendSdp: no localId - retrying in 1s")
+            Handler(Looper.getMainLooper()).postDelayed({
+                sendSdp(toId, sdp)
+            }, 1000)
+            return
+        }
         val msg = HashMap<String, Any?>()
         msg["type"] = "sdp"
         msg["from"] = my
@@ -157,7 +165,13 @@ class FirebaseSignaling(private val roomId: String) {
     }
 
     fun sendIceCandidate(toId: String, c: IceCandidate) {
-        val my = localId ?: run { Log.w(TAG, "sendIce: no localId"); return }
+        val my = localId ?: run {
+            Log.w(TAG, "sendIce: no localId - retrying in 1s")
+            Handler(Looper.getMainLooper()).postDelayed({
+                sendIceCandidate(toId, c)
+            }, 1000)
+            return
+        }
         val msg = HashMap<String, Any?>()
         msg["type"] = "ice"
         msg["from"] = my
@@ -236,7 +250,7 @@ class FirebaseSignaling(private val roomId: String) {
         catch (e: Exception) { Log.w(TAG, "deleteMessage exc: ${e.message}") }
     }
 
-    fun enableAutoCleanup(maxAgeMs: Long = 60_000L, cleanupIntervalMs: Long = 30_000L) {
+    fun enableAutoCleanup(maxAgeMs: Long = 60_000L, cleanupIntervalMs: Long = 120_000L) {
         try {
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             val runnable = object : Runnable {

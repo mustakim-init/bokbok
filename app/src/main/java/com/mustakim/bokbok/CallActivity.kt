@@ -13,6 +13,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.gridlayout.widget.GridLayout
@@ -21,7 +22,7 @@ import kotlin.math.min
 
 class CallActivity : AppCompatActivity() {
 
-    private lateinit var webRtcClient: WebRTCClient
+    private var webRtcClient: WebRTCClient? = null
     private lateinit var roomId: String
     private lateinit var participantAdapter: ParticipantAdapter
     private val participants = mutableListOf<String>()
@@ -29,6 +30,7 @@ class CallActivity : AppCompatActivity() {
 
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var isCleaningUp = false
 
     private val prefs by lazy { getSharedPreferences("bokbok_prefs", Context.MODE_PRIVATE) }
 
@@ -40,6 +42,7 @@ class CallActivity : AppCompatActivity() {
                     val state = intent.getIntExtra("state", -1)
                     if (state == 1) setEarpieceMode() else setSpeakerMode()
                 }
+
                 BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothHeadset.EXTRA_STATE, -1)
                     if (state == BluetoothHeadset.STATE_CONNECTED) setEarpieceMode() else setSpeakerMode()
@@ -55,7 +58,11 @@ class CallActivity : AppCompatActivity() {
             SettingsActivity.PREF_RECEIVE_VOL -> applyReceiveVolume()
             SettingsActivity.PREF_NOISE_SUPP -> {
                 runOnUiThread {
-                    Toast.makeText(this, "Noise suppression changed — rejoin call for full effect", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this,
+                        "Noise suppression changed — rejoin call for full effect",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -74,7 +81,9 @@ class CallActivity : AppCompatActivity() {
 
         // Start voice foreground service
         val svcIntent = Intent(this, VoiceService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svcIntent) else startService(svcIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svcIntent) else startService(
+            svcIntent
+        )
 
         // register audio device receiver
         val filter = IntentFilter().apply {
@@ -121,9 +130,10 @@ class CallActivity : AppCompatActivity() {
 
         // Buttons
         muteButton.setOnClickListener {
-            val muted = webRtcClient.toggleMute()
+            val muted = webRtcClient?.toggleMute() ?: false
             muteButton.text = if (muted) "Unmute" else "Mute"
-            Toast.makeText(this, if (muted) "Mic muted" else "Mic unmuted", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, if (muted) "Mic muted" else "Mic unmuted", Toast.LENGTH_SHORT)
+                .show()
         }
 
         // mute button also serves as fallback PTT: if PTT enabled and user holds the mute button, talk.
@@ -132,11 +142,12 @@ class CallActivity : AppCompatActivity() {
             if (!isPtt) return@setOnTouchListener false
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    webRtcClient.setLocalMicEnabled(true)
+                    webRtcClient?.setLocalMicEnabled(true)
                     (v as Button).text = "Talking..."
                 }
+
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    webRtcClient.setLocalMicEnabled(false)
+                    webRtcClient?.setLocalMicEnabled(false)
                     (v as Button).text = "Mute"
                 }
             }
@@ -163,11 +174,12 @@ class CallActivity : AppCompatActivity() {
                     initialTouchY = event.rawY
 
                     // Start talking
-                    webRtcClient.setLocalMicEnabled(true)
+                    webRtcClient?.setLocalMicEnabled(true)
                     v.alpha = 1.0f
                     (v as Button).text = "🔊"
                     true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
@@ -176,22 +188,24 @@ class CallActivity : AppCompatActivity() {
                     val newX = initialX + dx
                     val newY = initialY + dy
 
-                    val displayMetrics = resources.displayMetrics
-                    val maxX = displayMetrics.widthPixels - v.width
-                    val maxY = displayMetrics.heightPixels - v.height
+                    val parent = v.parent as ViewGroup
+                    val maxX = parent.width - v.width
+                    val maxY = parent.height - v.height
 
-                    // Constrain to screen bounds
+                    // Constrain to parent bounds
                     v.x = newX.coerceIn(0f, maxX.toFloat())
                     v.y = newY.coerceIn(0f, maxY.toFloat())
                     true
                 }
+
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     // Stop talking
-                    webRtcClient.setLocalMicEnabled(false)
+                    webRtcClient?.setLocalMicEnabled(false)
                     v.alpha = 0.75f
                     (v as Button).text = "🎤"
                     true
                 }
+
                 else -> false
             }
         }
@@ -214,6 +228,7 @@ class CallActivity : AppCompatActivity() {
                 prefs.edit().putInt(SettingsActivity.PREF_RECEIVE_VOL, v).apply()
                 applyReceiveVolume()
             }
+
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
@@ -222,16 +237,23 @@ class CallActivity : AppCompatActivity() {
         try {
             webRtcClient = WebRTCClient(this, roomId)
             val wantsNoiseSupp = prefs.getBoolean(SettingsActivity.PREF_NOISE_SUPP, true)
-            webRtcClient.setNoiseSuppression(wantsNoiseSupp)
+            webRtcClient?.setNoiseSuppression(wantsNoiseSupp)
 
-            webRtcClient.init(onReady = {
+            // Set connection status callback before init
+            webRtcClient?.setOnConnectionStatusChanged { remoteId, status ->
+                runOnUiThread {
+                    connectionInfo.text = "Peer $remoteId: $status"
+                }
+            }
+
+            webRtcClient?.init(onReady = {
                 runOnUiThread {
                     statusText.text = "Status: Ready"
                     statusSpinner.visibility = View.GONE
                     Toast.makeText(this, "Call system ready", Toast.LENGTH_SHORT).show()
                 }
 
-                webRtcClient.setOnParticipantsChanged { list ->
+                webRtcClient?.setOnParticipantsChanged { list ->
                     mainHandler.post {
                         participants.clear()
                         participants.addAll(list)
@@ -244,7 +266,7 @@ class CallActivity : AppCompatActivity() {
                     }
                 }
 
-                webRtcClient.getCurrentParticipants { cur ->
+                webRtcClient?.getCurrentParticipants { cur ->
                     mainHandler.post {
                         participants.clear()
                         participants.addAll(cur)
@@ -260,15 +282,9 @@ class CallActivity : AppCompatActivity() {
             runOnUiThread {
                 statusText.text = "Status: Error - Restart app"
                 statusSpinner.visibility = View.GONE
-                Toast.makeText(this, "Failed to initialize call: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Failed to initialize call: ${e.message}", Toast.LENGTH_LONG)
+                    .show()
                 Log.e("CallActivity", "WebRTC initialization failed", e)
-            }
-        }
-
-        // Set connection status callback
-        webRtcClient.setOnConnectionStatusChanged { remoteId, status ->
-            runOnUiThread {
-                connectionInfo.text = "Peer $remoteId: $status"
             }
         }
     }
@@ -338,10 +354,10 @@ class CallActivity : AppCompatActivity() {
     private fun applyPttMode() {
         val ptt = prefs.getBoolean(SettingsActivity.PREF_PTT, false)
         if (ptt) {
-            webRtcClient.setLocalMicEnabled(false)
+            webRtcClient?.setLocalMicEnabled(false)
             Toast.makeText(this, "Push-to-talk enabled", Toast.LENGTH_SHORT).show()
         } else {
-            webRtcClient.setLocalMicEnabled(true)
+            webRtcClient?.setLocalMicEnabled(true)
             Toast.makeText(this, "Push-to-talk disabled", Toast.LENGTH_SHORT).show()
         }
         updatePttUi()
@@ -368,16 +384,18 @@ class CallActivity : AppCompatActivity() {
             am.requestAudioFocus(focusRequest!!)
         } else {
             @Suppress("DEPRECATION")
-            am.requestAudioFocus({ }, AudioManager.STREAM_VOICE_CALL,
+            am.requestAudioFocus(
+                { }, AudioManager.STREAM_VOICE_CALL,
                 if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-                else AudioManager.AUDIOFOCUS_GAIN)
+                else AudioManager.AUDIOFOCUS_GAIN
+            )
         }
     }
 
     private fun applyReceiveVolume() {
         val volPercent = prefs.getInt(SettingsActivity.PREF_RECEIVE_VOL, 100)
         val multiplier = volPercent / 100.0f
-        webRtcClient.setReceiveVolumeMultiplier(multiplier)
+        webRtcClient?.setReceiveVolumeMultiplier(multiplier)
     }
 
     // Updated speaker mode with modern API
@@ -427,7 +445,13 @@ class CallActivity : AppCompatActivity() {
     }
 
     private fun cleanupAndFinish(svcIntent: Intent) {
-        try { webRtcClient.endCall() } catch (_: Exception) {}
+        if (isCleaningUp) return // Prevent multiple cleanup calls
+        isCleaningUp = true
+
+        try {
+            webRtcClient?.endCall()
+            webRtcClient = null // Important: set to null after cleanup
+        } catch (_: Exception) {}
         try { stopService(svcIntent) } catch (_: Exception) {}
         try { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) } catch (_: Exception) {}
         abandonAudioFocus()
@@ -445,13 +469,40 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        abandonAudioFocus()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyDuckSetting()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        try {
-            val svcIntent = Intent(this, VoiceService::class.java)
-            stopService(svcIntent)
-        } catch (_: Exception) {}
-        try { prefs.unregisterOnSharedPreferenceChangeListener(prefListener) } catch (_: Exception) {}
-        try { unregisterReceiver(audioDeviceReceiver) } catch (_: Exception) {}
+
+        if (!isCleaningUp) {
+            try {
+                val svcIntent = Intent(this, VoiceService::class.java)
+                stopService(svcIntent)
+            } catch (_: Exception) {
+            }
+            try {
+                prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
+            } catch (_: Exception) {
+            }
+            try {
+                unregisterReceiver(audioDeviceReceiver)
+            } catch (_: Exception) {
+            }
+
+            // Only call endCall if we haven't already cleaned up
+            try {
+                webRtcClient?.endCall()
+                webRtcClient = null
+            } catch (_: Exception) {
+            }
+        }
     }
 }

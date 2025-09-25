@@ -220,7 +220,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         // ----------------------------------------------------------------------------------
 
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
+            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -233,13 +233,13 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 // These fields may not exist on all WebRTC builds; set defensively
                 val connTimeoutField = this::class.java.getDeclaredField("iceConnectionReceivingTimeout")
                 connTimeoutField.isAccessible = true
-                connTimeoutField.setInt(this, 5000)
+                connTimeoutField.setInt(this, 10000)
             } catch (_: Throwable) {}
 
             try {
                 val inactiveTimeoutField = this::class.java.getDeclaredField("iceInactiveTimeout")
                 inactiveTimeoutField.isAccessible = true
-                inactiveTimeoutField.setInt(this, 8000)
+                inactiveTimeoutField.setInt(this, 15000)
             } catch (_: Throwable) {}
         }
         // ---------------------------------------------------------------------------------------
@@ -449,7 +449,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         val f = factory ?: return null
 
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED
+            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
             bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -735,6 +735,30 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     it.iceConnectionState() == PeerConnection.IceConnectionState.COMPLETED
         }}
     """.trimIndent()
+    }
+
+
+    fun refreshAudioSession() {
+        executor.execute {
+            try {
+                // Temporarily toggle local audio to force audio re-init
+                localAudioTrack?.setEnabled(false)
+                Thread.sleep(60)
+                localAudioTrack?.setEnabled(true)
+
+                // Toggle remote tracks briefly so player surfaces refresh too
+                remoteAudioTracks.values.forEach { t ->
+                    try {
+                        t.setEnabled(false)
+                        Thread.sleep(15)
+                        t.setEnabled(true)
+                    } catch (_: Exception) {}
+                }
+                Log.d(tag, "Audio session refreshed")
+            } catch (e: Exception) {
+                Log.w(tag, "refreshAudioSession error: ${e.message}")
+            }
+        }
     }
 
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {

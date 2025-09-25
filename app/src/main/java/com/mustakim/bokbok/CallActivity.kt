@@ -68,7 +68,7 @@ class CallActivity : AppCompatActivity() {
     private val scoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             try {
-                val action = intent?.action
+                val action = intent?.action ?: return
                 if (action == AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) {
                     val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
                     when (state) {
@@ -76,20 +76,33 @@ class CallActivity : AppCompatActivity() {
                             audioManager?.let { am ->
                                 try {
                                     am.isBluetoothScoOn = true
+                                    am.isSpeakerphoneOn = false
                                     isSCOStarted = true
-                                    Log.d(TAG, "SCO connected — audio routed to Bluetooth headset.")
+                                    Log.d(TAG, "SCO connected - audio routed to Bluetooth")
+
+                                    // Nudge WebRTC audio to switch to new route: small mic toggle + optional refresh
+                                    try {
+                                        webRtcClient?.setLocalMicEnabled(false)
+                                        mainHandler.postDelayed({
+                                            try {
+                                                webRtcClient?.setLocalMicEnabled(true)
+                                                // if you add refreshAudioSession() (see WebRTCClient patch), call it here:
+                                                try { (webRtcClient as? WebRTCClient)?.refreshAudioSession() } catch (_: Exception) {}
+                                            } catch (e: Exception) { Log.w(TAG, "re-enable mic failed: ${e.message}") }
+                                        }, 120)
+                                    } catch (e: Exception) { Log.w(TAG, "Failed to nudge WebRTC after SCO connect", e) }
                                 } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to enable Bluetooth SCO on connected state", e)
+                                    Log.w(TAG, "Failed to set Bluetooth SCO on connected state", e)
                                 }
                             }
                         }
                         AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> {
                             Log.d(TAG, "SCO disconnected")
                             isSCOStarted = false
+                            // fall back to speaker (or earpiece) depending on wired headset presence
+                            if (hasHeadphonesConnected() && !isBluetoothConnected()) setEarpieceMode() else setSpeakerMode()
                         }
-                        else -> {
-                            Log.d(TAG, "SCO state: $state")
-                        }
+                        else -> Log.d(TAG, "SCO state: $state")
                     }
                 }
             } catch (e: Exception) {
@@ -682,36 +695,65 @@ class CallActivity : AppCompatActivity() {
         try {
             am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-            // Stop SCO first to ensure clean start
+            // Stop any existing SCO first
             if (isSCOStarted) {
-                try {
-                    am.stopBluetoothSco()
-                } catch (e: Exception) {
-                    Log.w(TAG, "stopBluetoothSco() before start failed", e)
-                }
+                try { am.stopBluetoothSco() } catch (e: Exception) { Log.w(TAG, "stopBluetoothSco() before start failed", e) }
                 isSCOStarted = false
             }
 
-            // Start Bluetooth SCO for voice calls. SCO readiness will be handled by scoReceiver.
+            // Only start SCO if we have a SCO-capable device (avoid starting SCO for A2DP-only devices)
+            val hasScoDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            } else {
+                @Suppress("DEPRECATION")
+                am.isBluetoothScoOn
+            }
+
+            if (!hasScoDevice) {
+                Log.d(TAG, "No SCO-capable Bluetooth device detected; not starting SCO (A2DP-only).")
+                // If A2DP-only, best-effort: set speaker off and let system route media to A2DP
+                try { am.isSpeakerphoneOn = false } catch (e: Exception) { Log.w(TAG, "Speaker disable failed", e) }
+                return
+            }
+
+            // Start Bluetooth SCO with a simple retry loop
+            var retries = 0
+            val maxRetries = 3
+            val scoStartRunnable = object : Runnable {
+                override fun run() {
+                    try {
+                        if (!isSCOStarted && retries < maxRetries) {
+                            Log.d(TAG, "Attempting startBluetoothSco, attempt ${retries + 1}")
+                            am.startBluetoothSco()
+                            retries++
+                            mainHandler.postDelayed(this, 1000)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "startBluetoothSco exception on retry $retries: ${e.message}", e)
+                        if (retries < maxRetries) {
+                            retries++
+                            mainHandler.postDelayed(this, 1000)
+                        } else {
+                            Log.w(TAG, "Bluetooth SCO failed after retries — falling back to speaker")
+                            setSpeakerMode()
+                        }
+                    }
+                }
+            }
+
             try {
                 am.startBluetoothSco()
-                Log.d(TAG, "Requested Bluetooth SCO start; waiting for ACTION_SCO_AUDIO_STATE_UPDATED...")
+                mainHandler.postDelayed(scoStartRunnable, 1000)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start Bluetooth SCO: ${e.message}", e)
                 setSpeakerMode()
                 return
             }
 
-            // Ensure speaker is off (best-effort)
-            try {
-                am.isSpeakerphoneOn = false
-            } catch (e: Exception) {
-                Log.w(TAG, "Speaker disable failed: ${e.message}", e)
-            }
-
-            Log.d(TAG, "Bluetooth audio routing requested")
+            try { am.isSpeakerphoneOn = false } catch (e: Exception) { Log.w(TAG, "Speaker disable failed: ${e.message}", e) }
+            Log.d(TAG, "Bluetooth SCO start requested (waiting for ACTION_SCO_AUDIO_STATE_UPDATED)")
         } catch (e: Exception) {
-            Log.e(TAG, "Bluetooth audio failed, falling back to speaker", e)
+            Log.e(TAG, "setBluetoothMode failed; falling back to speaker", e)
             setSpeakerMode()
         }
     }

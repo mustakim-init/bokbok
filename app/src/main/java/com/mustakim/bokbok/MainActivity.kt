@@ -3,6 +3,7 @@ package com.mustakim.bokbok
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
@@ -37,10 +38,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensurePermissionsAndStartCall(roomId: String) {
-        val needed = arrayOf(android.Manifest.permission.RECORD_AUDIO)
+        val needed = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
+
+        // Add Bluetooth permissions for Android 12+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            needed.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+        }
+
         val notGranted = needed.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
+
         if (notGranted.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, notGranted.toTypedArray(), REQ_AUDIO)
         } else {

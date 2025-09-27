@@ -71,72 +71,88 @@ class FirebaseSignaling(private val roomId: String) {
      * Start listeners (must be called once). onMessage receives (type, fromId, payload, messageKey).
      */
     fun start(onMessageCb: (Type, String, Map<String, Any?>, String) -> Unit) {
+        onMessage = onMessageCb
+
         whenAuthReady {
-            onMessage = onMessageCb
+            try {
+                // messages listener
+                messagesListener = messagesRef.addChildEventListener(object : ChildEventListener {
+                    override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                        // Add null check for localId
+                        val currentLocalId = localId
+                        if (currentLocalId == null) {
+                            Log.w(TAG, "localId still null when processing message, ignoring")
+                            return
+                        }
 
-            // messages listener
-            messagesListener = messagesRef.addChildEventListener(object : ChildEventListener {
-                override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                    val key = snapshot.key ?: return
-                    val map = snapshot.value as? Map<*, *> ?: return
-                    val typeStr = map["type"] as? String ?: return
-                    val from = map["from"] as? String ?: return
-                    val to = (map["to"] as? String?) // may be null
+                        val key = snapshot.key ?: return
+                        val map = snapshot.value as? Map<*, *> ?: return
+                        val typeStr = map["type"] as? String ?: return
+                        val from = map["from"] as? String ?: return
+                        val to = (map["to"] as? String?)
 
-                    Log.d(TAG, "Received message key=$key type=$typeStr from=$from to=$to")
+                        Log.d(TAG, "Received message key=$key type=$typeStr from=$from to=$to")
 
-                    // If message targeted to someone else, ignore
-                    val me = localId
-                    if (to != null && to != me) {
-                        Log.d(TAG, "Message $key ignored (to=$to != me=$me)")
-                        return
-                    }
+                        // If message targeted to someone else, ignore
+                        if (to != null && to != currentLocalId) {
+                            Log.d(TAG, "Message $key ignored (to=$to != me=$currentLocalId)")
+                            return
+                        }
 
-                    val payload = mutableMapOf<String, Any?>()
-                    for ((k, v) in map) if (k is String) payload[k] = v
+                        val payload = mutableMapOf<String, Any?>()
+                        for ((k, v) in map) if (k is String) payload[k] = v
 
-                    val type = when (typeStr) {
-                        "sdp" -> Type.SDP
-                        "ice" -> Type.ICE
-                        "join" -> Type.JOIN
-                        "leave" -> Type.LEAVE
-                        else -> null
-                    } ?: return
+                        val type = when (typeStr) {
+                            "sdp" -> Type.SDP
+                            "ice" -> Type.ICE
+                            "join" -> Type.JOIN
+                            "leave" -> Type.LEAVE
+                            else -> null
+                        } ?: return
 
-                    try {
-                        onMessageCb(type, from, payload, key)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "onMessageCb error: ${e.message}")
-                    }
-                }
-                override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
-                override fun onChildRemoved(snapshot: DataSnapshot) {}
-                override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
-                override fun onCancelled(error: DatabaseError) {
-                    Log.e(TAG, "messages listener cancelled: ${error.message}")
-                }
-            })
-
-            // participants listener
-            participantsListener = participantsRef.addValueEventListener(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    val ids = mutableListOf<String>()
-                    val me = localId
-                    for (ch in snapshot.children) {
-                        ch.key?.let { id ->
-                            if (id != me) ids.add(id)
+                        try {
+                            onMessageCb(type, from, payload, key)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "onMessageCb error: ${e.message}")
                         }
                     }
-                    Log.d(TAG, "participants changed: ${ids.size} other(s)")
-                    onParticipantsChanged?.invoke(ids)
-                }
-                override fun onCancelled(error: DatabaseError) {
-                    Log.e(TAG, "participants listener cancelled: ${error.message}")
-                }
-            })
+                    override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+                    override fun onChildRemoved(snapshot: DataSnapshot) {}
+                    override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+                    override fun onCancelled(error: DatabaseError) {
+                        Log.e(TAG, "messages listener cancelled: ${error.message}")
+                    }
+                })
 
-            // enable cleanup and onDisconnect
-            enableAutoCleanup()
+                // participants listener with null check
+                participantsListener = participantsRef.addValueEventListener(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val currentLocalId = localId
+                        if (currentLocalId == null) {
+                            Log.w(TAG, "localId null when processing participants, ignoring")
+                            return
+                        }
+
+                        val ids = mutableListOf<String>()
+                        for (ch in snapshot.children) {
+                            ch.key?.let { id ->
+                                if (id != currentLocalId) ids.add(id)
+                            }
+                        }
+                        Log.d(TAG, "participants changed: ${ids.size} other(s)")
+                        onParticipantsChanged?.invoke(ids)
+                    }
+                    override fun onCancelled(error: DatabaseError) {
+                        Log.e(TAG, "participants listener cancelled: ${error.message}")
+                    }
+                })
+
+                // enable cleanup and onDisconnect
+                enableAutoCleanup()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "start() setup failed: ${e.message}", e)
+            }
         }
     }
 

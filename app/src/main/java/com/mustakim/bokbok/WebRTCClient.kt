@@ -32,17 +32,60 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private val peerConnectionLock = Any()
 
+
     // --- NEW: TurnServerManager + connection monitoring fields ---
     private val turnServerManager = TurnServerManager()
     private val connectionTimeouts = ConcurrentHashMap<String, Long>()
     private val maxConnectionTimeoutMs = 15_000L // 15 seconds
     private val connectionRetryCounts = ConcurrentHashMap<String, Int>() // added for backoff logic
     private val isEnding = AtomicBoolean(false) // guard to avoid races during endCall()
+    // CGNAT detection
+    private var cgnatDetected = false
+    private val consecutiveFailures = ConcurrentHashMap<String, Int>()
+
+    private val isShuttingDown = AtomicBoolean(false)
     // -------------------------------------------------------------
 
     fun setNoiseSuppression(enabled: Boolean) {
         noiseSuppressionEnabled = enabled
         Log.d(tag, "Noise suppression set to $enabled (restart call to fully re-create audio source)")
+    }
+
+    private fun executeTask(task: Runnable) {
+        try {
+            if (!executor.isShutdown && !isShuttingDown.get()) {
+                executor.execute(task)
+            } else {
+                Log.w(tag, "Executor unavailable, running task on current thread")
+                task.run()
+            }
+        } catch (e: RejectedExecutionException) {
+            Log.w(tag, "Task rejected, running on current thread: ${e.message}")
+            task.run()
+        }
+    }
+
+    private fun detectCGNAT(): Boolean {
+        try {
+            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+            val networkOperator = telephonyManager.networkOperatorName?.lowercase() ?: ""
+            Log.d(tag, "Network operator: $networkOperator")
+
+            // Common CGNAT carriers
+            val isCGNAT = networkOperator.contains("jio") ||
+                    networkOperator.contains("airtel") ||
+                    networkOperator.contains("vi") ||
+                    networkOperator.contains("idea") ||
+                    networkOperator.contains("vodafone")
+
+            if (isCGNAT) {
+                Log.w(tag, "CGNAT carrier detected: $networkOperator")
+            }
+            return isCGNAT
+        } catch (e: Exception) {
+            Log.w(tag, "CGNAT detection failed: ${e.message}")
+            return false
+        }
     }
 
     fun setOnConnectionStatusChanged(callback: (String, String) -> Unit) {
@@ -51,12 +94,16 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     fun init(onReady: (() -> Unit)? = null) {
         signaling.whenAuthReady {
-            executor.execute {
+            executeTask {
                 try {
                     if (factory == null) {
                         PeerConnectionFactory.initialize(
-                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions()
+                            PeerConnectionFactory.InitializationOptions.builder(context.applicationContext)
+                                .setEnableInternalTracer(true)
+                                .setFieldTrials("WebRTC-Audio-NetworkAdaptation/Enabled/")
+                                .createInitializationOptions()
                         )
+
                         val opts = PeerConnectionFactory.Options()
                         factory = PeerConnectionFactory.builder().setOptions(opts).createPeerConnectionFactory()
                         Log.d(tag, "PeerConnectionFactory created")
@@ -142,16 +189,16 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     fun getCurrentParticipants(cb: (List<String>) -> Unit) { signaling.getParticipantsNow(cb) }
 
     private fun createPeerIfNeeded(remoteId: String, initiator: Boolean = false) {
-        executor.execute {
+        executeTask {
             synchronized(peerConnectionLock) {
                 try {
                     if (peerConnections.size >= 8) {  // Reasonable limit for mobile
                         Log.w(tag, "Max peer connections reached, ignoring $remoteId")
-                        return@execute
+                        return@executeTask
                     }
-                    if (peerConnections.containsKey(remoteId)) return@execute
+                    if (peerConnections.containsKey(remoteId)) return@executeTask
                     Log.d(tag, "Creating PeerConnection for $remoteId (initiator=$initiator)")
-                    val pc = createPeerConnection(remoteId) ?: return@execute
+                    val pc = createPeerConnection(remoteId) ?: return@executeTask
 
                     val sendTrack = localAudioTrack
                     if (sendTrack != null) {
@@ -205,169 +252,182 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     private fun createPeerConnection(remoteId: String): PeerConnection? {
-        val f = factory ?: return null
+        return try {
+            val f = factory ?: throw IllegalStateException("Factory not initialized")
 
-        // ---------- PATCHED: Use TurnServerManager to provide STUN + TURN servers ----------
-        val iceServers = turnServerManager.getIceServersForCurrentTier().toMutableList()
-        // Add emergency STUN servers as a fallback if the current tier is high
-        try {
-            if (turnServerManager.getCurrentTier() > 3) {
-                iceServers.addAll(turnServerManager.getEmergencyIceServers())
+            // Smart server selection based on network detection
+            if (detectCGNAT() && !cgnatDetected) {
+                cgnatDetected = true
+                turnServerManager.enableCGNATMode()
+                Log.w(tag, "CGNAT detected - enabling relay mode")
             }
-        } catch (e: Exception) {
-            Log.w(tag, "No emergency servers available or failed to add: ${e.message}")
-        }
-        // ----------------------------------------------------------------------------------
 
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
-            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
-            bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
-            rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
-            continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            // Gaming optimizations
-            iceTransportsType = PeerConnection.IceTransportsType.ALL
-            keyType = PeerConnection.KeyType.ECDSA
-
-            // Aggressive timeouts for faster failover (we will monitor & retry)
+            val iceServers = turnServerManager.getIceServersForCurrentTier().toMutableList()
+            // Add emergency STUN servers as a fallback if the current tier is high
             try {
-                // These fields may not exist on all WebRTC builds; set defensively
-                val connTimeoutField = this::class.java.getDeclaredField("iceConnectionReceivingTimeout")
-                connTimeoutField.isAccessible = true
-                connTimeoutField.setInt(this, 10000)
-            } catch (_: Throwable) {}
-
-            try {
-                val inactiveTimeoutField = this::class.java.getDeclaredField("iceInactiveTimeout")
-                inactiveTimeoutField.isAccessible = true
-                inactiveTimeoutField.setInt(this, 15000)
-            } catch (_: Throwable) {}
-        }
-        // ---------------------------------------------------------------------------------------
-
-        // Track connection attempt start time for timeout logic
-        connectionTimeouts[remoteId] = System.currentTimeMillis()
-
-        val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
-            override fun onSignalingChange(state: PeerConnection.SignalingState?) {
-                Log.d(tag, "Signaling state for $remoteId: $state")
-            }
-
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                Log.d(tag, "ICE state for $remoteId: $state (TURN tier: ${turnServerManager.getCurrentTier()})")
-                when (state) {
-                    PeerConnection.IceConnectionState.CONNECTED,
-                    PeerConnection.IceConnectionState.COMPLETED -> {
-                        // Connection successful - reset to tier 1 for future connections
-                        connectionTimeouts.remove(remoteId)
-                        turnServerManager.resetToTier1()
-                        Log.d(tag, "Connection successful for $remoteId, reset to tier 1")
-                        // Reset retry count
-                        connectionRetryCounts.remove(remoteId)
-                    }
-
-                    PeerConnection.IceConnectionState.FAILED,
-                    PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        // Connection failed - escalate and retry
-                        connectionTimeouts.remove(remoteId)
-                        turnServerManager.forceEscalateToNextTier()
-                        Log.w(tag, "Connection failed for $remoteId, escalated to tier ${turnServerManager.getCurrentTier()}")
-
-                        if (turnServerManager.getCurrentTier() < 5) {
-                            retryConnectionWithNewTier(remoteId)
-                        }
-                    }
-
-                    else -> {
-                        // If it remains in transitional states for too long, escalate
-                        val startTime = connectionTimeouts[remoteId]
-                        if (startTime != null &&
-                            System.currentTimeMillis() - startTime > maxConnectionTimeoutMs &&
-                            state != PeerConnection.IceConnectionState.CONNECTED &&
-                            state != PeerConnection.IceConnectionState.COMPLETED) {
-
-                            Log.w(tag, "Connection timeout for $remoteId after ${System.currentTimeMillis() - startTime}ms, escalating")
-                            turnServerManager.forceEscalateToNextTier()
-                            retryConnectionWithNewTier(remoteId)
-                        }
-                    }
+                if (turnServerManager.getCurrentTier() > 3) {
+                    iceServers.addAll(turnServerManager.getEmergencyIceServers())
                 }
-
-                onConnectionStatusChanged?.let { callback ->
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        val statusWithTier = "${state?.name ?: "Unknown"} (T${turnServerManager.getCurrentTier()})"
-                        callback(remoteId, statusWithTier)
-                    }
-                }
+            } catch (e: Exception) {
+                Log.w(tag, "No emergency servers available or failed to add: ${e.message}")
             }
 
-            override fun onIceConnectionReceivingChange(receiving: Boolean) {
-                Log.d(tag, "ICE receiving for $remoteId: $receiving")
-            }
+            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+                tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
+                bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE
+                rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
+                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+                // Gaming optimizations
+                iceTransportsType = PeerConnection.IceTransportsType.ALL
+                keyType = PeerConnection.KeyType.ECDSA
 
-            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
-                Log.d(tag, "ICE gathering for $remoteId: $state")
-
-                if (state == PeerConnection.IceGatheringState.GATHERING) {
-                    val start = connectionTimeouts[remoteId]
-                    if (start != null) {
-                        // If gathering takes too long, escalate to next tier
-                        android.os.Handler(Looper.getMainLooper()).postDelayed({
-                            val currentState = try { peerConnections[remoteId]?.iceGatheringState() } catch (_: Exception) { null }
-                            if (currentState == PeerConnection.IceGatheringState.GATHERING) {
-                                Log.w(tag, "ICE gathering timeout for $remoteId, forcing escalation")
-                                turnServerManager.forceEscalateToNextTier()
-                            }
-                        }, 10_000L) // 10s gathering timeout
-                    }
-                }
-            }
-
-            override fun onIceCandidate(candidate: IceCandidate) {
-                Log.d(tag, "onIceCandidate -> send to $remoteId")
-                signaling.sendIceCandidate(remoteId, candidate)
-            }
-            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
-            override fun onAddStream(stream: MediaStream?) {}
-            override fun onRemoveStream(stream: MediaStream?) {}
-            override fun onDataChannel(dataChannel: DataChannel?) {}
-            override fun onRenegotiationNeeded() {
-                Log.d(tag, "Renegotiation needed for $remoteId")
-            }
-
-            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                // Aggressive timeouts for faster failover (set defensively)
                 try {
-                    val track = receiver?.track()
-                    if (track is AudioTrack) {
-                        Log.d(tag, "Remote audio track added for $remoteId")
+                    val connTimeoutField = this::class.java.getDeclaredField("iceConnectionReceivingTimeout")
+                    connTimeoutField.isAccessible = true
+                    connTimeoutField.setInt(this, 10000)
+                } catch (_: Throwable) {}
 
-                        // Ensure track is enabled
-                        track.setEnabled(true)
-                        remoteAudioTracks[remoteId] = track
+                try {
+                    val inactiveTimeoutField = this::class.java.getDeclaredField("iceInactiveTimeout")
+                    inactiveTimeoutField.isAccessible = true
+                    inactiveTimeoutField.setInt(this, 15000)
+                } catch (_: Throwable) {}
+            }
 
-                        // Apply volume immediately
-                        applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
+            // Track connection attempt start time for timeout logic
+            connectionTimeouts[remoteId] = System.currentTimeMillis()
 
-                        // Force audio session refresh
-                        try {
-                            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                        } catch (e: Exception) {
-                            Log.w(tag, "Audio mode refresh failed: ${e.message}")
+            val pc = f.createPeerConnection(rtcConfig, object : PeerConnection.Observer {
+                override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+                    Log.d(tag, "Signaling state for $remoteId: $state")
+                }
+
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    Log.d(tag, "ICE state for $remoteId: $state (TURN tier: ${turnServerManager.getCurrentTier()})")
+                    when (state) {
+                        PeerConnection.IceConnectionState.CONNECTED,
+                        PeerConnection.IceConnectionState.COMPLETED -> {
+                            // Connection successful - reset to tier 1 for future connections
+                            connectionTimeouts.remove(remoteId)
+                            turnServerManager.resetToTier1()
+                            Log.d(tag, "Connection successful for $remoteId, reset to tier 1")
+                            // Reset retry count
+                            connectionRetryCounts.remove(remoteId)
                         }
 
-                        Log.d(tag, "Remote audio track fully configured for $remoteId")
+                        PeerConnection.IceConnectionState.FAILED,
+                        PeerConnection.IceConnectionState.DISCONNECTED -> {
+                            // Connection failed - escalate and retry
+                            connectionTimeouts.remove(remoteId)
+                            turnServerManager.forceEscalateToNextTier()
+                            Log.w(tag, "Connection failed for $remoteId, escalated to tier ${turnServerManager.getCurrentTier()}")
+
+                            if (turnServerManager.getCurrentTier() < 4) {
+                                retryConnectionWithNewTier(remoteId)
+                            }
+                        }
+
+                        else -> {
+                            // If it remains in transitional states for too long, escalate
+                            val startTime = connectionTimeouts[remoteId]
+                            if (startTime != null &&
+                                System.currentTimeMillis() - startTime > maxConnectionTimeoutMs &&
+                                state != PeerConnection.IceConnectionState.CONNECTED &&
+                                state != PeerConnection.IceConnectionState.COMPLETED) {
+
+                                Log.w(tag, "Connection timeout for $remoteId after ${System.currentTimeMillis() - startTime}ms, escalating")
+                                turnServerManager.forceEscalateToNextTier()
+                                retryConnectionWithNewTier(remoteId)
+                            }
+                        }
                     }
-                } catch (e: Exception) {
-                    Log.e(tag, "onAddTrack error: ${e.message}", e)
+
+                    onConnectionStatusChanged?.let { callback ->
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            val statusWithTier = "${state?.name ?: "Unknown"} (T${turnServerManager.getCurrentTier()})"
+                            callback(remoteId, statusWithTier)
+                        }
+                    }
                 }
-            }
-            override fun onRemoveTrack(receiver: RtpReceiver?) {
-                remoteAudioTracks.remove(remoteId)
-                Log.d(tag, "onRemoveTrack for $remoteId")
-            }
-        })
-        return pc
+
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {
+                    Log.d(tag, "ICE receiving for $remoteId: $receiving")
+                }
+
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                    Log.d(tag, "ICE gathering for $remoteId: $state")
+
+                    if (state == PeerConnection.IceGatheringState.GATHERING) {
+                        val start = connectionTimeouts[remoteId]
+                        if (start != null) {
+                            // If gathering takes too long, escalate to next tier
+                            android.os.Handler(Looper.getMainLooper()).postDelayed({
+                                val currentState = try { peerConnections[remoteId]?.iceGatheringState() } catch (_: Exception) { null }
+                                if (currentState == PeerConnection.IceGatheringState.GATHERING) {
+                                    Log.w(tag, "ICE gathering timeout for $remoteId, forcing escalation")
+                                    turnServerManager.forceEscalateToNextTier()
+                                }
+                            }, 10_000L) // 10s gathering timeout
+                        }
+                    }
+                }
+
+                override fun onIceCandidate(candidate: IceCandidate) {
+                    Log.d(tag, "onIceCandidate -> send to $remoteId")
+                    signaling.sendIceCandidate(remoteId, candidate)
+                }
+
+                override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+                override fun onAddStream(stream: MediaStream?) {}
+                override fun onRemoveStream(stream: MediaStream?) {}
+                override fun onDataChannel(dataChannel: DataChannel?) {}
+                override fun onRenegotiationNeeded() {
+                    Log.d(tag, "Renegotiation needed for $remoteId")
+                }
+
+                override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                    try {
+                        val track = receiver?.track()
+                        if (track is AudioTrack) {
+                            Log.d(tag, "Remote audio track added for $remoteId")
+
+                            // Ensure track is enabled
+                            track.setEnabled(true)
+                            remoteAudioTracks[remoteId] = track
+
+                            // Apply volume immediately
+                            applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
+
+                            // Force audio session refresh
+                            try {
+                                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                            } catch (e: Exception) {
+                                Log.w(tag, "Audio mode refresh failed: ${e.message}")
+                            }
+
+                            Log.d(tag, "Remote audio track fully configured for $remoteId")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(tag, "onAddTrack error: ${e.message}", e)
+                    }
+                }
+
+                override fun onRemoveTrack(receiver: RtpReceiver?) {
+                    remoteAudioTracks.remove(remoteId)
+                    Log.d(tag, "onRemoveTrack for $remoteId")
+                }
+            })
+
+            pc
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to create peer connection for $remoteId", e)
+            onConnectionStatusChanged?.invoke(remoteId, "Failed to connect")
+            null
+        }
     }
+
 
     // Retry connection with new TURN tier (close existing and create new peer)
     private fun retryConnectionWithNewTier(remoteId: String) {
@@ -388,7 +448,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         connectionRetryCounts[remoteId] = retryCount + 1
         val backoffMs = 1000L * (1 shl retryCount) // 1s, 2s, 4s
 
-        executor.execute {
+        executeTask {
             try {
                 Log.d(tag, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}, attempt ${retryCount + 1}")
 
@@ -405,7 +465,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
                 if (isEnding.get() || executor.isShutdown) {
                     Log.w(tag, "Abort retry for $remoteId because client is ending")
-                    return@execute
+                    return@executeTask
                 }
 
                 createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
@@ -415,7 +475,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         }
     }
     private fun fallbackToStunOnlyConnection(remoteId: String) {
-        executor.execute {
+        executeTask {
             try {
                 Log.w(tag, "Creating STUN-only connection for $remoteId as last resort")
 
@@ -505,9 +565,21 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
                         connectionTimeouts.remove(remoteId)
+
+                        // Track failures for CGNAT detection
+                        val failures = consecutiveFailures.getOrDefault(remoteId, 0) + 1
+                        consecutiveFailures[remoteId] = failures
+
+                        if (failures >= 2 && !cgnatDetected) {
+                            cgnatDetected = true
+                            turnServerManager.enableCGNATMode()
+                            Log.w(tag, "Multiple failures detected - likely CGNAT, enabling relay mode")
+                        }
+
                         turnServerManager.forceEscalateToNextTier()
-                        Log.w(tag, "Connection failed for $remoteId")
-                        if (turnServerManager.getCurrentTier() < 5) {
+                        Log.w(tag, "Connection failed for $remoteId, escalated to tier ${turnServerManager.getCurrentTier()}")
+
+                        if (turnServerManager.getCurrentTier() < 4) {
                             retryConnectionWithNewTier(remoteId)
                         }
                     }
@@ -584,10 +656,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     private fun handleRemoteSdp(fromId: String, payload: Map<String, Any?>, msgKey: String) {
-        executor.execute {
+        executeTask {
             try {
-                val type = payload["sdpType"] as? String ?: return@execute
-                val sdp = payload["sdp"] as? String ?: return@execute
+                val type = payload["sdpType"] as? String ?: return@executeTask
+                val sdp = payload["sdp"] as? String ?: return@executeTask
                 Log.d(tag, "handleRemoteSdp from=$fromId type=$type key=$msgKey")
                 val descType = if (type.equals("offer", true)) SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER
                 val sd = SessionDescription(descType, sdp)
@@ -637,9 +709,9 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     private fun handleRemoteIce(fromId: String, payload: Map<String, Any?>, msgKey: String) {
-        executor.execute {
+        executeTask {
             try {
-                val candidateStr = payload["candidate"] as? String ?: return@execute
+                val candidateStr = payload["candidate"] as? String ?: return@executeTask
                 val sdpMid = payload["sdpMid"] as? String
                 val sdpMLineIndex = (payload["sdpMLineIndex"] as? Long)?.toInt() ?: 0
                 Log.d(tag, "handleRemoteIce from=$fromId key=$msgKey")
@@ -657,7 +729,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     private fun closePeer(remoteId: String) {
-        executor.execute {
+        executeTask {
             try {
                 peerConnections.remove(remoteId)?.close()
                 remoteAudioTracks.remove(remoteId)
@@ -695,7 +767,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     fun setReceiveVolumeMultiplier(multiplier: Float) {
         receiveVolumeMultiplier = multiplier
-        executor.execute {
+        executeTask {
             for ((_, track) in remoteAudioTracks) {
                 applyVolumeToAudioTrack(track, multiplier)
             }
@@ -739,7 +811,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
 
     fun refreshAudioSession() {
-        executor.execute {
+        executeTask {
             try {
                 // Temporarily toggle local audio to force audio re-init
                 localAudioTrack?.setEnabled(false)
@@ -763,24 +835,43 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {
         try {
-            // Try direct method call first (newer WebRTC versions)
+            val clampedMultiplier = multiplier.coerceIn(0.0f, 2.0f)
+
+            // Try newer WebRTC versions first
             try {
-                track.setVolume(multiplier.toDouble())
-                Log.d(tag, "Applied volume multiplier $multiplier via direct method")
+                track.setVolume(clampedMultiplier.toDouble())
+                Log.d(tag, "Applied volume $clampedMultiplier via direct method")
                 return
             } catch (e: NoSuchMethodError) {
-                // Fall back to reflection for older versions
-                try {
-                    val method = track.javaClass.getMethod("setVolume", Double::class.javaPrimitiveType)
-                    method.invoke(track, multiplier.toDouble())
-                    Log.d(tag, "Applied volume multiplier $multiplier via reflection")
-                    return
-                } catch (e: Exception) {
-                    Log.w(tag, "Reflection volume set failed: ${e.message}")
-                }
+                Log.d(tag, "Direct setVolume not available, trying reflection")
+            } catch (e: Exception) {
+                Log.w(tag, "Direct setVolume failed: ${e.message}")
             }
+
+            // Reflection fallback with better error handling
+            try {
+                val setVolumeMethod = track.javaClass.getDeclaredMethod("setVolume", Double::class.javaPrimitiveType)
+                setVolumeMethod.isAccessible = true
+                setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
+                Log.d(tag, "Applied volume $clampedMultiplier via reflection")
+                return
+            } catch (e: NoSuchMethodException) {
+                Log.w(tag, "setVolume method not found")
+            } catch (e: Exception) {
+                Log.w(tag, "Reflection volume set failed: ${e.message}")
+            }
+
+            // Final fallback - enable/disable as volume control
+            if (clampedMultiplier < 0.1f) {
+                track.setEnabled(false)
+                Log.d(tag, "Volume too low, disabled track")
+            } else {
+                track.setEnabled(true)
+                Log.d(tag, "Volume control unavailable, track enabled")
+            }
+
         } catch (e: Exception) {
-            Log.w(tag, "All volume setting methods failed: ${e.message}")
+            Log.e(tag, "All volume setting methods failed: ${e.message}", e)
         }
     }
 
@@ -788,7 +879,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         // For full disposal when you mean to stop and not reuse the client.
         try {
             if (!executor.isShutdown) {
-                executor.execute {
+                executeTask {
                     synchronized(peerConnectionLock) {
                         peerConnections.values.forEach { it.close() }
                         peerConnections.clear()
@@ -815,48 +906,36 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     fun endCall() {
-        // Do the standard end-call cleanup but do not forcibly shut down the executor.
         if (isEnding.getAndSet(true)) {
-            Log.d(tag, "endCall already in progress; ignoring repeated call")
+            Log.d(tag, "endCall already in progress")
             return
         }
 
-        try {
-            // Check if executor is already shutdown to avoid RejectedExecutionException
-            if (executor.isShutdown) {
-                Log.d(tag, "Executor already shutdown, skipping endCall")
-                return
-            }
+        isShuttingDown.set(true)
 
-            val endCallTask = Runnable {
+        try {
+            executeTask {
                 try {
                     synchronized(peerConnectionLock) {
                         signaling.leave()
-                        peerConnections.values.forEach {
-                            try { it.close() } catch (e: Exception) { Log.w(tag, "Error closing peer: ${e.message}") }
+                        peerConnections.values.forEach { pc ->
+                            try { pc.close() } catch (e: Exception) { Log.w(tag, "Error closing peer: ${e.message}") }
                         }
                         peerConnections.clear()
                         remoteAudioTracks.clear()
+                        connectionTimeouts.clear()
+                        connectionRetryCounts.clear()
+                        consecutiveFailures.clear()
                     }
 
                     try { audioSource?.dispose() } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
                     try { localAudioTrack?.dispose() } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
-                    try { /* keep factory alive for potential quick rejoin - don't dispose here */ } catch (_: Exception) {}
                     try { signaling.close() } catch (e: Exception) { Log.w(tag, "signaling.close failed: ${e.message}") }
 
+                    Log.d(tag, "endCall cleanup complete")
                 } catch (e: Exception) {
                     Log.e(tag, "Error during endCall cleanup", e)
-                } finally {
-                    Log.d(tag, "endCall cleanup complete (executor still active)")
                 }
-            }
-
-            try {
-                executor.execute(endCallTask)
-            } catch (e: RejectedExecutionException) {
-                // Executor shutting down, run on current thread as best-effort
-                Log.w(tag, "Executor rejected endCall task; running synchronously", e)
-                endCallTask.run()
             }
         } catch (e: Exception) {
             Log.e(tag, "Unexpected error in endCall", e)

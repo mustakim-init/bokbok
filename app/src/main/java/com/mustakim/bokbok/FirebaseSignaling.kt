@@ -78,7 +78,6 @@ class FirebaseSignaling(private val roomId: String) {
                 // messages listener
                 messagesListener = messagesRef.addChildEventListener(object : ChildEventListener {
                     override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                        // Add null check for localId
                         val currentLocalId = localId
                         if (currentLocalId == null) {
                             Log.w(TAG, "localId still null when processing message, ignoring")
@@ -90,6 +89,13 @@ class FirebaseSignaling(private val roomId: String) {
                         val typeStr = map["type"] as? String ?: return
                         val from = map["from"] as? String ?: return
                         val to = (map["to"] as? String?)
+
+                        // CRITICAL: Ignore messages from yourself
+                        if (from == currentLocalId) {
+                            Log.d(TAG, "Ignoring own message $key from $from")
+                            try { messagesRef.child(key).removeValue() } catch (_: Exception) {}
+                            return
+                        }
 
                         Log.d(TAG, "Received message key=$key type=$typeStr from=$from to=$to")
 
@@ -112,6 +118,16 @@ class FirebaseSignaling(private val roomId: String) {
 
                         try {
                             onMessageCb(type, from, payload, key)
+
+                            // Auto-delete SDP/ICE messages after processing to prevent replay
+                            if (type == Type.SDP || type == Type.ICE) {
+                                try {
+                                    messagesRef.child(key).removeValue()
+                                    Log.d(TAG, "Auto-deleted processed $type message $key")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Failed to delete message: ${e.message}")
+                                }
+                            }
                         } catch (e: Exception) {
                             Log.e(TAG, "onMessageCb error: ${e.message}")
                         }

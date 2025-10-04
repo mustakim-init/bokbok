@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class WebRTCClient(private val context: Context, private val roomId: String) {
     private val tag = "WebRTCClient"
     private val executor = Executors.newSingleThreadExecutor()
+    private val scheduler = java.util.concurrent.Executors.newScheduledThreadPool(2)
     private val signaling = FirebaseSignaling(roomId)
 
     private val peerConnections = ConcurrentHashMap<String, PeerConnection>()
@@ -440,7 +441,6 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         if (retryCount >= 3) {
             Log.w(tag, "Max retries reached for $remoteId, falling back to STUN-only")
             connectionRetryCounts.remove(remoteId)
-            // CRITICAL FIX: Fallback to STUN-only mode
             fallbackToStunOnlyConnection(remoteId)
             return
         }
@@ -448,32 +448,34 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         connectionRetryCounts[remoteId] = retryCount + 1
         val backoffMs = 1000L * (1 shl retryCount) // 1s, 2s, 4s
 
-        executeTask {
-            try {
-                Log.d(tag, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}, attempt ${retryCount + 1}")
-
-                // Close existing connection
+        // Use scheduler for delay, then execute on main executor
+        scheduler.schedule({
+            executeTask {
                 try {
-                    peerConnections[remoteId]?.close()
+                    Log.d(tag, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}, attempt ${retryCount + 1}")
+
+                    // Close existing connection
+                    try {
+                        peerConnections[remoteId]?.close()
+                    } catch (e: Exception) {
+                        Log.w(tag, "Error closing peer before retry: ${e.message}")
+                    }
+                    peerConnections.remove(remoteId)
+                    remoteAudioTracks.remove(remoteId)
+
+                    if (isEnding.get() || executor.isShutdown) {
+                        Log.w(tag, "Abort retry for $remoteId because client is ending")
+                        return@executeTask
+                    }
+
+                    createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
                 } catch (e: Exception) {
-                    Log.w(tag, "Error closing peer before retry: ${e.message}")
+                    Log.e(tag, "Error retrying connection for $remoteId: ${e.message}", e)
                 }
-                peerConnections.remove(remoteId)
-                remoteAudioTracks.remove(remoteId)
-
-                Thread.sleep(backoffMs)
-
-                if (isEnding.get() || executor.isShutdown) {
-                    Log.w(tag, "Abort retry for $remoteId because client is ending")
-                    return@executeTask
-                }
-
-                createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
-            } catch (e: Exception) {
-                Log.e(tag, "Error retrying connection for $remoteId: ${e.message}", e)
             }
-        }
+        }, backoffMs, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
+
     private fun fallbackToStunOnlyConnection(remoteId: String) {
         executeTask {
             try {
@@ -811,27 +813,54 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
 
     fun refreshAudioSession() {
-        executeTask {
-            try {
-                // Temporarily toggle local audio to force audio re-init
-                localAudioTrack?.setEnabled(false)
-                Thread.sleep(60)
-                localAudioTrack?.setEnabled(true)
-
-                // Toggle remote tracks briefly so player surfaces refresh too
-                remoteAudioTracks.values.forEach { t ->
-                    try {
-                        t.setEnabled(false)
-                        Thread.sleep(15)
-                        t.setEnabled(true)
-                    } catch (_: Exception) {}
+        // Offload longer blocking waits to scheduler so executor isn't blocked
+        try {
+            // Short, synchronous disable/enable for local track on executor
+            executeTask {
+                try {
+                    localAudioTrack?.setEnabled(false)
+                } catch (e: Exception) {
+                    Log.w(tag, "refreshAudioSession local disable failed: ${e.message}")
                 }
-                Log.d(tag, "Audio session refreshed")
-            } catch (e: Exception) {
-                Log.w(tag, "refreshAudioSession error: ${e.message}")
             }
+
+            // Re-enable after a short delay using scheduler
+            scheduler.schedule({
+                executeTask {
+                    try {
+                        localAudioTrack?.setEnabled(true)
+                    } catch (e: Exception) {
+                        Log.w(tag, "refreshAudioSession local enable failed: ${e.message}")
+                    }
+                }
+            }, 60, TimeUnit.MILLISECONDS)
+
+            // For remote tracks, toggle each with a small delay so players can refresh
+            var delay = 0L
+            for (t in remoteAudioTracks.values) {
+                val track = t
+                scheduler.schedule({
+                    executeTask {
+                        try {
+                            track.setEnabled(false)
+                        } catch (e: Exception) {}
+                    }
+                    // re-enable slightly later
+                    scheduler.schedule({
+                        executeTask {
+                            try { track.setEnabled(true) } catch (e: Exception) {}
+                        }
+                    }, 40, TimeUnit.MILLISECONDS)
+                }, delay, TimeUnit.MILLISECONDS)
+                delay += 25L
+            }
+
+            Log.d(tag, "Audio session refresh scheduled")
+        } catch (e: Exception) {
+            Log.w(tag, "refreshAudioSession scheduling error: ${e.message}")
         }
     }
+
 
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {
         try {
@@ -876,7 +905,6 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     fun close() {
-        // For full disposal when you mean to stop and not reuse the client.
         try {
             if (!executor.isShutdown) {
                 executeTask {
@@ -884,20 +912,28 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         peerConnections.values.forEach { it.close() }
                         peerConnections.clear()
                         remoteAudioTracks.clear()
-                        try { audioSource?.dispose() } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
-                        try { localAudioTrack?.dispose() } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
-                        try { factory?.dispose() } catch (e: Exception) { Log.w(tag, "factory.dispose failed: ${e.message}") }
+                        try { audioSource?.dispose(); audioSource = null } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
+                        try { localAudioTrack?.dispose(); localAudioTrack = null } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
+                        try { factory?.dispose(); factory = null } catch (e: Exception) { Log.w(tag, "factory.dispose failed: ${e.message}") }
                         try { signaling.close() } catch (e: Exception) { Log.w(tag, "signaling.close failed: ${e.message}") }
                     }
                 }
-                // Shut down executor after cleanup
+
+                // Shut down both executors
                 try {
                     executor.shutdown()
-                    if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                    scheduler.shutdown()
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
                         executor.shutdownNow()
                     }
+                    if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                        scheduler.shutdownNow()
+                    }
                 } catch (e: Exception) {
-                    try { executor.shutdownNow() } catch (_: Exception) {}
+                    try {
+                        executor.shutdownNow()
+                        scheduler.shutdownNow()
+                    } catch (_: Exception) {}
                 }
             }
         } catch (e: Exception) {
@@ -928,8 +964,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         consecutiveFailures.clear()
                     }
 
-                    try { audioSource?.dispose() } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
-                    try { localAudioTrack?.dispose() } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
+                    try { audioSource?.dispose(); audioSource = null } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
+                    try { localAudioTrack?.dispose(); localAudioTrack = null } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
                     try { signaling.close() } catch (e: Exception) { Log.w(tag, "signaling.close failed: ${e.message}") }
 
                     Log.d(tag, "endCall cleanup complete")

@@ -749,7 +749,6 @@ class CallActivity : AppCompatActivity() {
                 }
                 if (wiredDevice != null) {
                     try {
-                        // set as communication device so WebRTC/system uses it
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             am.setCommunicationDevice(wiredDevice)
                         }

@@ -750,7 +750,9 @@ class CallActivity : AppCompatActivity() {
                 if (wiredDevice != null) {
                     try {
                         // set as communication device so WebRTC/system uses it
-                        am.setCommunicationDevice(wiredDevice)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            am.setCommunicationDevice(wiredDevice)
+                        }
                         Log.d(TAG, "routeToWiredHeadset: setCommunicationDevice succeeded")
                         return
                     } catch (e: Exception) {

@@ -25,6 +25,8 @@ import android.widget.*
 import androidx.core.app.ActivityCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.gridlayout.widget.GridLayout
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import kotlin.math.max
 import kotlin.math.min
 
@@ -43,11 +45,25 @@ class CallActivity : AppCompatActivity() {
     private var focusRequest: AudioFocusRequest? = null
     private var isCleaningUp = false
 
+    private val scoStateLock = Any()
+    private val participantsLock = Any()
+
+
     private val prefs by lazy { getSharedPreferences("bokbok_prefs", Context.MODE_PRIVATE) }
 
     // Track whether we've started SCO (so we can stop it later)
     private var isSCOStarted = false
     @Volatile private var isSCOStarting = false  // Add this
+
+    private val networkChangeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                ConnectivityManager.CONNECTIVITY_ACTION -> {
+                    handleNetworkChange()
+                }
+            }
+        }
+    }
 
     private val pendingEscalations = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -77,8 +93,7 @@ class CallActivity : AppCompatActivity() {
     }
 
 
-    // SCO state receiver: waits until SCO is actually connected before routing audio
-    // Replace the entire scoReceiver (around line 69-116) with this:
+
     private val scoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             try {
@@ -88,8 +103,12 @@ class CallActivity : AppCompatActivity() {
                     when (state) {
                         AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
                             Log.d(TAG, "SCO_AUDIO_STATE_CONNECTED")
-                            isSCOStarting = false  // ADDED
-                            isSCOStarted = true
+                            synchronized(scoStateLock) {
+                                isSCOStarting = false
+                                isSCOStarted = true
+                            }
+                            Log.d(TAG, "SCO connected - flags: starting=false, started=true")
+
                             try {
                                 audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
                                 audioManager?.isSpeakerphoneOn = false
@@ -106,8 +125,11 @@ class CallActivity : AppCompatActivity() {
                         AudioManager.SCO_AUDIO_STATE_DISCONNECTED,
                         AudioManager.SCO_AUDIO_STATE_ERROR -> {
                             Log.d(TAG, "SCO_AUDIO_STATE_DISCONNECTED or ERROR")
-                            isSCOStarting = false  // ADDED
-                            isSCOStarted = false
+                            synchronized(scoStateLock) {
+                                isSCOStarting = false
+                                isSCOStarted = false
+                            }
+                            Log.d(TAG, "SCO disconnected - flags: starting=false, started=false")
 
                             if (hasHeadphonesConnected()) {
                                 routeToWiredHeadset()
@@ -158,6 +180,7 @@ class CallActivity : AppCompatActivity() {
         webRtcClient = WebRTCClient(applicationContext, roomId)
 
         audioManager = getSystemService(AudioManager::class.java)
+        forceSpeakerAsDefault()
 //        applyAudioRouting()
 
 
@@ -181,6 +204,11 @@ class CallActivity : AppCompatActivity() {
         registerReceiver(audioDeviceReceiver, audioFilter)
         registerReceiver(scoReceiver, IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED))
         Log.d(TAG, "Audio routing: Manual device switching enabled")
+
+        val networkFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+        registerReceiver(networkChangeReceiver, networkFilter)
+        Log.d(TAG, "Network change monitoring enabled")
+
 
         // participants list
         participantAdapter = ParticipantAdapter(this, participants)
@@ -293,6 +321,19 @@ class CallActivity : AppCompatActivity() {
         }
 
         settingsButton.setOnClickListener { SettingsActivity.open(this) }
+        settingsButton.setOnLongClickListener {
+            // Toggle mic as audio refresh
+            toggleMicNudge()
+
+            val turnStatus = webRtcClient?.getTurnServerStatus() ?: "No client"
+            val audioStatus = webRtcClient?.verifyAudioConnection() ?: "No WebRTC client"
+
+            Toast.makeText(this, "Audio nudge applied + Debug Info Logged", Toast.LENGTH_SHORT).show()
+            Log.d(TAG, "TurnDebug: $turnStatus")
+            Log.d(TAG, "AudioVerification: $audioStatus")
+
+            true
+        }
         leaveButton.setOnClickListener { cleanupAndFinish(svcIntent) }
 
         // receive volume SeekBar
@@ -346,6 +387,21 @@ class CallActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleNetworkChange() {
+        Log.d(TAG, "Network change detected, checking connection stability")
+
+        // Check if we have active network
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+
+        if (capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))) {
+            Log.d(TAG, "Network available, ensuring WebRTC connections are stable")
+            webRtcClient?.refreshAudioSession()
+        }
+    }
+
     private fun monitorConnectionQuality() {
         val handler = Handler(Looper.getMainLooper())
         val monitorRunnable = object : Runnable {
@@ -395,119 +451,136 @@ class CallActivity : AppCompatActivity() {
         handler.postDelayed(monitorRunnable, 5_000L)
     }
 
-
-    // Replace the entire applyAudioRouting() method (around line 330-390) with this:
     private fun applyAudioRouting() {
-        val am = audioManager ?: run {
-            Log.w(TAG, "AudioManager is null in applyAudioRouting")
-            return
-        }
+        val am = audioManager ?: return
 
         try {
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to set audio mode: ${e.message}")
-        }
 
-        var hasBtSco = false
-        var hasBtA2dp = false
-        var hasWired = false
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            try {
-                val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                for (d in outs) {
-                    when (d.type) {
-                        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> hasBtSco = true
-                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> hasBtA2dp = true
-                        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                        AudioDeviceInfo.TYPE_WIRED_HEADSET,
-                        AudioDeviceInfo.TYPE_USB_HEADSET,
-                        AudioDeviceInfo.TYPE_USB_DEVICE -> hasWired = true
+            // Android 14+ requires explicit communication device selection
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    val availableDevices = am.availableCommunicationDevices
+                    val preferredDevice = availableDevices.firstOrNull { device ->
+                        when {
+                            isBluetoothAudioConnected() && device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
+                                Log.d(TAG, "Android 14+: Selecting Bluetooth SCO device")
+                                true
+                            }
+                            isBluetoothAudioConnected() && device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> {
+                                Log.d(TAG, "Android 14+: Selecting Bluetooth A2DP device")
+                                true
+                            }
+                            hasHeadphonesConnected() && (device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                                    device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                                    device.type == AudioDeviceInfo.TYPE_USB_HEADSET) -> {
+                                Log.d(TAG, "Android 14+: Selecting wired headset device")
+                                true
+                            }
+                            device.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> {
+                                Log.d(TAG, "Android 14+: Selecting built-in speaker")
+                                true
+                            }
+                            else -> false
+                        }
                     }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error enumerating audio devices: ${e.message}")
-            }
-        } else {
-            hasWired = hasHeadphonesConnected()
-        }
 
-        when {
-            hasBtSco -> {
-                // Check BLUETOOTH_CONNECT permission on Android S+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
-                        != PackageManager.PERMISSION_GRANTED) {
-                        Log.w(TAG, "BLUETOOTH_CONNECT not granted, falling back to speaker")
-                        setSpeakerMode()
+                    preferredDevice?.let { device ->
+                        am.setCommunicationDevice(device)
+                        Log.d(TAG, "Android ${Build.VERSION.SDK_INT}+: Set communication device to ${device.type}")
+
+                        // If Bluetooth device is selected, ensure SCO is started
+                        if (device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                            synchronized(scoStateLock) {
+                                if (!isSCOStarted && !isSCOStarting) {
+                                    isSCOStarting = true
+                                    am.startBluetoothSco()
+                                    Log.d(TAG, "Started Bluetooth SCO for Android 14+")
+                                }
+                            }
+                        }
                         return
                     }
-                }
 
-                Log.d(TAG, "applyAudioRouting: routing to Bluetooth SCO (requesting start)")
-                try { am.isSpeakerphoneOn = false } catch (e: Exception) {}
-
-                // Only start SCO if not already started or starting
-                if (!isSCOStarted && !isSCOStarting) {
-                    isSCOStarting = true
-                    try {
-                        am.startBluetoothSco()
-                        Log.d(TAG, "Bluetooth SCO start requested")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "startBluetoothSco() failed: ${e.message}")
-                        isSCOStarting = false
-                        setSpeakerMode()
+                    // If no preferred device found, fall back to speaker
+                    Log.w(TAG, "Android 14+: No preferred communication device found, falling back to speaker")
+                    val speaker = availableDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    speaker?.let {
+                        am.setCommunicationDevice(it)
+                        Log.d(TAG, "Android 14+: Fallback to built-in speaker")
                     }
-                } else {
-                    Log.d(TAG, "SCO already started/starting, skipping")
+
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to set communication device, falling back to legacy API: ${e.message}")
                 }
             }
 
-            hasBtA2dp -> {
-                Log.d(TAG, "applyAudioRouting: Bluetooth A2DP present – do not start SCO")
-                try { am.isSpeakerphoneOn = false } catch (e: Exception) {}
-                stopBluetoothScoSafely()
+            // Fallback for older Android versions - USE THE UNUSED FUNCTIONS
+            when {
+                isBluetoothAudioConnected() -> {
+                    Log.d(TAG, "Routing audio to Bluetooth using legacy API")
+                    setBluetoothMode()
+                }
+                hasHeadphonesConnected() -> {
+                    Log.d(TAG, "Routing audio to wired headset using legacy API")
+                    routeToWiredHeadset()
+                }
+                else -> {
+                    Log.d(TAG, "Routing audio to speaker using legacy API")
+                    setSpeakerMode()
+                }
             }
 
-            hasWired -> {
-                Log.d(TAG, "applyAudioRouting: routing to wired headset")
-                routeToWiredHeadset()
-                stopBluetoothScoSafely()
-            }
+            // Apply audio focus settings after routing
+            applyDuckSetting()
 
-            else -> {
-                Log.d(TAG, "applyAudioRouting: defaulting to speaker")
-                setSpeakerMode()
-                stopBluetoothScoSafely()
-            }
-        }
-
-        try {
-            (webRtcClient as? WebRTCClient)?.refreshAudioSession()
         } catch (e: Exception) {
-            Log.w(TAG, "refreshAudioSession failed: ${e.message}")
-            try { toggleMicNudge() } catch (ignored: Exception) {}
+            Log.e(TAG, "Audio routing failed", e)
+            // Final fallback - force speaker mode
+            try {
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                am.isSpeakerphoneOn = true
+                Log.w(TAG, "Emergency fallback: forced speaker mode")
+            } catch (e2: Exception) {
+                Log.e(TAG, "Even emergency fallback failed", e2)
+            }
         }
+
+        // Refresh WebRTC audio session after routing changes
+        Handler(Looper.getMainLooper()).postDelayed({
+            try {
+                webRtcClient?.refreshAudioSession()
+                Log.d(TAG, "Audio session refreshed after routing change")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to refresh audio session after routing: ${e.message}")
+            }
+        }, 200)
     }
 
 
     private fun stopBluetoothScoSafely() {
         val am = audioManager ?: return
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
-                am.stopBluetoothSco()
-            } else {
+            synchronized(scoStateLock) {
+                if (isSCOStarting) {
+                    Log.d(TAG, "SCO is starting, waiting a bit before stopping")
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        stopBluetoothScoSafely()
+                    }, 500)
+                    return
+                }
                 am.stopBluetoothSco()
             }
         } catch (e: Exception) {
             Log.w(TAG, "stopBluetoothSco failed: ${e.message}")
         } finally {
             Handler(Looper.getMainLooper()).postDelayed({
-                if (isSCOStarted || isSCOStarting) {
-                    isSCOStarted = false
-                    isSCOStarting = false
-                    Log.d(TAG, "stopBluetoothScoSafely: forced SCO flags clear after timeout")
+                synchronized(scoStateLock) {
+                    if (isSCOStarted || isSCOStarting) {
+                        isSCOStarted = false
+                        isSCOStarting = false
+                        Log.d(TAG, "stopBluetoothScoSafely: forced SCO flags clear after timeout")
+                    }
                 }
             }, 5000)
         }
@@ -660,8 +733,10 @@ class CallActivity : AppCompatActivity() {
         updatePttUi()
     }
 
+    // Replace applyDuckSetting method in CallActivity
     private fun applyDuckSetting() {
         val duck = prefs.getBoolean(SettingsActivity.PREF_DUCK, true)
+        val isPtt = prefs.getBoolean(SettingsActivity.PREF_PTT, false)
         val am = audioManager ?: return
 
         abandonAudioFocus() // Clean up previous focus
@@ -676,15 +751,37 @@ class CallActivity : AppCompatActivity() {
                 val focusGain = if (duck) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
                 else AudioManager.AUDIOFOCUS_GAIN
 
-                focusRequest = AudioFocusRequest.Builder(focusGain)
+                // For PTT mode, use different focus gain to prevent interruption
+                val finalFocusGain = if (isPtt && duck) {
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+                } else {
+                    focusGain
+                }
+
+                focusRequest = AudioFocusRequest.Builder(finalFocusGain)
                     .setAudioAttributes(attr)
                     .setAcceptsDelayedFocusGain(true)
                     .setOnAudioFocusChangeListener { change ->
                         when (change) {
                             AudioManager.AUDIOFOCUS_GAIN -> Log.d(TAG, "Focus gained")
                             AudioManager.AUDIOFOCUS_LOSS -> Log.w(TAG, "Focus lost")
-                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> Log.d(TAG, "Focus lost temporarily")
-                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> Log.d(TAG, "Focus lost, can duck")
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                                Log.d(TAG, "Focus lost temporarily")
+                                // For gaming scenarios, try to regain focus after a short delay
+                                if (isPtt) {
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        applyDuckSetting()
+                                    }, 1000)
+                                }
+                            }
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                                Log.d(TAG, "Focus lost, can duck")
+                                // If we're in PTT mode and being ducked, try to regain focus
+                                if (isPtt && !duck) {
+                                    // Re-request focus without ducking for PTT mode
+                                    applyDuckSetting()
+                                }
+                            }
                             else -> Log.d(TAG, "Focus change: $change")
                         }
                     }
@@ -703,6 +800,14 @@ class CallActivity : AppCompatActivity() {
                         when (change) {
                             AudioManager.AUDIOFOCUS_GAIN -> Log.d(TAG, "Legacy: Focus gained")
                             AudioManager.AUDIOFOCUS_LOSS -> Log.w(TAG, "Legacy: Focus lost")
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                                Log.d(TAG, "Legacy: Focus lost temporarily")
+                                if (isPtt) {
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        applyDuckSetting()
+                                    }, 1000)
+                                }
+                            }
                             else -> Log.d(TAG, "Legacy: Focus change: $change")
                         }
                     },
@@ -727,11 +832,28 @@ class CallActivity : AppCompatActivity() {
     private fun setSpeakerMode() {
         val am = audioManager ?: return
         try {
-            am.isSpeakerphoneOn = true
             am.mode = AudioManager.MODE_IN_COMMUNICATION
-            Log.d(TAG, "setSpeakerMode: speaker on")
+
+            // CRITICAL: Android 14+ requires explicit communication device
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val devices = am.availableCommunicationDevices
+                val speaker = devices.firstOrNull {
+                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                }
+                if (speaker != null) {
+                    am.setCommunicationDevice(speaker)
+                    Log.d(TAG, "Android 14+: Explicitly set speaker as communication device")
+                } else {
+                    // Fallback for older behavior
+                    am.isSpeakerphoneOn = true
+                }
+            } else {
+                am.isSpeakerphoneOn = true
+            }
+
+            Log.d(TAG, "setSpeakerMode: speaker configured for SDK ${Build.VERSION.SDK_INT}")
         } catch (e: Exception) {
-            Log.w(TAG, "setSpeakerMode failed: ${e.message}")
+            Log.w(TAG, "setSpeakerMode failed: ${e.message}", e)
         }
     }
 
@@ -820,9 +942,20 @@ class CallActivity : AppCompatActivity() {
         try {
             am.mode = AudioManager.MODE_IN_COMMUNICATION
             am.isSpeakerphoneOn = false
-            Log.d(TAG, "Audio mode set for Bluetooth - letting WebRTC handle routing")
+
+            // Actually start Bluetooth SCO for voice calls on older Android versions
+            synchronized(scoStateLock) {
+                if (!isSCOStarted && !isSCOStarting) {
+                    isSCOStarting = true
+                    am.startBluetoothSco()
+                    Log.d(TAG, "Started Bluetooth SCO for legacy API")
+                }
+            }
+
+            Log.d(TAG, "Bluetooth audio mode configured for legacy API")
         } catch (e: Exception) {
             Log.e(TAG, "setBluetoothMode failed", e)
+            // Fallback to speaker if Bluetooth fails
             setSpeakerMode()
         }
     }
@@ -847,6 +980,14 @@ class CallActivity : AppCompatActivity() {
                 Log.w(TAG, "scoReceiver already unregistered")
             } catch (e: Exception) {
                 Log.w(TAG, "Error unregistering scoReceiver", e)
+            }
+
+            try {
+                unregisterReceiver(networkChangeReceiver)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "networkChangeReceiver already unregistered")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unregistering networkChangeReceiver", e)
             }
 
             // Stop Bluetooth SCO
@@ -902,15 +1043,20 @@ class CallActivity : AppCompatActivity() {
             }
         }
     }
+
+    // In ensurePermissionsAndInit(), improve the Bluetooth permission check:
     private fun ensurePermissionsAndInit() {
         val permissions = mutableListOf<String>()
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.RECORD_AUDIO)
         }
 
+        // FIX: Better handling for BLUETOOTH_CONNECT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
                 permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
             }
         }
@@ -927,6 +1073,129 @@ class CallActivity : AppCompatActivity() {
         val statusText = findViewById<TextView>(R.id.statusText)
         val statusSpinner = findViewById<ProgressBar>(R.id.statusSpinner)
         val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
+
+        webRtcClient?.setConnectionStateListener { remoteId, status ->
+            runOnUiThread {
+                Log.d(TAG, "Connection State: $remoteId -> $status")
+
+                // Update UI
+                findViewById<TextView>(R.id.connectionInfo)?.text = "Peer $remoteId: $status"
+
+                // Auto-retry for failed connections
+                if (status.contains("FAILED", true) || status.contains("DISCONNECTED", true)) {
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (participants.contains(remoteId) && !isCleaningUp) {
+                            Log.d(TAG, "Auto-retrying connection to $remoteId")
+                            // The system will automatically recreate through participant changes
+                        }
+                    }, 3000)
+                }
+            }
+        }
+
+        // Set up connection status monitoring BEFORE initializing WebRTC
+        webRtcClient?.setOnConnectionStatusChanged { remoteId, status ->
+            runOnUiThread {
+
+                updateConnectionStatusWithTurnInfo(remoteId, status)
+                Log.d(TAG, "Connection status changed: $remoteId -> $status")
+
+                // Update connection info display
+                val currentText = connectionInfo.text.toString()
+                val newText = "Peer $remoteId: $status\n${webRtcClient?.getTurnServerStatus() ?: ""}"
+                connectionInfo.text = newText
+
+                // Auto-retry logic for failed connections
+                if (status.contains("FAILED", ignoreCase = true) ||
+                    status.contains("DISCONNECTED", ignoreCase = true) ||
+                    status.contains("CLOSED", ignoreCase = true)) {
+
+                    Log.w(TAG, "Connection failed for $remoteId, scheduling retry")
+
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        webRtcClient?.let { client ->
+                            // Check if participant is still in the room
+                            client.getCurrentParticipants { currentParticipants ->
+                                if (currentParticipants.contains(remoteId)) {
+                                    Log.d(TAG, "Attempting to reconnect to $remoteId")
+
+                                    // Force reconnection by recreating peer
+                                    runOnUiThread {
+                                        Toast.makeText(
+                                            this@CallActivity,
+                                            "Reconnecting to $remoteId...",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+
+                                    // This will trigger the signaling to recreate the peer connection
+                                    client.forceTurnServerEscalation()
+
+                                    // Additional retry: manually trigger peer creation after delay
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        if (participants.contains(remoteId) && !isCleaningUp) {
+                                            Log.d(TAG, "Manual reconnection attempt for $remoteId")
+                                            // The participant change listener should handle recreation
+                                        }
+                                    }, 3000)
+                                } else {
+                                    Log.d(TAG, "Participant $remoteId no longer in room, skipping reconnection")
+                                }
+                            }
+                        }
+                    }, 2000L) // Wait 2 seconds before retry
+                }
+
+                // Handle successful connections
+                if (status.contains("CONNECTED", ignoreCase = true) ||
+                    status.contains("COMPLETED", ignoreCase = true)) {
+
+                    Log.d(TAG, "Connection established with $remoteId")
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@CallActivity,
+                            "Connected to $remoteId",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+
+                    // Refresh audio session on successful connection
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        try {
+                            webRtcClient?.refreshAudioSession()
+                            applyAudioRouting() // Re-apply audio routing
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error refreshing audio after connection: ${e.message}")
+                        }
+                    }, 1000)
+                }
+
+                // Handle connection timeouts
+                if (status.contains("GATHERING", ignoreCase = true) ||
+                    status.contains("CHECKING", ignoreCase = true)) {
+
+                    // Set a timeout for stuck connection states
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        val currentStatus = connectionInfo.text.toString()
+                        if (currentStatus.contains(remoteId) &&
+                            (currentStatus.contains("GATHERING") || currentStatus.contains("CHECKING"))) {
+
+                            Log.w(TAG, "Connection timeout for $remoteId, forcing escalation")
+                            webRtcClient?.forceTurnServerEscalation()
+
+                            runOnUiThread {
+                                Toast.makeText(
+                                    this@CallActivity,
+                                    "Optimizing connection to $remoteId...",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }, 10000L) // 10 second timeout
+                }
+            }
+        }
+
         webRtcClient?.init(onReady = {
             runOnUiThread {
                 statusText.text = "Status: Ready"
@@ -934,23 +1203,38 @@ class CallActivity : AppCompatActivity() {
                 Toast.makeText(this, "Call system ready", Toast.LENGTH_SHORT).show()
             }
 
+            val noiseSupp = prefs.getBoolean(SettingsActivity.PREF_NOISE_SUPP, true)
+            webRtcClient?.setNoiseSuppression(noiseSupp)
+
             webRtcClient?.setOnParticipantsChanged { list ->
-                mainHandler.post {
-                    participants.clear()
-                    participants.addAll(list)
-                    participantAdapter.notifyDataSetChanged()
-                    val infoText = if (list.isEmpty()) "No other participants"
-                    else "${list.size} participant(s) connected"
-                    connectionInfo.text = infoText
+                synchronized(participantsLock) {
+                    mainHandler.post {
+                        synchronized(participantsLock) {
+                            participants.clear()
+                            participants.addAll(list)
+                            participantAdapter.notifyDataSetChanged()
+                        }
+                        val infoText = if (list.isEmpty()) "No other participants"
+                        else "${list.size} participant(s) connected"
+                        connectionInfo.text = infoText
+
+                        // Log participant changes for debugging
+                        Log.d(TAG, "Participants updated: ${list.joinToString()}")
+                    }
                 }
                 Unit
             }
 
             webRtcClient?.getCurrentParticipants { cur ->
-                mainHandler.post {
-                    participants.clear()
-                    participants.addAll(cur)
-                    participantAdapter.notifyDataSetChanged()
+                synchronized(participantsLock) {
+                    mainHandler.post {
+                        synchronized(participantsLock) {
+                            participants.clear()
+                            participants.addAll(cur)
+                            participantAdapter.notifyDataSetChanged()
+                        }
+                        Log.d(TAG, "Initial participants: ${cur.joinToString()}")
+                    }
                 }
                 Unit
             }
@@ -960,36 +1244,40 @@ class CallActivity : AppCompatActivity() {
             setupTurnServerDebugging()
             monitorConnectionQuality()
 
-            // Audio state monitor for debugging
+            // Enhanced audio state monitor for debugging
             val audioMonitor = Handler(Looper.getMainLooper())
             val monitorRunnable = object : Runnable {
                 override fun run() {
+                    if (isCleaningUp) return
+
                     audioManager?.let { am ->
                         val audioDebugInfo = """
-                        AudioDebug:
-                        - Mode: ${am.mode}
-                        - Speaker: ${am.isSpeakerphoneOn}
-                        - BluetoothSCO: ${am.isBluetoothScoOn}
-                        - SCOStarted: $isSCOStarted
-                        - Music Volume: ${am.getStreamVolume(AudioManager.STREAM_MUSIC)}/${am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}
-                        - Voice Volume: ${am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)}/${am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}
-                    """.trimIndent()
+                    AudioDebug:
+                    - Mode: ${am.mode}
+                    - Speaker: ${am.isSpeakerphoneOn}
+                    - BluetoothSCO: ${am.isBluetoothScoOn}
+                    - SCOStarted: $isSCOStarted
+                    - Music Volume: ${am.getStreamVolume(AudioManager.STREAM_MUSIC)}/${am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}
+                    - Voice Volume: ${am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)}/${am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}
+                    - Active Participants: ${participants.size}
+                """.trimIndent()
 
                         Log.d("AudioDebug", audioDebugInfo)
 
                         webRtcClient?.let { client ->
                             val webrtcDebugInfo = """
-                            WebRTCDebug:
-                            - Local track: ${client.getLocalAudioTrack() != null}
-                            - Local enabled: ${client.isLocalMicEnabled()}
-                            - Remote tracks: ${participants.size}
-                            - Peer Connections: ${participants.size}
-                        """.trimIndent()
+                        WebRTCDebug:
+                        - Local track: ${client.getLocalAudioTrack() != null}
+                        - Local enabled: ${client.isLocalMicEnabled()}
+                        - Remote tracks: ${participants.size}
+                        - Peer Connections: ${participants.size}
+                        - TURN Status: ${client.getTurnServerStatus()}
+                    """.trimIndent()
 
                             Log.d("WebRTCDebug", webrtcDebugInfo)
                         }
                     }
-                    audioMonitor.postDelayed(this, 3000)
+                    audioMonitor.postDelayed(this, 5000) // Reduced from 3s to 5s to reduce log spam
                 }
             }
             audioMonitor.post(monitorRunnable)
@@ -997,14 +1285,35 @@ class CallActivity : AppCompatActivity() {
         })
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_AUDIO) {
-            if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+
+            if (allGranted) {
                 initWebRtc()
             } else {
-                Toast.makeText(this, "Audio permissions required for voice chat", Toast.LENGTH_LONG).show()
-                finish()
+                // Check which permission was denied
+                val deniedPermissions = permissions.filterIndexed { index, _ ->
+                    grantResults[index] != PackageManager.PERMISSION_GRANTED
+                }
+
+                if (Manifest.permission.RECORD_AUDIO in deniedPermissions) {
+                    Toast.makeText(
+                        this,
+                        "Audio permission required for voice chat",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                } else {
+                    // Bluetooth denied but audio granted - continue with limited functionality
+                    Log.w(TAG, "Bluetooth permission denied - continuing without BT support")
+                    initWebRtc()
+                }
             }
         }
     }

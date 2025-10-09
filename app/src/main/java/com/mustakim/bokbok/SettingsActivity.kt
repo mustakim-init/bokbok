@@ -40,7 +40,7 @@ class SettingsActivity : AppCompatActivity() {
         val ptt = prefs.getBoolean(PREF_PTT, false)
         val noise = prefs.getBoolean(PREF_NOISE_SUPP, true)
         val duck = prefs.getBoolean(PREF_DUCK, true)
-        var rVol = prefs.getInt(PREF_RECEIVE_VOL, 100)
+        var rVol = prefs.getInt(PREF_RECEIVE_VOL, 100).coerceIn(10, 200)
 
         // clamp rVol
         if (rVol < 10) rVol = 10

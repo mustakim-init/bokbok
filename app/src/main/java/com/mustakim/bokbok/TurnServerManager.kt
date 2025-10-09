@@ -7,6 +7,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 class TurnServerManager {
     private val tag = "TurnServerManager"
 
+    private var lastEscalationTime = 0L
+
+
     private val turnServerConfigs = listOf(
         // Tier 1: Port 443 servers (bypass firewalls)
         TurnConfig(
@@ -97,19 +100,40 @@ class TurnServerManager {
     }
 
     fun markServerAsFailed(config: TurnConfig) {
+        val now = System.currentTimeMillis()
         config.lastFailTime = System.currentTimeMillis()
         config.failCount++
         if (!failedServers.contains(config)) failedServers.add(config)
         Log.w(tag, "TURN server failed: ${config.urls.firstOrNull()}")
+
+        // Auto-escalate if we have multiple rapid failures
+        if (now - lastEscalationTime < 30000) { // 30 seconds
+            val failuresInWindow = failedServers.count { now - it.lastFailTime < 30000 }
+            if (failuresInWindow >= 2 && currentTier < 4) {
+                escalateToNextTier()
+                Log.w(tag, "Auto-escalating to tier $currentTier due to rapid failures")
+            }
+        }
+    }
+    fun markCurrentTierAsFailed() {
+        val currentConfigs = turnServerConfigs.filter { it.tier == currentTier }
+        currentConfigs.forEach { markServerAsFailed(it) }
     }
 
     fun enableCGNATMode() {
         Log.i(tag, "Enabling CGNAT mode - forcing TURN relay")
         forceRelayMode = true
         currentTier = 1
+        lastEscalationTime = System.currentTimeMillis()
     }
 
-    fun escalateToNextTier() { if (currentTier < 4) currentTier++ }
+    fun escalateToNextTier() {
+        if (currentTier < 4) {
+            currentTier++
+            lastEscalationTime = System.currentTimeMillis()
+        }
+    }
+    fun canEscalate(): Boolean = System.currentTimeMillis() - lastEscalationTime > 15000 // 15 second cooldown
     fun forceEscalateToNextTier() { escalateToNextTier() }
     fun resetToTier1() { currentTier = 1 }
     fun getCurrentTier(): Int = currentTier

@@ -8,6 +8,7 @@ import com.google.firebase.database.*
 import org.webrtc.IceCandidate
 import org.webrtc.SessionDescription
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Firebase signaling (verbose).
@@ -32,6 +33,10 @@ class FirebaseSignaling(private val roomId: String) {
     private var messagesListener: ChildEventListener? = null
     private var participantsListener: ValueEventListener? = null
 
+    private var messageSequence = 0L
+    private val messageProcessing = AtomicBoolean(false)
+    private var retryCount = 0
+    private val maxRetries = 3
     private var onMessage: ((Type, String, Map<String, Any?>, String) -> Unit)? = null
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
 
@@ -90,9 +95,16 @@ class FirebaseSignaling(private val roomId: String) {
                         val from = map["from"] as? String ?: return
                         val to = (map["to"] as? String?)
 
-                        // CRITICAL: Ignore messages from yourself
-                        if (from == currentLocalId) {
-                            Log.d(TAG, "Ignoring own message $key from $from")
+                        // Check message sequence for ordering
+                        val seq = (map["seq"] as? Long) ?: 0L
+                        if (seq < messageSequence && (typeStr == "sdp" || typeStr == "ice")) {
+                            Log.d(TAG, "Ignoring outdated message $key with seq=$seq (current=$messageSequence)")
+                            return
+                        }
+
+                        // ONLY filter SDP/ICE self-messages, not JOIN/LEAVE
+                        if ((typeStr == "sdp" || typeStr == "ice") && from == currentLocalId) {
+                            Log.d(TAG, "Ignoring own signaling message $key from $from")
                             try { messagesRef.child(key).removeValue() } catch (_: Exception) {}
                             return
                         }
@@ -176,12 +188,19 @@ class FirebaseSignaling(private val roomId: String) {
 
     fun sendSdp(toId: String, sdp: SessionDescription) {
         val my = localId ?: run {
-            Log.w(TAG, "sendSdp: no localId - retrying in 1s")
-            Handler(Looper.getMainLooper()).postDelayed({
-                sendSdp(toId, sdp)
-            }, 1000)
+            if (retryCount < maxRetries) {
+                retryCount++
+                Log.w(TAG, "sendSdp: no localId - retrying in 1s (attempt $retryCount)")
+                Handler(Looper.getMainLooper()).postDelayed({
+                    sendSdp(toId, sdp)
+                }, 1000)
+            } else {
+                Log.e(TAG, "sendSdp: max retries reached, giving up")
+                retryCount = 0
+            }
             return
         }
+        retryCount = 0 // Reset on success
         val msg = HashMap<String, Any?>()
         msg["type"] = "sdp"
         msg["from"] = my
@@ -189,15 +208,21 @@ class FirebaseSignaling(private val roomId: String) {
         msg["sdpType"] = sdp.type.canonicalForm()
         msg["sdp"] = sdp.description
         msg["ts"] = ServerValue.TIMESTAMP
+        msg["seq"] = messageSequence
+
         val push = messagesRef.push()
         push.setValue(msg).addOnCompleteListener { t ->
-            if (t.isSuccessful) Log.d(TAG, "Sent SDP to $toId (key=${push.key})")
+            if (t.isSuccessful) Log.d(TAG, "Sent SDP to $toId (key=${push.key}, seq=${msg["seq"]})")
             else Log.e(TAG, "Failed to send SDP to $toId: ${t.exception?.message}")
         }
+
+        // Increment after setting to ensure consistency
+        messageSequence++
     }
 
     fun sendIceCandidate(toId: String, c: IceCandidate) {
         val my = localId ?: run {
+            messageSequence++ // Still increment to maintain sequence even if failed
             Log.w(TAG, "sendIce: no localId - retrying in 1s")
             Handler(Looper.getMainLooper()).postDelayed({
                 sendIceCandidate(toId, c)
@@ -212,11 +237,15 @@ class FirebaseSignaling(private val roomId: String) {
         msg["sdpMid"] = c.sdpMid
         msg["sdpMLineIndex"] = c.sdpMLineIndex
         msg["ts"] = ServerValue.TIMESTAMP
+        msg["seq"] = messageSequence
         val push = messagesRef.push()
         push.setValue(msg).addOnCompleteListener { t ->
             if (t.isSuccessful) Log.d(TAG, "Sent ICE to $toId (key=${push.key})")
             else Log.e(TAG, "Failed to send ICE to $toId: ${t.exception?.message}")
         }
+
+        // Increment after setting to ensure consistency
+        messageSequence++
     }
 
     fun shouldInitiateTo(remoteId: String): Boolean {

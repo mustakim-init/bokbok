@@ -29,7 +29,6 @@ class MainActivity : AppCompatActivity() {
 
         // Firebase anonymous sign-in
         FirebaseAuth.getInstance().signInAnonymously()
-        requestBatteryOptimizationExemption()
 
         roomInput = findViewById(R.id.roomInput)
         val joinButton = findViewById<Button>(R.id.joinButton)
@@ -69,14 +68,6 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    private fun requestBatteryOptimizationExemption() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-            val uri = Uri.parse("package:" + packageName)
-            intent.data = uri
-            startActivity(intent)
-        }
-    }
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<out String>, grantResults: IntArray

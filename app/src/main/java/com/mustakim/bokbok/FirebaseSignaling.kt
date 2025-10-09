@@ -82,6 +82,7 @@ class FirebaseSignaling(private val roomId: String) {
             try {
                 // messages listener
                 messagesListener = messagesRef.addChildEventListener(object : ChildEventListener {
+                    // In FirebaseSignaling.kt - REPLACE the entire onChildAdded method
                     override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                         val currentLocalId = localId
                         if (currentLocalId == null) {
@@ -102,11 +103,22 @@ class FirebaseSignaling(private val roomId: String) {
                             return
                         }
 
-                        // ONLY filter SDP/ICE self-messages, not JOIN/LEAVE
-                        if ((typeStr == "sdp" || typeStr == "ice") && from == currentLocalId) {
-                            Log.d(TAG, "Ignoring own signaling message $key from $from")
-                            try { messagesRef.child(key).removeValue() } catch (_: Exception) {}
-                            return
+                        // Filter self-messages differently based on type
+                        when (typeStr) {
+                            "sdp", "ice" -> {
+                                if (from == currentLocalId) {
+                                    Log.d(TAG, "Ignoring own signaling message $key from $from")
+                                    try { messagesRef.child(key).removeValue() } catch (_: Exception) {}
+                                    return
+                                }
+                            }
+                            "join", "leave" -> {
+                                // Don't filter join/leave messages, but skip self-peer creation
+                                if (from == currentLocalId) {
+                                    Log.d(TAG, "Received own $typeStr message, skipping peer processing")
+                                    // Don't return here - we still want to process the message for UI updates
+                                }
+                            }
                         }
 
                         Log.d(TAG, "Received message key=$key type=$typeStr from=$from to=$to")
@@ -254,28 +266,52 @@ class FirebaseSignaling(private val roomId: String) {
     }
 
     fun join(): Boolean {
-        val my = localId ?: run { Log.w(TAG, "join: no localId"); return false }
+        val my = localId ?: run {
+            Log.w(TAG, "join: no localId")
+            return false
+        }
+
         Log.d(TAG, "Joining room $roomId as $my")
+
+        // First write to participants, then broadcast join
         val ref = participantsRef.child(my)
         ref.setValue(ServerValue.TIMESTAMP).addOnCompleteListener { t ->
             if (t.isSuccessful) {
                 Log.d(TAG, "participantsRef write ok for $my")
-                try { participantsRef.child(my).onDisconnect().removeValue() } catch (e: Exception) { Log.w(TAG, "onDisconnect fail: ${e.message}") }
+
+                // Set up disconnect cleanup
+                try {
+                    participantsRef.child(my).onDisconnect().removeValue()
+                } catch (e: Exception) {
+                    Log.w(TAG, "onDisconnect fail: ${e.message}")
+                }
+
+                // Wait a bit then check participants
+                Handler(Looper.getMainLooper()).postDelayed({
+                    getParticipantsNow { participants ->
+                        Log.d(TAG, "Initial room participants: ${participants.size}")
+                        // Notify about participants (excluding self)
+                        onParticipantsChanged?.invoke(participants.filter { it != my })
+                    }
+                }, 3000)
+
             } else {
                 Log.e(TAG, "Failed to write participant $my: ${t.exception?.message}")
             }
         }
 
-        // broadcast join
-        val msg = HashMap<String, Any?>()
-        msg["type"] = "join"
-        msg["from"] = my
-        msg["to"] = null
-        msg["ts"] = ServerValue.TIMESTAMP
-        messagesRef.push().setValue(msg).addOnCompleteListener { t ->
-            if (t.isSuccessful) Log.d(TAG, "Broadcasted join for $my")
-            else Log.e(TAG, "Failed to broadcast join: ${t.exception?.message}")
-        }
+        // Broadcast join message after a delay to ensure participant is registered
+        Handler(Looper.getMainLooper()).postDelayed({
+            val msg = HashMap<String, Any?>()
+            msg["type"] = "join"
+            msg["from"] = my
+            msg["to"] = null
+            msg["ts"] = ServerValue.TIMESTAMP
+            messagesRef.push().setValue(msg).addOnCompleteListener { t ->
+                if (t.isSuccessful) Log.d(TAG, "Broadcasted join for $my")
+                else Log.e(TAG, "Failed to broadcast join: ${t.exception?.message}")
+            }
+        }, 2000)
 
         return true
     }

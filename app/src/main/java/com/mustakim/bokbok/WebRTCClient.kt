@@ -1,6 +1,7 @@
 package com.mustakim.bokbok
 
 import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -35,6 +36,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
     private var onConnectionStatusChanged: ((String, String) -> Unit)? = null
+    private val isInitialized = AtomicBoolean(false)
 
     private val peerConnectionLock = Any()
 
@@ -103,6 +105,12 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     fun init(onReady: (() -> Unit)? = null) {
+        if (isInitialized.get()) {
+            Log.d(tag, "WebRTCClient already initialized")
+            onReady?.invoke()
+            return
+        }
+
         signaling.whenAuthReady {
             executeTask {
                 try {
@@ -146,13 +154,14 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     }
 
                     if (audioSource == null && factory != null) {
-                        val audioConstraints = MediaConstraints()
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", if (noiseSuppressionEnabled) "true" else "false"))
-                        audioConstraints.mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-                        audioConstraints.optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
-                        audioConstraints.optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
+                        val audioConstraints = MediaConstraints().apply {
+                            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", if (noiseSuppressionEnabled) "true" else "false"))
+                            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+                            optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
+                            optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
+                        }
 
                         audioSource = factory!!.createAudioSource(audioConstraints)
                         localAudioTrack = factory!!.createAudioTrack("ARDAMSa0", audioSource)
@@ -169,24 +178,32 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             FirebaseSignaling.Type.SDP -> handleRemoteSdp(fromId, payload, msgKey)
                             FirebaseSignaling.Type.ICE -> handleRemoteIce(fromId, payload, msgKey)
                             FirebaseSignaling.Type.JOIN -> {
-                                Log.d(tag, "Join message from $fromId -> createPeerIfNeeded")
-                                // Add delay to ensure participant is properly registered in Firebase
+                                Log.d(tag, "Join message from $fromId")
+
+                                // CRITICAL: Completely ignore self-join messages for peer creation
+                                if (fromId == signaling.localId) {
+                                    Log.d(tag, "Ignoring self-join message completely")
+                                    return@start
+                                }
+
+                                // For remote joins, create peer with delay
                                 Handler(Looper.getMainLooper()).postDelayed({
                                     executeTask {
-                                        // Verify the participant still exists before creating peer
                                         signaling.getParticipantsNow { participants ->
-                                            if (participants.contains(fromId)) {
+                                            if (participants.contains(fromId) && fromId != signaling.localId) {
                                                 createPeerIfNeeded(fromId, initiator = signaling.shouldInitiateTo(fromId))
                                             } else {
-                                                Log.w(tag, "Participant $fromId no longer in room, skipping peer creation")
+                                                Log.w(tag, "Participant $fromId no longer in room or is self, skipping peer creation")
                                             }
                                         }
                                     }
-                                }, 1000) // 1 second delay
+                                }, 1500) // Increased delay
                             }
                             FirebaseSignaling.Type.LEAVE -> {
                                 Log.d(tag, "Leave message from $fromId -> closePeer")
-                                closePeer(fromId)
+                                if (fromId != signaling.localId) {
+                                    closePeer(fromId)
+                                }
                             }
                         }
                     }
@@ -223,9 +240,13 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         }
                     }, 2000)
 
-                    // Call onReady with proper error handling
+                    // Mark as initialized and call onReady
+                    isInitialized.set(true)
+                    initializationComplete.set(true)
+                    startParticipantDiscovery()
+                    startTrackMonitoring()
+
                     onReady?.let { callback ->
-                        initializationComplete.set(true)
                         Handler(Looper.getMainLooper()).postDelayed({
                             try {
                                 callback()
@@ -326,6 +347,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         val sdpConstraints = MediaConstraints().apply {
             mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
             optional.add(MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"))
+            // ADD these for better compatibility:
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
         }
 
         pc.createOffer(object : SdpObserver {
@@ -418,11 +443,14 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     when (state) {
                         PeerConnection.IceConnectionState.CONNECTED,
                         PeerConnection.IceConnectionState.COMPLETED -> {
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                verifyRemoteTracksImmediately(remoteId)
+                            }, 1000)
                             connectionTimeouts.remove(remoteId)
                             turnServerManager.resetToTier1()
                             Log.d(tag, "Connection successful for $remoteId, reset to tier 1")
                             connectionRetryCounts.remove(remoteId)
-                            consecutiveFailures.remove(remoteId) // Reset failures on success
+                            consecutiveFailures.remove(remoteId)
                         }
 
                         PeerConnection.IceConnectionState.FAILED,
@@ -599,6 +627,42 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         }, backoffMs, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
+    private fun startParticipantDiscovery() {
+        // Periodic participant discovery
+        val discoveryHandler = Handler(Looper.getMainLooper())
+        val discoveryRunnable = object : Runnable {
+            override fun run() {
+                if (isShuttingDown.get()) return
+
+                signaling.getParticipantsNow { participants ->
+                    val remoteParticipants = participants.filter { it != signaling.localId }
+                    Log.d(tag, "Periodic participant discovery: ${remoteParticipants.size} remote participants")
+
+                    if (remoteParticipants.isNotEmpty()) {
+                        onParticipantsChanged?.invoke(remoteParticipants)
+
+                        // Create peer connections for new participants
+                        remoteParticipants.forEach { participantId ->
+                            if (!peerConnections.containsKey(participantId) && peerConnections.size < 5) {
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    createPeerIfNeeded(participantId, initiator = signaling.shouldInitiateTo(participantId))
+                                }, 1000)
+                            }
+                        }
+                    }
+                }
+
+                // Run every 10 seconds
+                if (!isShuttingDown.get()) {
+                    discoveryHandler.postDelayed(this, 10000)
+                }
+            }
+        }
+
+        // Start discovery after initial delay
+        discoveryHandler.postDelayed(discoveryRunnable, 5000)
+    }
+
     private fun fallbackToStunOnlyConnection(remoteId: String) {
         executeTask {
             try {
@@ -679,9 +743,14 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 Log.d(tag, "ICE state for $remoteId: $state")
+
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED -> {
+
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            verifyRemoteTracksImmediately(remoteId)
+                        }, 1000)
                         connectionTimeouts.remove(remoteId)
                         turnServerManager.resetToTier1()
                         Log.d(tag, "Connection successful for $remoteId")
@@ -755,19 +824,51 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
             override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
                 try {
+                    Log.d(tag, "onAddTrack called for $remoteId - receiver: ${receiver != null}")
+
                     val track = receiver?.track()
                     if (track is AudioTrack) {
-                        Log.d(tag, "Remote audio track added for $remoteId")
+                        Log.d(tag, "Remote audio track added for $remoteId - type: ${track.kind()}")
+
+                        // Store and enable the track immediately
                         track.setEnabled(true)
                         remoteAudioTracks[remoteId] = track
+
+                        // Apply volume
                         applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
 
-                        try {
-                            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                        } catch (e: Exception) {
-                            Log.w(tag, "Audio mode refresh failed: ${e.message}")
+                        // Force audio system refresh
+                        Handler(Looper.getMainLooper()).post {
+                            try {
+                                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    try {
+                                        val devices = audioManager.availableCommunicationDevices
+                                        val speaker = devices.firstOrNull {
+                                            it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                                        }
+                                        speaker?.let { audioManager.setCommunicationDevice(it) }
+                                    } catch (e: Exception) {
+                                        Log.w(tag, "Failed to set communication device: ${e.message}")
+                                    }
+                                } else {
+                                    audioManager.isSpeakerphoneOn = true
+                                }
+                            } catch (e: Exception) {
+                                Log.e(tag, "Audio setup error: ${e.message}")
+                            }
+
+                            // Refresh WebRTC audio session
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                refreshAudioSession()
+                            }, 500)
                         }
+
+                        Log.d(tag, "Remote audio track fully configured for $remoteId")
+                    } else {
+                        Log.w(tag, "onAddTrack: Track is not AudioTrack or is null")
                     }
                 } catch (e: Exception) {
                     Log.e(tag, "onAddTrack error: ${e.message}", e)
@@ -779,6 +880,69 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 Log.d(tag, "onRemoveTrack for $remoteId")
             }
         }
+    }
+
+    private fun verifyRemoteTracksImmediately(remoteId: String) {
+        Log.d(tag, "Immediately verifying remote tracks for $remoteId")
+
+        val pc = peerConnections[remoteId] ?: return
+
+        try {
+            val receivers = pc.receivers
+            Log.d(tag, "Found ${receivers.size} receivers for $remoteId")
+
+            var audioTrackFound = false
+            for (receiver in receivers) {
+                val track = receiver.track()
+                Log.d(tag, "Receiver track: ${track?.kind()} - enabled: ${track?.enabled()}")
+
+                if (track is AudioTrack) {
+                    audioTrackFound = true
+                    if (!remoteAudioTracks.containsKey(remoteId)) {
+                        Log.w(tag, "Audio track found but not in map - adding now")
+                        track.setEnabled(true)
+                        remoteAudioTracks[remoteId] = track
+                        applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
+
+                        Handler(Looper.getMainLooper()).post {
+                            refreshAudioSession()
+                        }
+                    }
+                    break
+                }
+            }
+
+            if (!audioTrackFound) {
+                Log.e(tag, "NO AUDIO TRACK FOUND in receivers for $remoteId!")
+            }
+
+        } catch (e: Exception) {
+            Log.e(tag, "Track verification error: ${e.message}", e)
+        }
+    }
+
+    private fun startTrackMonitoring() {
+        val handler = Handler(Looper.getMainLooper())
+        val monitorRunnable = object : Runnable {
+            override fun run() {
+                if (isShuttingDown.get()) return
+
+                peerConnections.forEach { (remoteId, pc) ->
+                    if ((pc.iceConnectionState() == PeerConnection.IceConnectionState.CONNECTED ||
+                                pc.iceConnectionState() == PeerConnection.IceConnectionState.COMPLETED) &&
+                        !remoteAudioTracks.containsKey(remoteId)) {
+
+                        Log.w(tag, "Connected peer $remoteId has no remote track - attempting recovery")
+                        verifyRemoteTracksImmediately(remoteId)
+                    }
+                }
+
+                if (!isShuttingDown.get()) {
+                    handler.postDelayed(this, 5000)
+                }
+            }
+        }
+        handler.postDelayed(monitorRunnable, 3000)
     }
 
     private fun handleRemoteIce(fromId: String, payload: Map<String, Any?>, msgKey: String) {
@@ -877,6 +1041,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     val answerConstraints = MediaConstraints().apply {
                         mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                         optional.add(MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"))
+                        // Added these for better compatibility:
+                        optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                        optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                        optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                     }
 
                     pc?.createAnswer(object : SdpObserver {
@@ -1109,55 +1277,72 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         }
     }
 
+    // In WebRTCClient.kt, improve the close() method:
     fun close() {
         if (isShuttingDown.getAndSet(true)) {
             return
         }
 
+        Log.d(tag, "WebRTCClient closing...")
+
         try {
-            // First, prevent new tasks
+            // Shutdown executors first to prevent new tasks
             executor.shutdown()
             scheduler.shutdown()
 
-            // Execute cleanup with proper synchronization
-            synchronized(peerConnectionLock) {
-                // Create a copy to avoid ConcurrentModificationException
-                val peersToClose = peerConnections.values.toList()
-                peerConnections.clear()
-                peersToClose.forEach { pc ->
-                    try { pc.close() } catch (e: Exception) { Log.w(tag, "Error closing peer: ${e.message}") }
-                }
-                remoteAudioTracks.clear()
-                peersToClose.forEach { pc ->
-                    try { pc.close() } catch (e: Exception) { Log.w(tag, "Error closing peer: ${e.message}") }
-                }
-                remoteAudioTracks.clear()
-
-                try { audioSource?.dispose(); audioSource = null } catch (e: Exception) { Log.w(tag, "audioSource.dispose failed: ${e.message}") }
-                try { localAudioTrack?.dispose(); localAudioTrack = null } catch (e: Exception) { Log.w(tag, "localAudioTrack.dispose failed: ${e.message}") }
-                try { factory?.dispose(); factory = null } catch (e: Exception) { Log.w(tag, "factory.dispose failed: ${e.message}") }
-                try { signaling.close() } catch (e: Exception) { Log.w(tag, "signaling.close failed: ${e.message}") }
+            // Wait for existing tasks to complete with timeout
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow()
             }
-
-            // Force shutdown if needed
-            try {
-                if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
-                    executor.shutdownNow()
-                }
-                if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow()
-                }
-            } catch (e: Exception) {
-                try {
-                    executor.shutdownNow()
-                    scheduler.shutdownNow()
-                } catch (inner: Exception) {
-                    Log.w(tag, "Force shutdown failed: ${inner.message}")
-                }
+            if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow()
             }
-        } catch (e: Exception) {
-            Log.w(tag, "close() error: ${e.message}")
+        } catch (e: InterruptedException) {
+            executor.shutdownNow()
+            scheduler.shutdownNow()
+            Thread.currentThread().interrupt()
         }
+
+        // Then clean up resources
+        synchronized(peerConnectionLock) {
+            try {
+                // Close all peer connections
+                peerConnections.values.forEach { pc ->
+                    try {
+                        pc.close()
+                    } catch (e: Exception) {
+                        Log.w(tag, "Error closing peer connection: ${e.message}")
+                    }
+                }
+                peerConnections.clear()
+                remoteAudioTracks.clear()
+
+                // Dispose of media resources
+                try {
+                    localAudioTrack?.dispose()
+                    audioSource?.dispose()
+                    factory?.dispose()
+                } catch (e: Exception) {
+                    Log.w(tag, "Error disposing media resources: ${e.message}")
+                }
+
+                localAudioTrack = null
+                audioSource = null
+                factory = null
+
+                // Close signaling
+                try {
+                    signaling.close()
+                } catch (e: Exception) {
+                    Log.w(tag, "Error closing signaling: ${e.message}")
+                }
+
+            } catch (e: Exception) {
+                Log.e(tag, "Error during WebRTC cleanup", e)
+            }
+        }
+
+        Log.d(tag, "WebRTCClient closed completely")
     }
 
     fun endCall() {

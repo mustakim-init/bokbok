@@ -18,9 +18,6 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
-    <!-- Legacy Bluetooth permissions -->
-<!--    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />-->
-<!--    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />-->
 
 
     <application
@@ -67,6 +64,7 @@
         <!-- Foreground service for keeping call alive -->
         <service
             android:name=".VoiceService"
+            android:enabled="true"
             android:foregroundServiceType="microphone"
             android:exported="false" />
 

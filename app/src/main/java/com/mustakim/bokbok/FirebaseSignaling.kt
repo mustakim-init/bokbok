@@ -33,10 +33,9 @@ class FirebaseSignaling(private val roomId: String) {
     private var messagesListener: ChildEventListener? = null
     private var participantsListener: ValueEventListener? = null
 
-    private var messageSequence = 0L
+    @Volatile private var messageSequence = 0L
+    private val sequenceLock = Any()
     private val messageProcessing = AtomicBoolean(false)
-    private var retryCount = 0
-    private val maxRetries = 3
     private var onMessage: ((Type, String, Map<String, Any?>, String) -> Unit)? = null
     private var onParticipantsChanged: ((List<String>) -> Unit)? = null
 
@@ -94,7 +93,7 @@ class FirebaseSignaling(private val roomId: String) {
                         val map = snapshot.value as? Map<*, *> ?: return
                         val typeStr = map["type"] as? String ?: return
                         val from = map["from"] as? String ?: return
-                        val to = (map["to"] as? String?)
+                        val to = map["to"] as? String?
 
                         // Check message sequence for ordering
                         val seq = (map["seq"] as? Long) ?: 0L
@@ -103,25 +102,36 @@ class FirebaseSignaling(private val roomId: String) {
                             return
                         }
 
-                        // Filter self-messages differently based on type
+                        // CRITICAL: Filter self-messages for SDP/ICE to prevent loops
                         when (typeStr) {
                             "sdp", "ice" -> {
                                 if (from == currentLocalId) {
                                     Log.d(TAG, "Ignoring own signaling message $key from $from")
-                                    try { messagesRef.child(key).removeValue() } catch (_: Exception) {}
+                                    try {
+                                        messagesRef.child(key).removeValue()
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "Failed to remove own message: ${e.message}")
+                                    }
                                     return
                                 }
                             }
-                            "join", "leave" -> {
-                                // Don't filter join/leave messages, but skip self-peer creation
+                            "join" -> {
+                                // For join messages, process but don't create peer for self
                                 if (from == currentLocalId) {
-                                    Log.d(TAG, "Received own $typeStr message, skipping peer processing")
-                                    // Don't return here - we still want to process the message for UI updates
+                                    Log.d(TAG, "Received own join message - will skip peer creation in handler")
+                                    // Continue processing for UI updates
+                                }
+                            }
+                            "leave" -> {
+                                // Always process leave messages for cleanup
+                                if (from == currentLocalId) {
+                                    Log.d(TAG, "Received own leave message")
+                                    // Continue processing
                                 }
                             }
                         }
 
-                        Log.d(TAG, "Received message key=$key type=$typeStr from=$from to=$to")
+                        Log.d(TAG, "Processing message key=$key type=$typeStr from=$from to=$to")
 
                         // If message targeted to someone else, ignore
                         if (to != null && to != currentLocalId) {
@@ -130,7 +140,9 @@ class FirebaseSignaling(private val roomId: String) {
                         }
 
                         val payload = mutableMapOf<String, Any?>()
-                        for ((k, v) in map) if (k is String) payload[k] = v
+                        for ((k, v) in map) {
+                            if (k is String) payload[k] = v
+                        }
 
                         val type = when (typeStr) {
                             "sdp" -> Type.SDP
@@ -141,7 +153,7 @@ class FirebaseSignaling(private val roomId: String) {
                         } ?: return
 
                         try {
-                            onMessageCb(type, from, payload, key)
+                            onMessage?.invoke(type, from, payload, key)
 
                             // Auto-delete SDP/ICE messages after processing to prevent replay
                             if (type == Type.SDP || type == Type.ICE) {
@@ -153,7 +165,7 @@ class FirebaseSignaling(private val roomId: String) {
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "onMessageCb error: ${e.message}")
+                            Log.e(TAG, "onMessage callback error: ${e.message}", e)
                         }
                     }
                     override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
@@ -199,65 +211,74 @@ class FirebaseSignaling(private val roomId: String) {
     fun onParticipantsChanged(cb: (List<String>) -> Unit) { onParticipantsChanged = cb }
 
     fun sendSdp(toId: String, sdp: SessionDescription) {
-        val my = localId ?: run {
-            if (retryCount < maxRetries) {
-                retryCount++
-                Log.w(TAG, "sendSdp: no localId - retrying in 1s (attempt $retryCount)")
-                Handler(Looper.getMainLooper()).postDelayed({
-                    sendSdp(toId, sdp)
-                }, 1000)
-            } else {
-                Log.e(TAG, "sendSdp: max retries reached, giving up")
-                retryCount = 0
+        whenAuthReady {
+            val my = localId
+            if (my == null) {
+                Log.w(TAG, "sendSdp: localId still null after auth ready")
+                return@whenAuthReady
             }
-            return
-        }
-        retryCount = 0 // Reset on success
-        val msg = HashMap<String, Any?>()
-        msg["type"] = "sdp"
-        msg["from"] = my
-        msg["to"] = toId
-        msg["sdpType"] = sdp.type.canonicalForm()
-        msg["sdp"] = sdp.description
-        msg["ts"] = ServerValue.TIMESTAMP
-        msg["seq"] = messageSequence
 
-        val push = messagesRef.push()
-        push.setValue(msg).addOnCompleteListener { t ->
-            if (t.isSuccessful) Log.d(TAG, "Sent SDP to $toId (key=${push.key}, seq=${msg["seq"]})")
-            else Log.e(TAG, "Failed to send SDP to $toId: ${t.exception?.message}")
-        }
+            val currentSeq = synchronized(sequenceLock) {
+                val seq = messageSequence
+                messageSequence++
+                seq
+            }
 
-        // Increment after setting to ensure consistency
-        messageSequence++
+            val msg = hashMapOf<String, Any?>(
+                "type" to "sdp",
+                "from" to my,
+                "to" to toId,
+                "sdpType" to sdp.type.canonicalForm(),
+                "sdp" to sdp.description,
+                "ts" to ServerValue.TIMESTAMP,
+                "seq" to currentSeq
+            )
+
+            val push = messagesRef.push()
+            push.setValue(msg).addOnCompleteListener { t ->
+                if (t.isSuccessful) {
+                    Log.d(TAG, "Sent SDP to $toId (key=${push.key}, seq=$currentSeq)")
+                } else {
+                    Log.e(TAG, "Failed to send SDP to $toId: ${t.exception?.message}")
+                }
+            }
+        }
     }
 
     fun sendIceCandidate(toId: String, c: IceCandidate) {
-        val my = localId ?: run {
-            messageSequence++ // Still increment to maintain sequence even if failed
-            Log.w(TAG, "sendIce: no localId - retrying in 1s")
-            Handler(Looper.getMainLooper()).postDelayed({
-                sendIceCandidate(toId, c)
-            }, 1000)
-            return
-        }
-        val msg = HashMap<String, Any?>()
-        msg["type"] = "ice"
-        msg["from"] = my
-        msg["to"] = toId
-        msg["candidate"] = c.sdp
-        msg["sdpMid"] = c.sdpMid
-        msg["sdpMLineIndex"] = c.sdpMLineIndex
-        msg["ts"] = ServerValue.TIMESTAMP
-        msg["seq"] = messageSequence
-        val push = messagesRef.push()
-        push.setValue(msg).addOnCompleteListener { t ->
-            if (t.isSuccessful) Log.d(TAG, "Sent ICE to $toId (key=${push.key})")
-            else Log.e(TAG, "Failed to send ICE to $toId: ${t.exception?.message}")
-        }
+        whenAuthReady {
+            val my = localId
+            if (my == null) {
+                Log.w(TAG, "sendIceCandidate: localId still null after auth ready")
+                return@whenAuthReady
+            }
 
-        // Increment after setting to ensure consistency
-        messageSequence++
+            val currentSeq = synchronized(sequenceLock) {
+                val seq = messageSequence
+                messageSequence++
+                seq
+            }
+
+            val msg = hashMapOf<String, Any?>(
+                "type" to "ice",
+                "from" to my,
+                "to" to toId,
+                "candidate" to c.sdp,
+                "sdpMid" to c.sdpMid,
+                "sdpMLineIndex" to c.sdpMLineIndex,
+                "ts" to ServerValue.TIMESTAMP,
+                "seq" to currentSeq
+            )
+
+            val push = messagesRef.push()
+            push.setValue(msg).addOnCompleteListener { t ->
+                if (t.isSuccessful) {
+                    Log.d(TAG, "Sent ICE to $toId (key=${push.key}, seq=$currentSeq)")
+                } else {
+                    Log.e(TAG, "Failed to send ICE to $toId: ${t.exception?.message}")
+                }
+            }
+        }
     }
 
     fun shouldInitiateTo(remoteId: String): Boolean {

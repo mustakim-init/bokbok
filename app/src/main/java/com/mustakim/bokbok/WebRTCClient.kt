@@ -49,6 +49,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     private val isEnding = AtomicBoolean(false) // guard to avoid races during endCall()
     // CGNAT detection
     private var cgnatDetected = false
+
+    private var onRemoteAudioTrackAdded: ((String) -> Unit)? = null
     private val consecutiveFailures = ConcurrentHashMap<String, Int>()
 
     private val isShuttingDown = AtomicBoolean(false)
@@ -94,10 +96,6 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             Log.w(tag, "CGNAT detection failed: ${e.message}")
             return false
         }
-    }
-
-    fun setConnectionStateListener(listener: (String, String) -> Unit) {
-        onConnectionStatusChanged = listener
     }
 
     fun setOnConnectionStatusChanged(callback: (String, String) -> Unit) {
@@ -531,7 +529,20 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 }
 
                 override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
-                override fun onAddStream(stream: MediaStream?) {}
+                override fun onAddStream(stream: MediaStream?) {
+                    Log.w(tag, "onAddStream called for $remoteId. This is a fallback.")
+                    stream?.audioTracks?.firstOrNull()?.let { audioTrack ->
+                        Log.d(tag, "Found audio track in stream for $remoteId, processing it.")
+
+                        audioTrack.setEnabled(true)
+                        remoteAudioTracks[remoteId] = audioTrack
+                        applyVolumeToAudioTrack(audioTrack, receiveVolumeMultiplier)
+
+                        Handler(Looper.getMainLooper()).post {
+                            refreshAudioSession()
+                        }
+                    }
+                }
                 override fun onRemoveStream(stream: MediaStream?) {}
                 override fun onDataChannel(dataChannel: DataChannel?) {}
                 override fun onRenegotiationNeeded() {
@@ -544,20 +555,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                         if (track is AudioTrack) {
                             Log.d(tag, "Remote audio track added for $remoteId")
 
-                            // Ensure track is enabled
+                            // Only manage the WebRTC track itself
                             track.setEnabled(true)
                             remoteAudioTracks[remoteId] = track
-
-                            // Apply volume immediately
                             applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
 
-                            // Force audio session refresh
-                            try {
-                                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                            } catch (e: Exception) {
-                                Log.w(tag, "Audio mode refresh failed: ${e.message}")
-                            }
+                            // Verify track is enabled after short delay
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                ensureRemoteTrackEnabled(remoteId)
+                            }, 500)
+
+                            // Notify CallActivity that a new audio track is available
+                            onRemoteAudioTrackAdded?.invoke(remoteId)
 
                             Log.d(tag, "Remote audio track fully configured for $remoteId")
                         }
@@ -583,8 +592,8 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
 
     // Retry connection with new TURN tier (close existing and create new peer)
     private fun retryConnectionWithNewTier(remoteId: String) {
-        if (executor.isShutdown) {
-            Log.w(tag, "Executor is shutdown, skipping retry for $remoteId")
+        if (isShuttingDown.get() || isEnding.get()) {
+            Log.w(tag, "Skipping retry - client is shutting down")
             return
         }
 
@@ -599,32 +608,43 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         connectionRetryCounts[remoteId] = retryCount + 1
         val backoffMs = 1000L * (1 shl retryCount) // 1s, 2s, 4s
 
-        // Use scheduler for delay, then execute on main executor
-        scheduler.schedule({
-            executeTask {
-                try {
-                    Log.d(tag, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}, attempt ${retryCount + 1}")
-
-                    // Close existing connection
-                    try {
-                        peerConnections[remoteId]?.close()
-                    } catch (e: Exception) {
-                        Log.w(tag, "Error closing peer before retry: ${e.message}")
-                    }
-                    peerConnections.remove(remoteId)
-                    remoteAudioTracks.remove(remoteId)
-
-                    if (isEnding.get() || executor.isShutdown) {
-                        Log.w(tag, "Abort retry for $remoteId because client is ending")
-                        return@executeTask
-                    }
-
-                    createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
-                } catch (e: Exception) {
-                    Log.e(tag, "Error retrying connection for $remoteId: ${e.message}", e)
+        try {
+            scheduler.schedule({
+                if (isShuttingDown.get() || isEnding.get()) {
+                    Log.w(tag, "Abort scheduled retry for $remoteId - client is shutting down")
+                    return@schedule
                 }
-            }
-        }, backoffMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+                executeTask {
+                    try {
+                        Log.d(tag, "Retrying connection for $remoteId with TURN tier ${turnServerManager.getCurrentTier()}, attempt ${retryCount + 1}")
+
+                        synchronized(peerConnectionLock) {
+                            try {
+                                peerConnections[remoteId]?.close()
+                            } catch (e: Exception) {
+                                Log.w(tag, "Error closing peer before retry: ${e.message}")
+                            }
+                            peerConnections.remove(remoteId)
+                            remoteAudioTracks.remove(remoteId)
+                            remoteDescriptionSet.remove(remoteId)
+                            pendingIceCandidates.remove(remoteId)
+                        }
+
+                        // Small delay before recreating
+                        Thread.sleep(500)
+
+                        if (!isEnding.get() && !isShuttingDown.get()) {
+                            createPeerIfNeeded(remoteId, initiator = signaling.shouldInitiateTo(remoteId))
+                        }
+                    } catch (e: Exception) {
+                        Log.e(tag, "Error retrying connection for $remoteId: ${e.message}", e)
+                    }
+                }
+            }, backoffMs, TimeUnit.MILLISECONDS)
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to schedule retry for $remoteId: ${e.message}", e)
+        }
     }
 
     private fun startParticipantDiscovery() {
@@ -815,7 +835,20 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
             }
 
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
-            override fun onAddStream(stream: MediaStream?) {}
+            override fun onAddStream(stream: MediaStream?) {
+                Log.w(tag, "onAddStream called for $remoteId. This is a fallback.")
+                stream?.audioTracks?.firstOrNull()?.let { audioTrack ->
+                    Log.d(tag, "Found audio track in stream for $remoteId, processing it.")
+
+                    audioTrack.setEnabled(true)
+                    remoteAudioTracks[remoteId] = audioTrack
+                    applyVolumeToAudioTrack(audioTrack, receiveVolumeMultiplier)
+
+                    Handler(Looper.getMainLooper()).post {
+                        refreshAudioSession()
+                    }
+                }
+            }
             override fun onRemoveStream(stream: MediaStream?) {}
             override fun onDataChannel(dataChannel: DataChannel?) {}
             override fun onRenegotiationNeeded() {
@@ -830,41 +863,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     if (track is AudioTrack) {
                         Log.d(tag, "Remote audio track added for $remoteId - type: ${track.kind()}")
 
-                        // Store and enable the track immediately
+                        // Only manage the WebRTC track
                         track.setEnabled(true)
                         remoteAudioTracks[remoteId] = track
-
-                        // Apply volume
                         applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
 
-                        // Force audio system refresh
-                        Handler(Looper.getMainLooper()).post {
-                            try {
-                                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                        // Verify track is enabled after short delay
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            ensureRemoteTrackEnabled(remoteId)
+                        }, 500)
 
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    try {
-                                        val devices = audioManager.availableCommunicationDevices
-                                        val speaker = devices.firstOrNull {
-                                            it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                                        }
-                                        speaker?.let { audioManager.setCommunicationDevice(it) }
-                                    } catch (e: Exception) {
-                                        Log.w(tag, "Failed to set communication device: ${e.message}")
-                                    }
-                                } else {
-                                    audioManager.isSpeakerphoneOn = true
-                                }
-                            } catch (e: Exception) {
-                                Log.e(tag, "Audio setup error: ${e.message}")
-                            }
-
-                            // Refresh WebRTC audio session
-                            Handler(Looper.getMainLooper()).postDelayed({
-                                refreshAudioSession()
-                            }, 500)
-                        }
+                        // Notify CallActivity that a new audio track is available
+                        onRemoteAudioTrackAdded?.invoke(remoteId)
 
                         Log.d(tag, "Remote audio track fully configured for $remoteId")
                     } else {
@@ -921,6 +931,27 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         }
     }
 
+    private fun ensureRemoteTrackEnabled(remoteId: String) {
+        val track = remoteAudioTracks[remoteId]
+        if (track == null) {
+            Log.w(tag, "No remote track found for $remoteId")
+            return
+        }
+
+        if (!track.enabled()) {
+            Log.w(tag, "Remote track was disabled - re-enabling for $remoteId")
+            track.setEnabled(true)
+            applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
+
+            // Force audio session refresh
+            Handler(Looper.getMainLooper()).postDelayed({
+                refreshAudioSession()
+            }, 100)
+        } else {
+            Log.d(tag, "Remote track for $remoteId is already enabled")
+        }
+    }
+
     private fun startTrackMonitoring() {
         val handler = Handler(Looper.getMainLooper())
         val monitorRunnable = object : Runnable {
@@ -954,21 +985,29 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 Log.d(tag, "handleRemoteIce from=$fromId key=$msgKey")
 
                 val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
-                val pc = peerConnections[fromId]
 
-                if (pc == null) {
-                    Log.w(tag, "No peer connection for $fromId, cannot add ICE candidate")
-                    return@executeTask
-                }
+                synchronized(peerConnectionLock) {
+                    val pc = peerConnections[fromId]
 
-                // CRITICAL: Check if remote description is set
-                if (remoteDescriptionSet[fromId] == true) {
-                    pc.addIceCandidate(candidate)
-                    Log.d(tag, "Added ICE candidate for $fromId")
-                } else {
-                    // Queue candidates until remote description is set
-                    pendingIceCandidates.getOrPut(fromId) { mutableListOf() }.add(candidate)
-                    Log.d(tag, "Queued ICE candidate for $fromId (waiting for remote description)")
+                    if (pc == null) {
+                        Log.w(tag, "No peer connection for $fromId, queueing ICE candidate")
+                        pendingIceCandidates.getOrPut(fromId) { mutableListOf() }.add(candidate)
+                        return@executeTask
+                    }
+
+                    // Check if remote description is set
+                    if (remoteDescriptionSet[fromId] == true) {
+                        try {
+                            pc.addIceCandidate(candidate)
+                            Log.d(tag, "Added ICE candidate for $fromId")
+                        } catch (e: Exception) {
+                            Log.w(tag, "Failed to add ICE candidate: ${e.message}")
+                        }
+                    } else {
+                        // Queue candidates until remote description is set
+                        pendingIceCandidates.getOrPut(fromId) { mutableListOf() }.add(candidate)
+                        Log.d(tag, "Queued ICE candidate for $fromId (waiting for remote description)")
+                    }
                 }
 
                 val to = payload["to"] as? String?
@@ -1111,6 +1150,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         return false
     }
 
+    fun setOnRemoteAudioTrackAdded(callback: (String) -> Unit) {
+        onRemoteAudioTrackAdded = callback
+    }
+
     fun setLocalMicEnabled(enabled: Boolean) {
         try {
             localAudioTrack?.setEnabled(enabled)
@@ -1164,6 +1207,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     """.trimIndent()
     }
 
+    fun getRemoteTrackCount(): Int {
+        return remoteAudioTracks.size
+    }
+
+    fun getRemoteTrackInfo(): String {
+        val info = StringBuilder()
+        info.append("Remote Tracks: ${remoteAudioTracks.size}\n")
+        remoteAudioTracks.forEach { (id, track) ->
+            info.append("  - $id: enabled=${track.enabled()}, kind=${track.kind()}\n")
+        }
+        return info.toString()
+    }
 
     fun refreshAudioSession() {
         // Offload longer blocking waits to scheduler so executor isn't blocked
@@ -1218,16 +1273,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     // Replace applyVolumeToAudioTrack method
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {
         try {
-            val clampedMultiplier = multiplier.coerceIn(0.0f, 2.0f)
+            // Never go below 0.1 to avoid complete silence
+            val clampedMultiplier = multiplier.coerceIn(0.1f, 2.0f)
+            var volumeApplied = false
 
-            // Android 14+ WebRTC volume control - use track-based volume instead of system volume
+            // Android 14+ WebRTC volume control
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Try the new WebRTC volume API first
+                // Try float API first
                 try {
                     val setVolumeMethod = track.javaClass.getMethod("setVolume", Float::class.javaPrimitiveType)
                     setVolumeMethod.invoke(track, clampedMultiplier)
-                    Log.d(tag, "Android 14+: Applied volume $clampedMultiplier via new float API")
-                    return
+                    Log.d(tag, "Android 14+: Applied volume $clampedMultiplier via float API")
+                    volumeApplied = true
                 } catch (e: NoSuchMethodException) {
                     Log.d(tag, "Float setVolume API not available, trying double")
                 } catch (e: Exception) {
@@ -1235,45 +1292,67 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 }
 
                 // Try double API as fallback
-                try {
-                    val setVolumeMethod = track.javaClass.getMethod("setVolume", Double::class.javaPrimitiveType)
-                    setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
-                    Log.d(tag, "Android 14+: Applied volume $clampedMultiplier via double API")
-                    return
-                } catch (e: NoSuchMethodException) {
-                    Log.d(tag, "Double setVolume API not available, trying reflection")
-                } catch (e: Exception) {
-                    Log.w(tag, "Double setVolume API failed: ${e.message}")
+                if (!volumeApplied) {
+                    try {
+                        val setVolumeMethod = track.javaClass.getMethod("setVolume", Double::class.javaPrimitiveType)
+                        setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
+                        Log.d(tag, "Android 14+: Applied volume $clampedMultiplier via double API")
+                        volumeApplied = true
+                    } catch (e: Exception) {
+                        Log.w(tag, "Double setVolume API failed: ${e.message}")
+                    }
                 }
             } else {
-                // Pre-Android 14: Try newer API first (WebRTC M114+)
+                // Pre-Android 14: Try newer API first
                 try {
                     val setVolumeMethod = track.javaClass.getMethod("setVolume", Double::class.javaPrimitiveType)
                     setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
                     Log.d(tag, "Applied volume $clampedMultiplier via new API")
-                    return
+                    volumeApplied = true
                 } catch (e: NoSuchMethodException) {
                     Log.d(tag, "New setVolume API not available, trying legacy")
+                } catch (e: Exception) {
+                    Log.w(tag, "New setVolume API failed: ${e.message}")
                 }
             }
 
-            // Legacy API
-            try {
-                val setVolumeMethod = track.javaClass.getDeclaredMethod("setVolume", Double::class.javaPrimitiveType)
-                setVolumeMethod.isAccessible = true
-                setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
-                Log.d(tag, "Applied volume $clampedMultiplier via reflection")
-                return
-            } catch (e: Exception) {
-                Log.w(tag, "All volume methods failed: ${e.message}")
+            // Legacy reflection fallback
+            if (!volumeApplied) {
+                try {
+                    val setVolumeMethod = track.javaClass.getDeclaredMethod("setVolume", Double::class.javaPrimitiveType)
+                    setVolumeMethod.isAccessible = true
+                    setVolumeMethod.invoke(track, clampedMultiplier.toDouble())
+                    Log.d(tag, "Applied volume $clampedMultiplier via reflection")
+                    volumeApplied = true
+                } catch (e: Exception) {
+                    Log.w(tag, "Legacy reflection failed: ${e.message}")
+                }
             }
 
-            // Final fallback
-            track.setEnabled(clampedMultiplier >= 0.1f)
-            Log.d(tag, "Volume control unavailable, using enable/disable")
+            // Final fallback - system volume control
+            if (!volumeApplied) {
+                Log.w(tag, "All WebRTC volume methods failed, using system volume as last resort")
+                track.setEnabled(true) // Ensure track stays enabled
+
+                try {
+                    val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                    val targetVol = (maxVol * clampedMultiplier).toInt().coerceIn(1, maxVol)
+                    am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, targetVol, 0)
+                    Log.d(tag, "Applied system volume: $targetVol/$maxVol")
+                } catch (e: Exception) {
+                    Log.e(tag, "System volume adjustment also failed: ${e.message}")
+                }
+            }
 
         } catch (e: Exception) {
             Log.e(tag, "applyVolumeToAudioTrack failed completely: ${e.message}", e)
+            // Emergency fallback - just ensure track is enabled
+            try {
+                track.setEnabled(true)
+            } catch (e2: Exception) {
+                Log.e(tag, "Even track.setEnabled failed: ${e2.message}")
+            }
         }
     }
 

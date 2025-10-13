@@ -459,66 +459,37 @@ class CallActivity : AppCompatActivity() {
 
     private fun startAudioModeEnforcement() {
         audioModeEnforcer.removeCallbacksAndMessages(null)
-
-        // Only enforce audio mode if we have active participants
-        if (participants.isEmpty()) {
-            Log.d(TAG, "Skipping audio mode enforcement - no participants")
-            shouldMaintainAudioMode = false
-            return
-        }
+        shouldMaintainAudioMode = true
 
         val enforcerRunnable = object : Runnable {
-            private var consecutiveCorrectMode = 0
-
             override fun run() {
-                if (!shouldMaintainAudioMode || participants.isEmpty() || isCleaningUp || isFinishing) {
-                    Log.d(TAG, "Stopping audio mode enforcement")
+                if (!shouldMaintainAudioMode || isCleaningUp || isFinishing) {
                     return
                 }
 
                 val am = audioManager ?: return
                 val currentMode = am.mode
 
-                // Only enforce if we're actually in a call with active audio
+                // Only enforce if we're not in the correct mode
                 if (currentMode != AudioManager.MODE_IN_COMMUNICATION) {
-                    consecutiveCorrectMode = 0
                     Log.w(TAG, "Audio mode changed to $currentMode, restoring to MODE_IN_COMMUNICATION")
-
                     try {
                         am.mode = AudioManager.MODE_IN_COMMUNICATION
-
-                        // Trigger a re-application of audio routing
+                        // Small delay before re-applying routing
                         Handler(Looper.getMainLooper()).postDelayed({
-                            if (!isCleaningUp && !isFinishing) {
-                                applyAudioRouting()
-                            }
+                            applyAudioRouting()
                         }, 100)
-
-                        Log.d(TAG, "Audio mode restored successfully")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to restore audio mode: ${e.message}", e)
+                        Log.e(TAG, "Failed to restore audio mode: ${e.message}")
                     }
-
-                    // Check again sooner after a fix
-                    audioModeEnforcer.postDelayed(this, 1000)
-                } else {
-                    consecutiveCorrectMode++
-
-                    // If mode has been correct for a while, slow down checks
-                    val nextCheckDelay = when {
-                        consecutiveCorrectMode < 3 -> 3000L  // First checks: every 3s
-                        consecutiveCorrectMode < 10 -> 5000L // Stable: every 5s
-                        else -> 10000L                        // Very stable: every 10s
-                    }
-
-                    audioModeEnforcer.postDelayed(this, nextCheckDelay)
                 }
+
+                // Check every 3 seconds (less frequent to reduce overhead)
+                audioModeEnforcer.postDelayed(this, 3000)
             }
         }
 
-        // Start enforcement immediately
         audioModeEnforcer.post(enforcerRunnable)
-        Log.d(TAG, "Started smart audio mode enforcement")
     }
 
     private fun applyAudioRouting() {

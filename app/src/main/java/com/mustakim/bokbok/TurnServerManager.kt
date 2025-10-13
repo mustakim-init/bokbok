@@ -11,33 +11,55 @@ class TurnServerManager {
 
 
     private val turnServerConfigs = listOf(
-        // Tier 1: Port 443 servers (bypass firewalls)
+        // Tier 1: Most reliable servers first
         TurnConfig(
             listOf(
-                "turns:openrelay.metered.ca:443?transport=tcp",
-                "turn:openrelay.metered.ca:80?transport=tcp"
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun2.l.google.com:19302",
+                "stun3.l.google.com:19302",
+                "stun4.l.google.com:19302",
+                "stun.ekiga.net",
+                "stun.ideasip.com",
+                "stun.rixtelecom.se",
+                "stun.schlund.de",
+                "stun.stunprotocol.org:3478",
+                "stun.voiparound.com",
+                "stun.voipbuster.com",
+                "stun.voipstunt.com",
+                "stun.voxgratia.org"
             ),
-            "openrelayproject", "openrelayproject", 1
+            "", "", 1
         ),
 
-        // Tier 2: More port 443 servers
+        // Tier 2: Reliable TURN servers
         TurnConfig(
-            listOf("turn:numb.viagenie.ca:443?transport=tcp"),
-            "webrtc@live.com", "muazkh", 2
+            listOf(
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp"
+            ),
+            "openrelayproject", "openrelayproject", 2
         ),
 
-        // Tier 3: Backup servers
+        // Tier 3: Backup TURN servers
         TurnConfig(
-            listOf("turn:turn.anyfirewall.com:443?transport=tcp"),
-            "webrtc", "webrtc", 3
+            listOf(
+                "turn:numb.viagenie.ca:3478",
+                "turn:numb.viagenie.ca:3478?transport=tcp"
+            ),
+            "webrtc@live.com", "muazkh", 3
         ),
 
-        // Tier 4: Last resort
         TurnConfig(
-            listOf("turn:freestun.net:53?transport=tcp"),
-            "free", "free", 4
+            listOf(
+                "turn:turn.anyfirewall.com:443?transport=tcp",
+                "turn:turn.anyfirewall.com:3478?transport=udp"
+            ),
+            "webrtc", "webrtc", 4
         )
     )
+
 
     private val stunServers = listOf(
         "stun:stun.l.google.com:19302",
@@ -99,22 +121,24 @@ class TurnServerManager {
         return (System.currentTimeMillis() - config.lastFailTime) < cooldown
     }
 
-    fun markServerAsFailed(config: TurnConfig) {
+    fun markServerAsFailed(config: TurnConfig, failedUrl: String? = null) {
         val now = System.currentTimeMillis()
-        config.lastFailTime = System.currentTimeMillis()
+        config.lastFailTime = now
         config.failCount++
         if (!failedServers.contains(config)) failedServers.add(config)
-        Log.w(tag, "TURN server failed: ${config.urls.firstOrNull()}")
+        Log.w(tag, "TURN server failed: ${failedUrl ?: config.urls.firstOrNull() ?: "unknown"} (failCount=${config.failCount})")
 
-        // Auto-escalate if we have multiple rapid failures
-        if (now - lastEscalationTime < 30000) { // 30 seconds
-            val failuresInWindow = failedServers.count { now - it.lastFailTime < 30000 }
-            if (failuresInWindow >= 2 && currentTier < 4) {
+        // Only auto-escalate if at least two distinct configs failed in the last 30s
+        if (now - lastEscalationTime < 30000) {
+            val distinctFailures = failedServers.count { now - it.lastFailTime < 30000 }
+            if (distinctFailures >= 2 && currentTier < 4) {
                 escalateToNextTier()
-                Log.w(tag, "Auto-escalating to tier $currentTier due to rapid failures")
+                Log.w(tag, "Auto-escalating to tier $currentTier due to multiple distinct failures")
+                lastEscalationTime = now
             }
         }
     }
+
     fun markCurrentTierAsFailed() {
         val currentConfigs = turnServerConfigs.filter { it.tier == currentTier }
         currentConfigs.forEach { markServerAsFailed(it) }

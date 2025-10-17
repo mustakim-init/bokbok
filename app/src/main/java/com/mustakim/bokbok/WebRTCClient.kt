@@ -168,7 +168,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                     }
 
                     // Add small delay before starting signaling
-                    Thread.sleep(1000)
+                    Thread.sleep(300)
 
                     signaling.start { type, fromId, payload, msgKey ->
                         Log.d(tag, "Signal recv type=$type from=$fromId payloadKeys=${payload.keys}")
@@ -195,7 +195,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                                             }
                                         }
                                     }
-                                }, 1500) // Increased delay
+                                }, 500) // Increased delay
                             }
                             FirebaseSignaling.Type.LEAVE -> {
                                 Log.d(tag, "Leave message from $fromId -> closePeer")
@@ -216,7 +216,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                                     createPeerIfNeeded(rid, initiator = signaling.shouldInitiateTo(rid))
                                 }
                             }
-                        }, 1000)
+                        }, 300)
                     }
 
                     val joined = signaling.join()
@@ -233,10 +233,10 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                                     if (!peerConnections.containsKey(rid) && peerConnections.size < 5) {
                                         createPeerIfNeeded(rid, initiator = signaling.shouldInitiateTo(rid))
                                     }
-                                }, index * 500L) // Stagger connections
+                                }, index * 300L) // Stagger connections
                             }
                         }
-                    }, 2000)
+                    }, 800)
 
                     //calls :
                     isInitialized.set(true)
@@ -254,7 +254,7 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             } catch (e: Exception) {
                                 Log.e(tag, "Error in onReady callback", e)
                             }
-                        }, 3000) // Additional delay to ensure everything is stable
+                        }, 1000) // Additional delay to ensure everything is stable
                     }
 
                 } catch (e: Exception) {
@@ -582,22 +582,16 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             track.setEnabled(true)
                             remoteAudioTracks[remoteId] = track
 
-                            // Force audio session configuration
-                            Handler(Looper.getMainLooper()).post {
-                                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                            // REMOVED: The AudioManager manipulation that was fighting with CallActivity
+                            // The CallActivity will handle audio routing via applyAudioRouting()
 
-                                // For SDK 31+, ensure communication device is set
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    val speaker = am.availableCommunicationDevices.firstOrNull {
-                                        it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                                    }
-                                    speaker?.let { am.setCommunicationDevice(it) }
-                                }
-                            }
-
+                            // Just apply volume and notify
                             applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
-                            onRemoteAudioTrackAdded?.invoke(remoteId)
+
+                            // Notify CallActivity with a small delay to ensure track is ready
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                onRemoteAudioTrackAdded?.invoke(remoteId)
+                            }, 500)
                         }
                     } catch (e: Exception) {
                         Log.e(tag, "onAddTrack error: ${e.message}", e)
@@ -935,27 +929,18 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                 try {
                     val track = receiver?.track()
                     if (track is AudioTrack) {
-                        Log.d(tag, "Remote audio track added for $remoteId")
+                        Log.d(tag, "Remote audio track added for $remoteId (fallback observer)")
 
                         track.setEnabled(true)
                         remoteAudioTracks[remoteId] = track
 
-                        // Force audio session configuration
-                        Handler(Looper.getMainLooper()).post {
-                            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                            am.mode = AudioManager.MODE_IN_COMMUNICATION
-
-                            // For SDK 31+, ensure communication device is set
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                val speaker = am.availableCommunicationDevices.firstOrNull {
-                                    it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-                                }
-                                speaker?.let { am.setCommunicationDevice(it) }
-                            }
-                        }
+                        // REMOVED: AudioManager manipulation
 
                         applyVolumeToAudioTrack(track, receiveVolumeMultiplier)
-                        onRemoteAudioTrackAdded?.invoke(remoteId)
+
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            onRemoteAudioTrackAdded?.invoke(remoteId)
+                        }, 500)
                     }
                 } catch (e: Exception) {
                     Log.e(tag, "onAddTrack error: ${e.message}", e)
@@ -1479,51 +1464,29 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
     }
 
     fun refreshAudioSession() {
-        // Offload longer blocking waits to scheduler so executor isn't blocked
         try {
-            // Short, synchronous disable/enable for local track on executor
             executeTask {
                 try {
+                    // Simple disable/enable for local track
                     localAudioTrack?.setEnabled(false)
-                } catch (e: Exception) {
-                    Log.w(tag, "refreshAudioSession local disable failed: ${e.message}")
-                }
-            }
+                    Thread.sleep(50)
+                    localAudioTrack?.setEnabled(true)
 
-            // Re-enable after a short delay using scheduler
-            scheduler.schedule({
-                executeTask {
-                    try {
-                        localAudioTrack?.setEnabled(true)
-                    } catch (e: Exception) {
-                        Log.w(tag, "refreshAudioSession local enable failed: ${e.message}")
-                    }
-                }
-            }, 60, TimeUnit.MILLISECONDS)
-
-            // For remote tracks, toggle each with a small delay so players can refresh
-            var delay = 0L
-            for (t in remoteAudioTracks.values) {
-                val track = t
-                scheduler.schedule({
-                    executeTask {
-                        try {
-                            track.setEnabled(false)
-                        } catch (e: Exception) {}
-                    }
-                    // re-enable slightly later
-                    scheduler.schedule({
-                        executeTask {
-                            try { track.setEnabled(true) } catch (e: Exception) {}
+                    // For remote tracks, just verify they're enabled
+                    remoteAudioTracks.values.forEach { track ->
+                        if (!track.enabled()) {
+                            track.setEnabled(true)
+                            Log.d(tag, "Re-enabled remote track")
                         }
-                    }, 40, TimeUnit.MILLISECONDS)
-                }, delay, TimeUnit.MILLISECONDS)
-                delay += 25L
-            }
+                    }
 
-            Log.d(tag, "Audio session refresh scheduled")
+                    Log.d(tag, "Audio session refreshed")
+                } catch (e: Exception) {
+                    Log.w(tag, "refreshAudioSession failed: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
-            Log.w(tag, "refreshAudioSession scheduling error: ${e.message}")
+            Log.w(tag, "refreshAudioSession error: ${e.message}")
         }
     }
 

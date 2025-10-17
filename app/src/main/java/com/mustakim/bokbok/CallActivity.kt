@@ -119,7 +119,7 @@ class CallActivity : AppCompatActivity() {
                                 Log.w(TAG, "Error setting mode on SCO connect: ${e.message}")
                             }
                             try {
-                                (webRtcClient as? WebRTCClient)?.refreshAudioSession()
+                                webRtcClient?.refreshAudioSession()
                             } catch (e: Exception) {
                                 Log.w(TAG, "refreshAudioSession failed on SCO connect: ${e.message}")
                             }
@@ -141,7 +141,7 @@ class CallActivity : AppCompatActivity() {
                             }
 
                             try {
-                                (webRtcClient as? WebRTCClient)?.refreshAudioSession()
+                                webRtcClient?.refreshAudioSession()
                             } catch (e: Exception) {
                                 Log.w(TAG, "refreshAudioSession failed on SCO disconnect: ${e.message}")
                             }
@@ -225,11 +225,8 @@ class CallActivity : AppCompatActivity() {
         val pttToggle = findViewById<ToggleButton>(R.id.pttToggle)
         val settingsButton = findViewById<Button>(R.id.settingsButton)
         val leaveButton = findViewById<Button>(R.id.leaveButton)
-        val statusText = findViewById<TextView>(R.id.statusText)
-        val statusSpinner = findViewById<ProgressBar>(R.id.statusSpinner)
         val receiveVolume = findViewById<SeekBar>(R.id.receiveVolume)
         val pttFloat = findViewById<Button>(R.id.pttFloatButton)
-        val connectionInfo = findViewById<TextView>(R.id.connectionInfo)
         val volumeValue = findViewById<TextView>(R.id.volumeValue)
 
         // prefs listener
@@ -470,22 +467,19 @@ class CallActivity : AppCompatActivity() {
                 val am = audioManager ?: return
                 val currentMode = am.mode
 
-                // Only enforce if we're not in the correct mode
-                if (currentMode != AudioManager.MODE_IN_COMMUNICATION) {
-                    Log.w(TAG, "Audio mode changed to $currentMode, restoring to MODE_IN_COMMUNICATION")
+                // Only enforce if mode is COMPLETELY wrong (not during every check)
+                if (currentMode == AudioManager.MODE_NORMAL ||
+                    currentMode == AudioManager.MODE_RINGTONE) {
+                    Log.w(TAG, "Audio mode is $currentMode, restoring to MODE_IN_COMMUNICATION")
                     try {
                         am.mode = AudioManager.MODE_IN_COMMUNICATION
-                        // Small delay before re-applying routing
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            applyAudioRouting()
-                        }, 100)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to restore audio mode: ${e.message}")
                     }
                 }
 
-                // Check every 3 seconds (less frequent to reduce overhead)
-                audioModeEnforcer.postDelayed(this, 3000)
+                // CHANGED: Check every 10 seconds instead of 3 - less interference
+                audioModeEnforcer.postDelayed(this, 10000)
             }
         }
 
@@ -496,46 +490,41 @@ class CallActivity : AppCompatActivity() {
         val am = audioManager ?: return
 
         try {
+            // Set mode once
             am.mode = AudioManager.MODE_IN_COMMUNICATION
 
-            // Android 14+ requires explicit communication device selection
+            // For Android 12+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 try {
                     val availableDevices = am.availableCommunicationDevices
                     var deviceSelected = false
 
-                    // Try Bluetooth first
+                    // Try Bluetooth
                     if (isBluetoothAudioConnected()) {
                         val bluetoothDevice = availableDevices.firstOrNull { device ->
-                            device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                                    device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                            device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
                         }
                         if (bluetoothDevice != null) {
                             am.setCommunicationDevice(bluetoothDevice)
-                            Log.d(TAG, "Android 14+: Set Bluetooth communication device")
                             deviceSelected = true
 
-                            // Start SCO for Bluetooth headsets
                             synchronized(scoStateLock) {
                                 if (!isSCOStarted && !isSCOStarting) {
                                     isSCOStarting = true
                                     am.startBluetoothSco()
-                                    Log.d(TAG, "Started Bluetooth SCO")
                                 }
                             }
                         }
                     }
 
-                    // Try wired headset next
+                    // Try wired
                     if (!deviceSelected && hasHeadphonesConnected()) {
                         val wiredDevice = availableDevices.firstOrNull { device ->
                             device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                                    device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                                    device.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                                    device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES
                         }
                         if (wiredDevice != null) {
                             am.setCommunicationDevice(wiredDevice)
-                            Log.d(TAG, "Android 14+: Set wired headset communication device")
                             deviceSelected = true
                         }
                     }
@@ -545,64 +534,26 @@ class CallActivity : AppCompatActivity() {
                         val speaker = availableDevices.firstOrNull {
                             it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
                         }
-                        speaker?.let {
-                            am.setCommunicationDevice(it)
-                            Log.d(TAG, "Android 14+: Fallback to built-in speaker")
-                        }
+                        speaker?.let { am.setCommunicationDevice(it) }
                     }
 
                 } catch (e: Exception) {
-                    Log.w(TAG, "Android 14+ audio routing failed: ${e.message}")
-                    // Fall through to legacy routing
+                    Log.w(TAG, "Android S+ audio routing failed: ${e.message}")
                 }
-            }
-
-            // Legacy audio routing for older Android versions
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
-                != PackageManager.PERMISSION_GRANTED) {
-
+            } else {
+                // Legacy routing
                 when {
-                    isBluetoothAudioConnected() -> {
-                        Log.d(TAG, "Legacy: Routing to Bluetooth")
-                        setBluetoothMode()
-                    }
-                    hasHeadphonesConnected() -> {
-                        Log.d(TAG, "Legacy: Routing to wired headset")
-                        routeToWiredHeadset()
-                    }
-                    else -> {
-                        Log.d(TAG, "Legacy: Routing to speaker")
-                        setSpeakerMode()
-                    }
+                    isBluetoothAudioConnected() -> setBluetoothMode()
+                    hasHeadphonesConnected() -> routeToWiredHeadset()
+                    else -> setSpeakerMode()
                 }
             }
 
-            // Apply audio focus after routing
-            Handler(Looper.getMainLooper()).postDelayed({
-                applyDuckSetting()
-            }, 100)
-
-            // Refresh WebRTC audio session
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    webRtcClient?.refreshAudioSession()
-                    Log.d(TAG, "Audio session refreshed")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Audio session refresh failed: ${e.message}")
-                }
-            }, 200)
+            // REMOVED: Don't call webRtcClient?.refreshAudioSession() here
+            // Let audio stabilize naturally
 
         } catch (e: Exception) {
             Log.e(TAG, "Audio routing failed", e)
-            // Emergency fallback
-            try {
-                am.mode = AudioManager.MODE_IN_COMMUNICATION
-                am.isSpeakerphoneOn = true
-                Log.w(TAG, "Emergency fallback: forced speaker mode")
-            } catch (e2: Exception) {
-                Log.e(TAG, "Emergency audio fallback also failed", e2)
-            }
         }
     }
 
@@ -688,7 +639,6 @@ class CallActivity : AppCompatActivity() {
                 Log.w(TAG, "hasHeadphonesConnected error: ${e.message}")
             }
         } else {
-            @Suppress("DEPRECATION")
             return am.isWiredHeadsetOn
         }
         return false
@@ -1329,34 +1279,20 @@ class CallActivity : AppCompatActivity() {
 
         webRtcClient?.setOnRemoteAudioTrackAdded { remoteId ->
             runOnUiThread {
-                Log.d(TAG, "Remote audio track added for $remoteId - scheduling audio setup")
+                Log.d(TAG, "Remote audio track added for $remoteId")
 
-                // Stagger the audio setup to ensure track is ready
+                // Give track time to settle
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (!isCleaningUp && !isFinishing) {
-                        Log.d(TAG, "Step 1: Refreshing WebRTC audio session for $remoteId")
+                        // Just ensure audio mode is correct
+                        audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
 
-                        // 1. First ensure WebRTC audio session is fresh
-                        try {
-                            webRtcClient?.refreshAudioSession()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Audio session refresh failed: ${e.message}")
-                        }
-
-                        // 2. Then apply routing after session refresh completes
+                        // Log audio state for debugging
                         Handler(Looper.getMainLooper()).postDelayed({
-                            if (!isCleaningUp && !isFinishing) {
-                                Log.d(TAG, "Step 2: Applying audio routing for $remoteId")
-                                applyAudioRouting()
-
-                                // 3. Final verification after routing
-                                Handler(Looper.getMainLooper()).postDelayed({
-                                    debugAudioState()
-                                }, 500)
-                            }
-                        }, 300)
+                            debugAudioState()
+                        }, 1000)
                     }
-                }, 1000)  // Increased initial delay
+                }, 500)
             }
         }
 
@@ -1497,10 +1433,15 @@ class CallActivity : AppCompatActivity() {
         super.onResume()
         shouldMaintainAudioMode = true
 
-        audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION //new added for testing
-        applyDuckSetting()
-        applyAudioRouting()
+        // Just ensure mode is correct
+        audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
 
+        // Apply audio focus
+        applyDuckSetting()
+
+        // REMOVED: Don't call applyAudioRouting() here - causes issues
+
+        // Restart enforcement
         startAudioModeEnforcement()
         Log.d(TAG, "onResume: Audio mode enforcement restarted")
     }

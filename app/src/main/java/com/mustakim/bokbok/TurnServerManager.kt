@@ -16,18 +16,18 @@ class TurnServerManager {
             listOf(
                 "stun:stun.l.google.com:19302",
                 "stun:stun1.l.google.com:19302",
-                "stun2.l.google.com:19302",
-                "stun3.l.google.com:19302",
-                "stun4.l.google.com:19302",
-                "stun.ekiga.net",
-                "stun.ideasip.com",
-                "stun.rixtelecom.se",
-                "stun.schlund.de",
-                "stun.stunprotocol.org:3478",
-                "stun.voiparound.com",
-                "stun.voipbuster.com",
-                "stun.voipstunt.com",
-                "stun.voxgratia.org"
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+                "stun:stun.ekiga.net",
+                "stun:stun.ideasip.com",
+                "stun:stun.rixtelecom.se",
+                "stun:stun.schlund.de",
+                "stun:stun.stunprotocol.org:3478",
+                "stun:stun.voiparound.com",
+                "stun:stun.voipbuster.com",
+                "stun:stun.voipstunt.com",
+                "stun:stun.voxgratia.org"
             ),
             "", "", 1
         ),
@@ -61,12 +61,6 @@ class TurnServerManager {
     )
 
 
-    private val stunServers = listOf(
-        "stun:stun.l.google.com:19302",
-        "stun:stun1.l.google.com:19302",
-        "stun:stun2.l.google.com:19302"
-    )
-
     private val failedServers = CopyOnWriteArrayList<TurnConfig>()
     private var currentTier = 1
     private var forceRelayMode = false
@@ -83,15 +77,12 @@ class TurnServerManager {
     fun getIceServersForCurrentTier(): List<PeerConnection.IceServer> {
         val servers = mutableListOf<PeerConnection.IceServer>()
 
-        // Add fewer STUN servers if forcing relay
-        if (forceRelayMode) {
-            servers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-        } else {
-            stunServers.forEach { servers.add(PeerConnection.IceServer.builder(it).createIceServer()) }
+        // Don't add stunServers separately - tier 1 already has them
+        val availableConfigs = turnServerConfigs.filter { it.tier <= currentTier && !isRecentlyFailed(it) }
+        val configs = availableConfigs.ifEmpty {
+            turnServerConfigs.filter { !isRecentlyFailed(it) }
         }
 
-        val availableConfigs = turnServerConfigs.filter { it.tier <= currentTier && !isRecentlyFailed(it) }
-        val configs = if (availableConfigs.isEmpty()) turnServerConfigs.filter { !isRecentlyFailed(it) } else availableConfigs
         configs.forEach { servers.addAll(createIceServersFromConfig(it)) }
 
         Log.d(tag, "Using ${servers.size} ICE servers for tier $currentTier (relay: $forceRelayMode)")
@@ -139,11 +130,6 @@ class TurnServerManager {
         }
     }
 
-    fun markCurrentTierAsFailed() {
-        val currentConfigs = turnServerConfigs.filter { it.tier == currentTier }
-        currentConfigs.forEach { markServerAsFailed(it) }
-    }
-
     fun enableCGNATMode() {
         Log.i(tag, "Enabling CGNAT mode - forcing TURN relay")
         forceRelayMode = true
@@ -157,7 +143,7 @@ class TurnServerManager {
             lastEscalationTime = System.currentTimeMillis()
         }
     }
-    fun canEscalate(): Boolean = System.currentTimeMillis() - lastEscalationTime > 15000 // 15 second cooldown
+
     fun forceEscalateToNextTier() { escalateToNextTier() }
     fun resetToTier1() { currentTier = 1 }
     fun getCurrentTier(): Int = currentTier
@@ -166,6 +152,11 @@ class TurnServerManager {
     fun getEmergencyIceServers(): List<PeerConnection.IceServer> {
         return listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer(),
+            PeerConnection.IceServer.builder("stun:stun.stunprotocol.org:3478").createIceServer(),
             PeerConnection.IceServer.builder("turns:openrelay.metered.ca:443?transport=tcp")
                 .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer()
         )

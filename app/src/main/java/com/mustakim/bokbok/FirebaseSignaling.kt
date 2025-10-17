@@ -81,7 +81,6 @@ class FirebaseSignaling(private val roomId: String) {
             try {
                 // messages listener
                 messagesListener = messagesRef.addChildEventListener(object : ChildEventListener {
-                    // In FirebaseSignaling.kt - REPLACE the entire onChildAdded method
                     override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                         val currentLocalId = localId
                         if (currentLocalId == null) {
@@ -95,39 +94,35 @@ class FirebaseSignaling(private val roomId: String) {
                         val from = map["from"] as? String ?: return
                         val to = map["to"] as? String?
 
-                        // Check message sequence for ordering
-                        val seq = (map["seq"] as? Long) ?: 0L
-                        if (seq < messageSequence && (typeStr == "sdp" || typeStr == "ice")) {
-                            Log.d(TAG, "Ignoring outdated message $key with seq=$seq (current=$messageSequence)")
-                            return
-                        }
-
-                        // CRITICAL: Filter self-messages for SDP/ICE to prevent loops
-                        when (typeStr) {
-                            "sdp", "ice" -> {
-                                if (from == currentLocalId) {
-                                    Log.d(TAG, "Ignoring own signaling message $key from $from")
-                                    try {
-                                        messagesRef.child(key).removeValue()
-                                    } catch (e: Exception) {
-                                        Log.w(TAG, "Failed to remove own message: ${e.message}")
-                                    }
+                        // CRITICAL: Filter self-messages EARLY for all signaling types
+                        if (from == currentLocalId) {
+                            when (typeStr) {
+                                "sdp", "ice" -> {
+                                    Log.d(TAG, "Ignoring own $typeStr message $key")
+                                    return
+                                }
+                                "join" -> {
+                                    Log.d(TAG, "Received own join message - ignoring for peer creation")
+                                    return
+                                }
+                                "leave" -> {
+                                    Log.d(TAG, "Received own leave message")
                                     return
                                 }
                             }
-                            "join" -> {
-                                // For join messages, process but don't create peer for self
-                                if (from == currentLocalId) {
-                                    Log.d(TAG, "Received own join message - will skip peer creation in handler")
-                                    // Continue processing for UI updates
-                                }
-                            }
-                            "leave" -> {
-                                // Always process leave messages for cleanup
-                                if (from == currentLocalId) {
-                                    Log.d(TAG, "Received own leave message")
-                                    // Continue processing
-                                }
+                        }
+
+                        // REMOVE THE BROKEN SEQUENCE CHECK COMPLETELY
+                        // This was causing SDP/ICE messages to be rejected incorrectly
+                        // Each peer has independent messageSequence, so comparing them is wrong
+
+                        // OPTIONAL: Add timestamp-based staleness check (if needed)
+                        val ts = (map["ts"] as? Long)
+                        if (ts != null) {
+                            val age = System.currentTimeMillis() - ts
+                            if (age > 300_000) { // 5 minutes old
+                                Log.d(TAG, "Ignoring ancient message $key (age=${age}ms)")
+                                return
                             }
                         }
 
@@ -155,14 +150,16 @@ class FirebaseSignaling(private val roomId: String) {
                         try {
                             onMessage?.invoke(type, from, payload, key)
 
-                            // Auto-delete SDP/ICE messages after processing to prevent replay
+                            // Auto-delete processed signaling messages after small delay
                             if (type == Type.SDP || type == Type.ICE) {
-                                try {
-                                    messagesRef.child(key).removeValue()
-                                    Log.d(TAG, "Auto-deleted processed $type message $key")
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Failed to delete message: ${e.message}")
-                                }
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    try {
+                                        messagesRef.child(key).removeValue()
+                                        Log.d(TAG, "Auto-deleted $type message $key")
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "Failed to delete message: ${e.message}")
+                                    }
+                                }, 500)
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "onMessage callback error: ${e.message}", e)
@@ -212,11 +209,7 @@ class FirebaseSignaling(private val roomId: String) {
 
     fun sendSdp(toId: String, sdp: SessionDescription) {
         whenAuthReady {
-            val my = localId
-            if (my == null) {
-                Log.w(TAG, "sendSdp: localId still null after auth ready")
-                return@whenAuthReady
-            }
+            val my = localId ?: return@whenAuthReady
 
             val currentSeq = synchronized(sequenceLock) {
                 val seq = messageSequence
@@ -231,7 +224,7 @@ class FirebaseSignaling(private val roomId: String) {
                 "sdpType" to sdp.type.canonicalForm(),
                 "sdp" to sdp.description,
                 "ts" to ServerValue.TIMESTAMP,
-                "seq" to currentSeq
+                "seq" to currentSeq  // Keep for logging, not for filtering
             )
 
             val push = messagesRef.push()
@@ -247,11 +240,7 @@ class FirebaseSignaling(private val roomId: String) {
 
     fun sendIceCandidate(toId: String, c: IceCandidate) {
         whenAuthReady {
-            val my = localId
-            if (my == null) {
-                Log.w(TAG, "sendIceCandidate: localId still null after auth ready")
-                return@whenAuthReady
-            }
+            val my = localId ?: return@whenAuthReady
 
             val currentSeq = synchronized(sequenceLock) {
                 val seq = messageSequence
@@ -267,7 +256,7 @@ class FirebaseSignaling(private val roomId: String) {
                 "sdpMid" to c.sdpMid,
                 "sdpMLineIndex" to c.sdpMLineIndex,
                 "ts" to ServerValue.TIMESTAMP,
-                "seq" to currentSeq
+                "seq" to currentSeq  // Keep for logging, not for filtering
             )
 
             val push = messagesRef.push()
@@ -314,7 +303,7 @@ class FirebaseSignaling(private val roomId: String) {
                         // Notify about participants (excluding self)
                         onParticipantsChanged?.invoke(participants.filter { it != my })
                     }
-                }, 3000)
+                }, 1000)
 
             } else {
                 Log.e(TAG, "Failed to write participant $my: ${t.exception?.message}")
@@ -332,7 +321,7 @@ class FirebaseSignaling(private val roomId: String) {
                 if (t.isSuccessful) Log.d(TAG, "Broadcasted join for $my")
                 else Log.e(TAG, "Failed to broadcast join: ${t.exception?.message}")
             }
-        }, 2000)
+        }, 800)
 
         return true
     }
@@ -370,7 +359,7 @@ class FirebaseSignaling(private val roomId: String) {
 
     fun enableAutoCleanup(maxAgeMs: Long = 60_000L, cleanupIntervalMs: Long = 120_000L) {
         try {
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val handler = Handler(Looper.getMainLooper())
             val runnable = object : Runnable {
                 override fun run() {
                     try { cleanupOldMessages(maxAgeMs) } catch (_: Exception) {}

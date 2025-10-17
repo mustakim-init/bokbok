@@ -130,6 +130,11 @@ class TurnServerManager {
         }
     }
 
+    fun markCurrentTierAsFailed() {
+        val currentConfigs = turnServerConfigs.filter { it.tier == currentTier }
+        currentConfigs.forEach { markServerAsFailed(it) }
+    }
+
     fun enableCGNATMode() {
         Log.i(tag, "Enabling CGNAT mode - forcing TURN relay")
         forceRelayMode = true

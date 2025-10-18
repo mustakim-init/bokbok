@@ -370,22 +370,26 @@ class CallActivity : AppCompatActivity() {
     // ========= ADDED TURN SERVER DEBUGGING & MONITORING =========
 
     private fun setupTurnServerDebugging() {
-        // Add a long-press listener on the Settings button
         findViewById<Button>(R.id.settingsButton)?.setOnLongClickListener {
-            val turnStatus = webRtcClient?.getTurnServerStatus() ?: "No client"
-            val audioStatus = webRtcClient?.verifyAudioConnection() ?: "No WebRTC client"
+            val debugInfo = webRtcClient?.debugAudioConnections() ?: "No client"
 
-            Toast.makeText(this, "Debug Info Logged", Toast.LENGTH_SHORT).show()
-            Log.d(TAG, "TurnDebug: $turnStatus")
-            Log.d(TAG, "AudioVerification: $audioStatus")
+            Log.d(TAG, debugInfo)
 
-            // Also log peer connection states
-            webRtcClient?.let { client ->
-                Log.d(TAG, "PeerStates: Active participants: ${participants.size}")
-                participants.forEach { participantId ->
-                    Log.d(TAG, "PeerStates: Participant: $participantId")
-                }
-            }
+            Toast.makeText(this, "Full debug info logged to Logcat", Toast.LENGTH_LONG).show()
+
+            // Also show a summary in a toast
+            val summary = """
+            Peers: ${webRtcClient?.getRemoteTrackCount() ?: 0}
+            Local Mic: ${webRtcClient?.isLocalMicEnabled() ?: false}
+            TURN: ${webRtcClient?.getTurnServerStatus() ?: "N/A"}
+        """.trimIndent()
+
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Audio Debug Info")
+                .setMessage(summary)
+                .setPositiveButton("OK", null)
+                .show()
+
             true
         }
     }

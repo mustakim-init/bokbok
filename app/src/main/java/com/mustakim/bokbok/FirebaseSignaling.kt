@@ -94,7 +94,7 @@ class FirebaseSignaling(private val roomId: String) {
                         val from = map["from"] as? String ?: return
                         val to = map["to"] as? String?
 
-                        // CRITICAL: Filter self-messages EARLY for all signaling types
+                        // ✅ FIX: Only filter self-messages for SDP and ICE, NOT for JOIN/LEAVE
                         if (from == currentLocalId) {
                             when (typeStr) {
                                 "sdp", "ice" -> {
@@ -102,8 +102,11 @@ class FirebaseSignaling(private val roomId: String) {
                                     return
                                 }
                                 "join" -> {
-                                    Log.d(TAG, "Received own join message - ignoring for peer creation")
-                                    return
+                                    // ✅ IMPORTANT: Don't return here!
+                                    // Other peers NEED to process this join message
+                                    Log.d(TAG, "Received own join broadcast - others will process it")
+                                    // But WE don't need to create a peer to ourselves
+                                    // The callback will handle this filter
                                 }
                                 "leave" -> {
                                     Log.d(TAG, "Received own leave message")
@@ -112,11 +115,7 @@ class FirebaseSignaling(private val roomId: String) {
                             }
                         }
 
-                        // REMOVE THE BROKEN SEQUENCE CHECK COMPLETELY
-                        // This was causing SDP/ICE messages to be rejected incorrectly
-                        // Each peer has independent messageSequence, so comparing them is wrong
-
-                        // OPTIONAL: Add timestamp-based staleness check (if needed)
+                        // Check staleness
                         val ts = (map["ts"] as? Long)
                         if (ts != null) {
                             val age = System.currentTimeMillis() - ts
@@ -165,6 +164,7 @@ class FirebaseSignaling(private val roomId: String) {
                             Log.e(TAG, "onMessage callback error: ${e.message}", e)
                         }
                     }
+
                     override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
                     override fun onChildRemoved(snapshot: DataSnapshot) {}
                     override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}

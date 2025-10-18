@@ -178,24 +178,26 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
                             FirebaseSignaling.Type.JOIN -> {
                                 Log.d(tag, "Join message from $fromId")
 
-                                // CRITICAL: Completely ignore self-join messages for peer creation
+                                // ✅ FIX: Filter self-messages HERE in the callback, not in FirebaseSignaling
                                 if (fromId == signaling.localId) {
-                                    Log.d(tag, "Ignoring self-join message completely")
+                                    Log.d(tag, "Ignoring self-join message in callback")
                                     return@start
                                 }
 
-                                // For remote joins, create peer with delay
-                                Handler(Looper.getMainLooper()).postDelayed({
-                                    executeTask {
-                                        signaling.getParticipantsNow { participants ->
-                                            if (participants.contains(fromId) && fromId != signaling.localId) {
-                                                createPeerIfNeeded(fromId, initiator = signaling.shouldInitiateTo(fromId))
-                                            } else {
-                                                Log.w(tag, "Participant $fromId no longer in room or is self, skipping peer creation")
-                                            }
-                                        }
+                                // ✅ IMPROVED: Immediate peer creation without excessive delays
+                                Log.d(tag, "Creating peer for joining participant $fromId")
+
+                                // Verify participant is still in room before creating peer
+                                signaling.getParticipantsNow { participants ->
+                                    if (participants.contains(fromId)) {
+                                        // Create peer immediately with proper initiator logic
+                                        val shouldInitiate = signaling.shouldInitiateTo(fromId)
+                                        Log.d(tag, "Confirmed $fromId in room, creating peer (initiator=$shouldInitiate)")
+                                        createPeerIfNeeded(fromId, initiator = shouldInitiate)
+                                    } else {
+                                        Log.w(tag, "Participant $fromId not in room, skipping peer creation")
                                     }
-                                }, 500) // Increased delay
+                                }
                             }
                             FirebaseSignaling.Type.LEAVE -> {
                                 Log.d(tag, "Leave message from $fromId -> closePeer")
@@ -1490,6 +1492,68 @@ class WebRTCClient(private val context: Context, private val roomId: String) {
         }
     }
 
+    fun debugAudioConnections(): String {
+        val sb = StringBuilder()
+        sb.appendLine("=== WEBRTC AUDIO DEBUG ===")
+        sb.appendLine("Initialization: ${initializationComplete.get()}")
+        sb.appendLine("Factory: ${factory != null}")
+        sb.appendLine("Audio Source: ${audioSource != null}")
+        sb.appendLine("Local Track: ${localAudioTrack != null}")
+        sb.appendLine("Local Track Enabled: ${localAudioTrack?.enabled() ?: "N/A"}")
+        sb.appendLine("")
+
+        sb.appendLine("=== PEER CONNECTIONS (${peerConnections.size}) ===")
+        peerConnections.forEach { (peerId, pc) ->
+            try {
+                val iceState = pc.iceConnectionState()
+                val sigState = pc.signalingState()
+                val receivers = pc.receivers.size
+                val senders = pc.senders.size
+
+                sb.appendLine("Peer: $peerId")
+                sb.appendLine("  ICE: $iceState")
+                sb.appendLine("  Signaling: $sigState")
+                sb.appendLine("  Receivers: $receivers")
+                sb.appendLine("  Senders: $senders")
+
+                // Check receivers for audio tracks
+                pc.receivers.forEach { receiver ->
+                    val track = receiver.track()
+                    sb.appendLine("  - Receiver: kind=${track?.kind()}, enabled=${track?.enabled()}")
+                }
+
+                // Check senders
+                pc.senders.forEach { sender ->
+                    val track = sender.track()
+                    sb.appendLine("  - Sender: kind=${track?.kind()}, enabled=${track?.enabled()}")
+                }
+
+            } catch (e: Exception) {
+                sb.appendLine("Peer: $peerId - ERROR: ${e.message}")
+            }
+            sb.appendLine("")
+        }
+
+        sb.appendLine("=== REMOTE AUDIO TRACKS (${remoteAudioTracks.size}) ===")
+        remoteAudioTracks.forEach { (peerId, track) ->
+            sb.appendLine("Peer: $peerId")
+            sb.appendLine("  Enabled: ${track.enabled()}")
+            sb.appendLine("  Kind: ${track.kind()}")
+            sb.appendLine("  State: ${track.state()}")
+        }
+
+        sb.appendLine("")
+        sb.appendLine("=== TURN SERVER ===")
+        sb.appendLine("Tier: ${turnServerManager.getCurrentTier()}")
+        sb.appendLine("Status: ${turnServerManager.getStatusInfo()}")
+
+        sb.appendLine("")
+        sb.appendLine("=== SIGNALING ===")
+        sb.appendLine("Local ID: ${signaling.localId}")
+        sb.appendLine("Room ID: $roomId")
+
+        return sb.toString()
+    }
 
     // Replace applyVolumeToAudioTrack method
     private fun applyVolumeToAudioTrack(track: AudioTrack, multiplier: Float) {

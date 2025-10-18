@@ -19,15 +19,8 @@ class TurnServerManager {
                 "stun:stun2.l.google.com:19302",
                 "stun:stun3.l.google.com:19302",
                 "stun:stun4.l.google.com:19302",
-                "stun:stun.ekiga.net",
-                "stun:stun.ideasip.com",
-                "stun:stun.rixtelecom.se",
-                "stun:stun.schlund.de",
-                "stun:stun.stunprotocol.org:3478",
-                "stun:stun.voiparound.com",
-                "stun:stun.voipbuster.com",
-                "stun:stun.voipstunt.com",
-                "stun:stun.voxgratia.org"
+                "turn:turn01.hubl.in?transport=udp",
+                "turn:turn02.hubl.in?transport=tcp"
             ),
             "", "", 1
         ),
@@ -45,16 +38,14 @@ class TurnServerManager {
         // Tier 3: Backup TURN servers
         TurnConfig(
             listOf(
-                "turn:numb.viagenie.ca:3478",
-                "turn:numb.viagenie.ca:3478?transport=tcp"
+                "turn:13.250.13.83:3478?transport=udp"
             ),
-            "webrtc@live.com", "muazkh", 3
+            "YzYNCouZM1mhqhmseWk6", "YzYNCouZM1mhqhmseWk6", 3
         ),
 
         TurnConfig(
             listOf(
-                "turn:turn.anyfirewall.com:443?transport=tcp",
-                "turn:turn.anyfirewall.com:3478?transport=udp"
+                "turn:turn.anyfirewall.com:443?transport=tcp"
             ),
             "webrtc", "webrtc", 4
         )

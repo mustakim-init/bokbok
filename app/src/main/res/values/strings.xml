@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BokBok</string>
+    <string name="lounge">Lounge</string>
+    <string name="chats">Chats</string>
+    <string name="game_boost">Game Boost</string>
+    <string name="profile">Profile</string>
+    <string name="settings">Settings</string>
+    <string name="notifications">Notifications</string>
+    <string name="create_room">Create Room</string>
+    <string name="add_friend">Add Friend</string>
+    <string name="join">Join</string>
+    <string name="leave">Leave</string>
+    <string name="mute">Mute</string>
+    <string name="unmute">Unmute</string>
+    <string name="default_web_client_id">5720343497-o35mshptp2poiu396ngco5o4cvrk1gq9.apps.googleusercontent.com</string>
+</resources>

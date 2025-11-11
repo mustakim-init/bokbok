@@ -30,6 +30,7 @@ import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.LoungeUiState
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import com.mustakim.bokbok.state.RoomStateManager
 
 
 @Composable
@@ -52,40 +53,43 @@ fun LoungeScreen(
             uiState = uiState,
             onCreateRoom = { showCreateRoomDialog = true },
             onFriendClick = remember { { _: FriendStatus -> } },
-            // ✅ FIX: Navigate to room when clicked
-            onRoomClick = remember(navController) {
+            // ✅ FIXED: Use RoomStateManager instead of navigation
+            onRoomClick = remember {
                 { room: VoiceRoom ->
-                    navController.navigate("voice_room/${room.id}")
+                    RoomStateManager.joinRoom(room)  // ✅ Join room via state manager
                 }
             },
             onRefresh = remember(loungeViewModel) { { loungeViewModel.refreshAllData() } },
             onRefreshPublicRooms = remember(loungeViewModel) { { loungeViewModel.refreshPublicRooms() } },
-            // ✅ FIX: Navigate to room when joined
-            onJoinRoom = remember(navController) {
+            // ✅ FIXED: Use RoomStateManager for public rooms too
+            onJoinRoom = remember {
                 { roomId: String ->
-                    navController.navigate("voice_room/$roomId")
+                    // Find the room from uiState and join it
+                    val room = uiState.publicRooms.find { it.id == roomId }
+                    room?.let { RoomStateManager.joinRoom(it) }
                 }
             }
         )
+    }
 
-        if (showCreateRoomDialog) {
-            CreateRoomDialog(
-                onDismiss = { showCreateRoomDialog = false },
-                onConfirm = { roomName, description, maxParticipants, category, isPublic, imageUri ->
-                    loungeViewModel.createRoom(
-                        roomName,
-                        description,
-                        maxParticipants,
-                        category,
-                        isPublic,
-                        imageUri
-                    )
-                    showCreateRoomDialog = false
-                }
-            )
-        }
+    if (showCreateRoomDialog) {
+        CreateRoomDialog(
+            onDismiss = { showCreateRoomDialog = false },
+            onConfirm = { roomName, description, maxParticipants, category, isPublic, imageUri ->
+                loungeViewModel.createRoom(
+                    roomName,
+                    description,
+                    maxParticipants,
+                    category,
+                    isPublic,
+                    imageUri
+                )
+                showCreateRoomDialog = false
+            }
+        )
     }
 }
+
 
 
 @OptIn(ExperimentalMaterialApi::class)

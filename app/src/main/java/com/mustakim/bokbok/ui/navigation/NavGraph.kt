@@ -4,7 +4,12 @@ import android.os.Build
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -130,20 +135,53 @@ fun NavGraph(
         }
 
         // Voice Room screen
+        // Voice Room screen
         composable(
             route = "voice_room/{roomId}",
-            arguments = listOf(
-                navArgument("roomId") { type = NavType.StringType }
-            )
+            arguments = listOf(navArgument("roomId") { type = NavType.StringType }),
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(
+                        durationMillis = 450,
+                        easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
+                    )
+                ) + fadeIn(
+                    animationSpec = tween(300)
+                )
+            },
+            exitTransition = null,  // ✅ Disable exit (we use popExit instead)
+            popEnterTransition = {
+                // Lounge reappears
+                fadeIn(animationSpec = tween(200))
+            },
+            popExitTransition = {
+                // ✅ THIS is the minimize animation
+                slideOutVertically(
+                    targetOffsetY = { it },  // Slide down
+                    animationSpec = tween(
+                        durationMillis = 450,
+                        easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
+                    )
+                ) + scaleOut(
+                    targetScale = 0.85f,
+                    animationSpec = tween(
+                        durationMillis = 450,
+                        easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
+                    )
+                ) + fadeOut(
+                    animationSpec = tween(300)
+                )
+            }
         ) { backStackEntry ->
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
 
+            // ✅ NO coroutine scope needed!
             VoiceRoomScreen(
                 roomId = roomId,
-                // ✅ FIX: Save state and navigate back
                 onMinimize = { room, isMuted ->
                     RoomStateManager.minimizeRoom(room, isMuted)
-                    navController.popBackStack()
+                    navController.popBackStack()  // ✅ Animation happens automatically
                 },
                 onLeaveRoom = {
                     RoomStateManager.leaveRoom()

@@ -31,6 +31,20 @@ import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import com.mustakim.bokbok.state.RoomStateManager
+import androidx.compose.runtime.remember
+import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.data.repository.FriendsRepository
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+
+
+
 
 
 @Composable
@@ -115,7 +129,16 @@ fun NavGraph(
         }
 
         composable(NavRoutes.Chats.route) {
-            ChatsScreen(navController, userViewModel)
+            val context = LocalContext.current
+            val userRepository = remember { UserRepository(context) }
+            val friendsRepository = remember { FriendsRepository(userRepository) }
+
+            ChatsScreen(
+                friendsRepository = friendsRepository,
+                onFriendClick = { userId -> },
+                navController = navController,  // ✅ Pass navController
+                userViewModel = userViewModel   // ✅ Pass userViewModel
+            )
         }
 
         composable(NavRoutes.GameBoost.route) {

@@ -32,6 +32,8 @@ import com.mustakim.bokbok.ui.components.MinimizedRoomBar
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
+import com.mustakim.bokbok.ui.navigation.NavRoutes
+
 
 
 @Composable
@@ -106,15 +108,20 @@ fun MainScaffold(
                     if (showBottomBar) {
                         val onNavigate = remember(navController) {
                             { route: String ->
-                                navController.navigate(route) {
-                                    popUpTo(navController.graph.startDestinationId) {
-                                        saveState = true
+                                // Only navigate if we're not already on that route
+                                if (currentRoute != route) {
+                                    navController.navigate(route) {
+                                        // Pop up to the start destination (Lounge)
+                                        popUpTo(NavRoutes.Lounge.route) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
                                     }
-                                    launchSingleTop = true
-                                    restoreState = true
                                 }
                             }
                         }
+
                         BottomNavigationBar(
                             currentRoute = currentRoute,
                             onNavigate = onNavigate

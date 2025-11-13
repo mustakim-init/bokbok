@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-// Move AuthEvent to top level (outside the AuthViewModel class)
 sealed class AuthEvent {
     object NavigateToUsernameSetup : AuthEvent()
     object NavigateToPermissions : AuthEvent()
@@ -32,7 +31,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
-    // One-time events channel
     private val _authEvents = MutableStateFlow<AuthEvent?>(null)
     val authEvents: StateFlow<AuthEvent?> = _authEvents.asStateFlow()
 
@@ -46,23 +44,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    // Clear one-time event after consumption
     fun clearAuthEvent() {
         _authEvents.value = null
     }
 
-    // Check if device supports modern Credential Manager
     fun supportsModernAuth(): Boolean {
         return repository.supportsCredentialManager()
     }
 
-    // Start legacy Google Sign-In (older devices)
     fun startLegacyGoogleSignIn(onIntentReady: (Intent) -> Unit) {
         val intent = repository.getGoogleSignInIntent()
         onIntentReady(intent)
     }
 
-    // Handle legacy Google Sign-In result
     fun handleLegacyGoogleSignIn(data: Intent?) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -95,7 +89,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Modern Google Sign-In that determines new vs existing user
     fun signInWithGoogle(activity: Activity) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -175,32 +168,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Keep for existing users who need to update username
-    fun updateUsername(username: String) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            val userId = repository.getCurrentUser()?.uid
-            if (userId != null) {
-                repository.updateUsername(userId, username).fold(
-                    onSuccess = {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            isNewGoogleUser = false,
-                            successMessage = "Username set successfully!"
-                        )
-                        _authEvents.value = AuthEvent.NavigateToPermissions
-                    },
-                    onFailure = { error ->
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            error = error.message ?: "Failed to set username"
-                        )
-                        _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to set username")
-                    }
-                )
-            }
-        }
-    }
+    // REMOVED: updateUsername method (no longer needed)
 
     fun signUp(
         email: String,

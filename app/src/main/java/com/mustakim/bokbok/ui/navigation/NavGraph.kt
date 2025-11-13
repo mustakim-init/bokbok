@@ -1,50 +1,41 @@
 package com.mustakim.bokbok.ui.navigation
 
 import android.os.Build
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
 import com.mustakim.bokbok.data.model.PermissionsList
+import com.mustakim.bokbok.data.repository.FriendsRepository
+import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.state.RoomStateManager
+import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
 import com.mustakim.bokbok.ui.screens.auth.LoginScreen
 import com.mustakim.bokbok.ui.screens.auth.SignupScreen
 import com.mustakim.bokbok.ui.screens.auth.SplashScreen
-import com.mustakim.bokbok.ui.screens.auth.UsernameSetupScreen
 import com.mustakim.bokbok.ui.screens.chats.ChatsScreen
 import com.mustakim.bokbok.ui.screens.gameboost.GameBoostScreen
 import com.mustakim.bokbok.ui.screens.lounge.LoungeScreen
 import com.mustakim.bokbok.ui.screens.notifications.NotificationsScreen
 import com.mustakim.bokbok.ui.screens.permissions.PermissionsScreen
 import com.mustakim.bokbok.ui.screens.profile.ProfileScreen
+import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
-import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
-import androidx.navigation.NavType
-import androidx.navigation.navArgument
-import com.mustakim.bokbok.state.RoomStateManager
-import androidx.compose.runtime.remember
-import com.mustakim.bokbok.data.repository.UserRepository
-import com.mustakim.bokbok.data.repository.FriendsRepository
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
-
-
-
 
 
 @Composable
@@ -113,12 +104,6 @@ fun NavGraph(
             )
         }
 
-        composable(NavRoutes.SetupUsername.route) {
-            UsernameSetupScreen(
-                navController = navController,
-                userViewModel = userViewModel
-            )
-        }
 
         // In your NavGraph setup
         composable("google_signup") {

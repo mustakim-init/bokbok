@@ -54,64 +54,20 @@ class AuthRepository(private val context: Context) {
         return googleSignInClient.signInIntent
     }
 
-    // Handle legacy Google Sign-In result
-    suspend fun handleLegacyGoogleSignInResult(data: Intent?): Result<Pair<FirebaseUser, Boolean>> {
+    // Check if user exists in Firestore by UID (correct way)
+    suspend fun checkIfUserExists(uid: String): Result<Boolean> {
         return try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
-            val account = task.getResult(ApiException::class.java)
-            signInWithGoogleAccount(account)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // Common sign-in logic for both modern and legacy
-    private suspend fun signInWithGoogleAccount(account: GoogleSignInAccount): Result<Pair<FirebaseUser, Boolean>> {
-        return try {
-            val idToken = account.idToken ?: throw Exception("No ID token found")
-
-            // Sign in to Firebase
-            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
-            val authResult = auth.signInWithCredential(firebaseCredential).await()
-            val firebaseUser = authResult.user ?: throw Exception("Failed to sign in with Google")
-
-            // Check if user document exists in Firestore
-            val userDoc = firestore.collection("users")
-                .document(firebaseUser.uid)
+            val doc = firestore.collection("users")
+                .document(uid)
                 .get()
                 .await()
-
-            val isNewUser = !userDoc.exists()
-
-            if (isNewUser) {
-                // Create user profile with Google data
-                val user = User(
-                    uid = firebaseUser.uid,
-                    username = "", // Will be set later
-                    email = firebaseUser.email ?: "",
-                    displayName = firebaseUser.displayName ?: "",
-                    bio = "",
-                    profileImageUrl = firebaseUser.photoUrl?.toString() ?: "",
-                    phoneNumber = firebaseUser.phoneNumber ?: "",
-                    createdAt = System.currentTimeMillis(),
-                    lastSeen = System.currentTimeMillis()
-                )
-
-                // Save to Firestore
-                firestore.collection("users")
-                    .document(firebaseUser.uid)
-                    .set(user.toMap())
-                    .await()
-            }
-
-            Result.success(firebaseUser to isNewUser)
+            Result.success(doc.exists())
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // Modern Google Sign-In with Credential Manager (Android 9+)
-    // IMPORTANT: Pass Activity context here!
+    // Modern Google Sign-In that returns user status (new vs existing)
     suspend fun signInWithGoogle(activity: Activity): Result<Pair<FirebaseUser, Boolean>> {
         return try {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -128,10 +84,9 @@ class AuthRepository(private val context: Context) {
                 .addCredentialOption(googleIdOption)
                 .build()
 
-            // Use Activity context instead of Application context!
             val result = credentialManager!!.getCredential(
                 request = request,
-                context = activity  // <-- This is the fix!
+                context = activity
             )
 
             val credential = GoogleIdTokenCredential.createFrom(result.credential.data)
@@ -142,34 +97,56 @@ class AuthRepository(private val context: Context) {
             val authResult = auth.signInWithCredential(firebaseCredential).await()
             val firebaseUser = authResult.user ?: throw Exception("Failed to sign in with Google")
 
-            // Check if user document exists
-            val userDoc = firestore.collection("users")
-                .document(firebaseUser.uid)
-                .get()
+            // Check if user exists in Firestore by UID
+            val userExists = checkIfUserExists(firebaseUser.uid).getOrThrow()
+
+            Result.success(firebaseUser to !userExists)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Handle legacy Google Sign-In result
+    suspend fun handleLegacyGoogleSignInResult(data: Intent?): Result<Pair<FirebaseUser, Boolean>> {
+        return try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+            val account = task.getResult(ApiException::class.java)
+
+            val idToken = account.idToken ?: throw Exception("No ID token found")
+            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = auth.signInWithCredential(firebaseCredential).await()
+            val firebaseUser = authResult.user ?: throw Exception("Failed to sign in with Google")
+
+            // Check if user exists in Firestore by UID
+            val userExists = checkIfUserExists(firebaseUser.uid).getOrThrow()
+
+            Result.success(firebaseUser to !userExists)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Create user profile for new Google users
+    suspend fun createGoogleUserProfile(user: FirebaseUser, username: String): Result<Unit> {
+        return try {
+            val userData = User(
+                uid = user.uid,
+                username = username.lowercase(),
+                email = user.email ?: "",
+                displayName = user.displayName ?: "",
+                bio = "",
+                profileImageUrl = user.photoUrl?.toString() ?: "",
+                phoneNumber = user.phoneNumber ?: "",
+                createdAt = System.currentTimeMillis(),
+                lastSeen = System.currentTimeMillis()
+            )
+
+            firestore.collection("users")
+                .document(user.uid)
+                .set(userData.toMap())
                 .await()
 
-            val isNewUser = !userDoc.exists()
-
-            if (isNewUser) {
-                val user = User(
-                    uid = firebaseUser.uid,
-                    username = "",
-                    email = firebaseUser.email ?: "",
-                    displayName = firebaseUser.displayName ?: "",
-                    bio = "",
-                    profileImageUrl = firebaseUser.photoUrl?.toString() ?: "",
-                    phoneNumber = firebaseUser.phoneNumber ?: "",
-                    createdAt = System.currentTimeMillis(),
-                    lastSeen = System.currentTimeMillis()
-                )
-
-                firestore.collection("users")
-                    .document(firebaseUser.uid)
-                    .set(user.toMap())
-                    .await()
-            }
-
-            Result.success(firebaseUser to isNewUser)
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -188,7 +165,7 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    // Update username for new Google users
+    // Update username for existing users (kept for backward compatibility)
     suspend fun updateUsername(userId: String, username: String): Result<Unit> {
         return try {
             firestore.collection("users")

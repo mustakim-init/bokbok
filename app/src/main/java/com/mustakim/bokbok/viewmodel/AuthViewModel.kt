@@ -11,6 +11,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+// Move AuthEvent to top level (outside the AuthViewModel class)
+sealed class AuthEvent {
+    object NavigateToUsernameSetup : AuthEvent()
+    object NavigateToPermissions : AuthEvent()
+    object NavigateToLounge : AuthEvent()
+    data class ShowError(val message: String) : AuthEvent()
+}
+
 data class AuthUiState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
@@ -24,6 +32,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
+    // One-time events channel
+    private val _authEvents = MutableStateFlow<AuthEvent?>(null)
+    val authEvents: StateFlow<AuthEvent?> = _authEvents.asStateFlow()
+
     init {
         checkAuthStatus()
     }
@@ -32,6 +44,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(
             isLoggedIn = repository.isUserLoggedIn()
         )
+    }
+
+    // Clear one-time event after consumption
+    fun clearAuthEvent() {
+        _authEvents.value = null
     }
 
     // Check if device supports modern Credential Manager
@@ -51,44 +68,97 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             repository.handleLegacyGoogleSignInResult(data).fold(
                 onSuccess = { (user, isNewUser) ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isLoggedIn = true,
-                        isNewGoogleUser = isNewUser,
-                        successMessage = if (isNewUser) "Account created!" else "Welcome back!"
-                    )
+                    if (isNewUser) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isLoggedIn = false,
+                            isNewGoogleUser = true
+                        )
+                        _authEvents.value = AuthEvent.NavigateToUsernameSetup
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isLoggedIn = true,
+                            isNewGoogleUser = false
+                        )
+                        _authEvents.value = AuthEvent.NavigateToPermissions
+                    }
                 },
                 onFailure = { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = error.message ?: "Failed to sign in with Google"
                     )
+                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to sign in with Google")
                 }
             )
         }
     }
 
-    // Modern Google Sign-In (Credential Manager for Android 9+)
-    // Pass Activity from UI!
+    // Modern Google Sign-In that determines new vs existing user
     fun signInWithGoogle(activity: Activity) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             repository.signInWithGoogle(activity).fold(
                 onSuccess = { (user, isNewUser) ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        isLoggedIn = true,
-                        isNewGoogleUser = isNewUser,
-                        successMessage = if (isNewUser) "Account created!" else "Welcome back!"
-                    )
+                    if (isNewUser) {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isLoggedIn = false,
+                            isNewGoogleUser = true
+                        )
+                        _authEvents.value = AuthEvent.NavigateToUsernameSetup
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isLoggedIn = true,
+                            isNewGoogleUser = false
+                        )
+                        _authEvents.value = AuthEvent.NavigateToPermissions
+                    }
                 },
                 onFailure = { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = error.message ?: "Failed to sign in with Google"
                     )
+                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to sign in with Google")
                 }
             )
+        }
+    }
+
+    // Complete account creation for new Google users
+    fun completeGoogleSignUp(username: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            val currentUser = repository.getCurrentUser()
+            if (currentUser != null) {
+                repository.createGoogleUserProfile(currentUser, username).fold(
+                    onSuccess = {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            isLoggedIn = true,
+                            isNewGoogleUser = false,
+                            successMessage = "Account created successfully!"
+                        )
+                        _authEvents.value = AuthEvent.NavigateToPermissions
+                    },
+                    onFailure = { error ->
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            error = error.message ?: "Failed to create account"
+                        )
+                        _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to create account")
+                    }
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "No user found. Please try signing in again."
+                )
+                _authEvents.value = AuthEvent.ShowError("No user found. Please try signing in again.")
+            }
         }
     }
 
@@ -105,6 +175,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Keep for existing users who need to update username
     fun updateUsername(username: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -117,12 +188,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             isNewGoogleUser = false,
                             successMessage = "Username set successfully!"
                         )
+                        _authEvents.value = AuthEvent.NavigateToPermissions
                     },
                     onFailure = { error ->
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
                             error = error.message ?: "Failed to set username"
                         )
+                        _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to set username")
                     }
                 )
             }
@@ -144,12 +217,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoggedIn = true,
                         successMessage = "Account created successfully!"
                     )
+                    _authEvents.value = AuthEvent.NavigateToPermissions
                 },
                 onFailure = { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = error.message ?: "Failed to create account"
                     )
+                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to create account")
                 }
             )
         }
@@ -165,12 +240,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoggedIn = true,
                         successMessage = "Welcome back!"
                     )
+                    _authEvents.value = AuthEvent.NavigateToPermissions
                 },
                 onFailure = { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = error.message ?: "Failed to sign in"
                     )
+                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to sign in")
                 }
             )
         }

@@ -41,7 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-
+import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
 
 
 
@@ -115,6 +115,14 @@ fun NavGraph(
 
         composable(NavRoutes.SetupUsername.route) {
             UsernameSetupScreen(
+                navController = navController,
+                userViewModel = userViewModel
+            )
+        }
+
+        // In your NavGraph setup
+        composable("google_signup") {
+            GoogleSignupScreen(
                 navController = navController,
                 userViewModel = userViewModel
             )

@@ -29,6 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.model.PermissionsList
+import com.mustakim.bokbok.viewmodel.AuthEvent
 import com.mustakim.bokbok.viewmodel.AuthViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
@@ -41,16 +42,17 @@ fun LoginScreen(
     userViewModel: UserViewModel
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity  // Get Activity from context
+    val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val uiState by authViewModel.uiState.collectAsState()
+    val authEvent by authViewModel.authEvents.collectAsState()
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Legacy Google Sign-In launcher (for older Android)
+    // Legacy Google Sign-In launcher
     val legacyGoogleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -59,16 +61,20 @@ fun LoginScreen(
         }
     }
 
-    // Handle auth success
-    LaunchedEffect(uiState.isLoggedIn, uiState.isNewGoogleUser) {
-        if (uiState.isLoggedIn) {
-            userViewModel.loadCurrentUser()
-            if (uiState.isNewGoogleUser) {
-                navController.navigate("setup_username") {
-                    popUpTo("login") { inclusive = true }
+    // Handle one-time auth events
+    LaunchedEffect(authEvent) {
+        when (authEvent) {
+            is AuthEvent.NavigateToUsernameSetup -> {
+                authViewModel.clearAuthEvent()
+                navController.navigate("google_signup") {
+                    popUpTo("login") { inclusive = false }
                 }
-            } else {
-                // Check permissions
+            }
+            is AuthEvent.NavigateToPermissions -> {
+                authViewModel.clearAuthEvent()
+                userViewModel.loadCurrentUser()
+
+                // Check permissions and navigate
                 val requiredPermissions = PermissionsList.getRequiredPermissions()
                 val allRequiredGranted = requiredPermissions.all { permission ->
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -95,10 +101,16 @@ fun LoginScreen(
                     }
                 }
             }
+            is AuthEvent.ShowError -> {
+                authViewModel.clearAuthEvent()
+                val error = (authEvent as AuthEvent.ShowError).message
+                snackbarHostState.showSnackbar(error)
+            }
+            else -> {}
         }
     }
 
-    // Show errors
+    // Show errors from uiState (for non-navigation errors)
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
             snackbarHostState.showSnackbar(error)
@@ -136,10 +148,8 @@ fun LoginScreen(
             // Google Sign-In Button
             OutlinedButton(
                 onClick = {
-                    // Check Android version and use appropriate method
                     if (authViewModel.supportsModernAuth()) {
-                        // Modern: Credential Manager (Android 9+)
-                        // Pass Activity context!
+                        // Modern: Check if user exists first
                         if (activity != null) {
                             authViewModel.signInWithGoogle(activity)
                         } else {
@@ -148,7 +158,7 @@ fun LoginScreen(
                             }
                         }
                     } else {
-                        // Legacy: Start activity for result
+                        // Legacy: Use existing flow
                         authViewModel.startLegacyGoogleSignIn { intent ->
                             legacyGoogleSignInLauncher.launch(intent)
                         }

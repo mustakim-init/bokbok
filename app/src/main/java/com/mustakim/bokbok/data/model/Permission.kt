@@ -1,5 +1,6 @@
 package com.mustakim.bokbok.data.model
 
+import android.os.Build
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,12 +46,18 @@ object PermissionsList {
         isRequired = false
     )
 
-    fun getAllPermissions() = listOf(
-        MICROPHONE,
-        NOTIFICATIONS,
-        CAMERA,
-        CONTACTS
-    )
+    fun getAllPermissions(): List<AppPermission> {
+        val permissions = mutableListOf(MICROPHONE, CAMERA, CONTACTS)
 
-    fun getRequiredPermissions() = getAllPermissions().filter { it.isRequired }
+        // Only add POST_NOTIFICATIONS on Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(1, NOTIFICATIONS) // Add after microphone
+        }
+
+        return permissions
+    }
+
+    fun getRequiredPermissions(): List<AppPermission> {
+        return getAllPermissions().filter { it.isRequired }
+    }
 }

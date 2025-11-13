@@ -111,6 +111,9 @@ dependencies {
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.googleid)
 
+    // Legacy Google Sign-In (for older Android versions)
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+
     // Networking (ImgBB)
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)

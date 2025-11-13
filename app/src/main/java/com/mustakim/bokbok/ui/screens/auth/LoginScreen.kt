@@ -1,5 +1,9 @@
 package com.mustakim.bokbok.ui.screens.auth
 
+import android.app.Activity
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -13,22 +17,21 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.R
+import com.mustakim.bokbok.data.model.PermissionsList
 import com.mustakim.bokbok.viewmodel.AuthViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
-import android.os.Build
-import androidx.core.content.ContextCompat
-import com.mustakim.bokbok.data.model.PermissionsList
-import androidx.compose.ui.platform.LocalContext
-
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,26 +41,34 @@ fun LoginScreen(
     userViewModel: UserViewModel
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity  // Get Activity from context
+    val scope = rememberCoroutineScope()
     val uiState by authViewModel.uiState.collectAsState()
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Legacy Google Sign-In launcher (for older Android)
+    val legacyGoogleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        scope.launch {
+            authViewModel.handleLegacyGoogleSignIn(result.data)
+        }
+    }
 
     // Handle auth success
     LaunchedEffect(uiState.isLoggedIn, uiState.isNewGoogleUser) {
         if (uiState.isLoggedIn) {
             userViewModel.loadCurrentUser()
-
             if (uiState.isNewGoogleUser) {
-                // New Google user needs to set username
                 navController.navigate("setup_username") {
                     popUpTo("login") { inclusive = true }
                 }
             } else {
-                // Check permissions before going to lounge
+                // Check permissions
                 val requiredPermissions = PermissionsList.getRequiredPermissions()
                 val allRequiredGranted = requiredPermissions.all { permission ->
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -87,7 +98,6 @@ fun LoginScreen(
         }
     }
 
-
     // Show errors
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
@@ -107,7 +117,7 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Logo/Title
+            // Logo
             Text(
                 text = "BokBok",
                 style = MaterialTheme.typography.displayLarge,
@@ -126,7 +136,23 @@ fun LoginScreen(
             // Google Sign-In Button
             OutlinedButton(
                 onClick = {
-                    authViewModel.signInWithGoogle()  // ← No parameters needed!
+                    // Check Android version and use appropriate method
+                    if (authViewModel.supportsModernAuth()) {
+                        // Modern: Credential Manager (Android 9+)
+                        // Pass Activity context!
+                        if (activity != null) {
+                            authViewModel.signInWithGoogle(activity)
+                        } else {
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Error: Activity not found")
+                            }
+                        }
+                    } else {
+                        // Legacy: Start activity for result
+                        authViewModel.startLegacyGoogleSignIn { intent ->
+                            legacyGoogleSignInLauncher.launch(intent)
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -143,7 +169,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Divider with "OR"
+            // OR Divider
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically

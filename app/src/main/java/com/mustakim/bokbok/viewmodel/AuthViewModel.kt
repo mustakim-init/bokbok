@@ -1,6 +1,8 @@
 package com.mustakim.bokbok.viewmodel
 
+import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.repository.AuthRepository
@@ -19,7 +21,6 @@ data class AuthUiState(
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = AuthRepository(application.applicationContext)
-
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
@@ -33,12 +34,46 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    // Google Sign-In (NO parameters needed!)
-    fun signInWithGoogle() {
+    // Check if device supports modern Credential Manager
+    fun supportsModernAuth(): Boolean {
+        return repository.supportsCredentialManager()
+    }
+
+    // Start legacy Google Sign-In (older devices)
+    fun startLegacyGoogleSignIn(onIntentReady: (Intent) -> Unit) {
+        val intent = repository.getGoogleSignInIntent()
+        onIntentReady(intent)
+    }
+
+    // Handle legacy Google Sign-In result
+    fun handleLegacyGoogleSignIn(data: Intent?) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            repository.handleLegacyGoogleSignInResult(data).fold(
+                onSuccess = { (user, isNewUser) ->
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isLoggedIn = true,
+                        isNewGoogleUser = isNewUser,
+                        successMessage = if (isNewUser) "Account created!" else "Welcome back!"
+                    )
+                },
+                onFailure = { error ->
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = error.message ?: "Failed to sign in with Google"
+                    )
+                }
+            )
+        }
+    }
 
-            repository.signInWithGoogle().fold(
+    // Modern Google Sign-In (Credential Manager for Android 9+)
+    // Pass Activity from UI!
+    fun signInWithGoogle(activity: Activity) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            repository.signInWithGoogle(activity).fold(
                 onSuccess = { (user, isNewUser) ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -73,7 +108,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun updateUsername(username: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
             val userId = repository.getCurrentUser()?.uid
             if (userId != null) {
                 repository.updateUsername(userId, username).fold(
@@ -103,7 +137,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
             repository.signUp(email, password, username, displayName).fold(
                 onSuccess = {
                     _uiState.value = _uiState.value.copy(
@@ -125,7 +158,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun signIn(email: String, password: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
             repository.signIn(email, password).fold(
                 onSuccess = {
                     _uiState.value = _uiState.value.copy(

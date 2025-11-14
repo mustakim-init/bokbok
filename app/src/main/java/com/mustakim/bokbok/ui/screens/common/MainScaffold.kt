@@ -32,6 +32,7 @@ import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
 
+
 @Composable
 fun MainScaffold(
     navController: NavHostController,
@@ -172,16 +173,25 @@ fun MainScaffold(
                     }
                 }
             ) { paddingValues ->
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
                     content(paddingValues)
 
-                    // Layer 2: Minimized bar
+
+                    // Layer 2: Minimized bar anchored using the real bottom inset
                     if (currentRoom != null && isMinimized) {
                         AnimatedVisibility(
                             visible = true,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .fillMaxWidth(),
+                                .fillMaxWidth()
+                                .padding(
+                                    start = 4.dp,
+                                    end = 4.dp,
+                                    bottom = paddingValues.calculateBottomPadding() + 8.dp
+                                ),
                             enter = slideInVertically(
                                 initialOffsetY = { it },
                                 animationSpec = tween(300)
@@ -198,9 +208,7 @@ fun MainScaffold(
                                 onExpand = { RoomStateManager.expandRoom() },
                                 onToggleMute = { RoomStateManager.toggleMute() },
                                 onLeaveRoom = { RoomStateManager.leaveRoom() },
-                                modifier = Modifier.padding(
-                                    bottom = if (showBottomBar) 80.dp else 16.dp
-                                )
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }

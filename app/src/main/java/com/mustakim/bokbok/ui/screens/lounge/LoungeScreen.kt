@@ -47,7 +47,6 @@ import com.mustakim.bokbok.viewmodel.LoungeUiState
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 
-
 @Composable
 fun LoungeScreen(
     navController: NavHostController,
@@ -110,6 +109,7 @@ private fun LoungeContent(
     paddingValues: PaddingValues,
     uiState: LoungeUiState,
     onCreateRoom: () -> Unit,
+    isMinimized: Boolean = RoomStateManager.isMinimized.value,
     onFriendClick: (FriendStatus) -> Unit,
     onRoomClick: (VoiceRoom) -> Unit,
     onRefresh: () -> Unit,  // ✅ Pull-to-refresh callback
@@ -170,7 +170,10 @@ private fun LoungeContent(
             onClick = onCreateRoom,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 32.dp, bottom = 36.dp),
+                .padding(
+                    end = 32.dp,
+                    bottom = if (isMinimized) 120.dp else 36.dp
+                ),
             containerColor = MaterialTheme.colorScheme.primary
         ) {
             Icon(Icons.Default.Add, "Create Room")

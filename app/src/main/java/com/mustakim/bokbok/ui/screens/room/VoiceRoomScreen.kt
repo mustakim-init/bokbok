@@ -50,7 +50,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mustakim.bokbok.data.model.VoiceRoom
 import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 import com.mustakim.bokbok.ui.components.ParticipantCard
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
@@ -60,7 +59,7 @@ import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 @Composable
 fun VoiceRoomScreen(
     roomId: String,
-    onMinimize: (VoiceRoom, Boolean) -> Unit,
+    onMinimize: (Boolean) -> Unit,
     onLeaveRoom: () -> Unit,
     viewModel: VoiceRoomViewModel = viewModel()
 ) {
@@ -110,12 +109,10 @@ fun VoiceRoomScreen(
         uiState.room?.name ?: "Voice Room"
     }
 
-    val onMinimizeCallback: () -> Unit = remember(uiState.room, uiState.isMuted) {
+    val onMinimizeCallback: () -> Unit = remember(uiState.isMuted) {
         {
-            uiState.room?.let { room ->
-                onMinimize(room, uiState.isMuted)
-            }
-            Unit
+            // Pass only the muted state to the parent
+            onMinimize(uiState.isMuted)
         }
     }
 

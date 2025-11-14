@@ -62,12 +62,9 @@ fun LoungeScreen(
             onRefresh = remember(loungeViewModel) { { loungeViewModel.refreshAllData() } },
             onRefreshPublicRooms = remember(loungeViewModel) { { loungeViewModel.refreshPublicRooms() } },
             // ✅ FIXED: Use RoomStateManager for public rooms too
-            onJoinRoom = remember {
-                { roomId: String ->
-                    // Find the room from uiState and join it
-                    val room = uiState.publicRooms.find { it.id == roomId }
-                    room?.let { RoomStateManager.joinRoom(it) }
-                }
+            onJoinRoom = { roomId: String ->
+                val room = uiState.publicRooms.find { it.id == roomId }
+                room?.let { RoomStateManager.joinRoom(it) }
             }
         )
     }

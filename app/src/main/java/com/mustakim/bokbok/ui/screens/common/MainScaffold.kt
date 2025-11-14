@@ -5,7 +5,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
@@ -28,10 +27,10 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.MinimizedRoomBar
+import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
-import com.mustakim.bokbok.ui.navigation.NavRoutes
 
 @Composable
 fun MainScaffold(
@@ -214,23 +213,34 @@ fun MainScaffold(
         if (currentRoom != null && !isMinimized) {
             AnimatedVisibility(
                 visible = true,
-                modifier = Modifier.fillMaxSize(), // ✅ Now fills the entire screen
+                modifier = Modifier.fillMaxSize(),
                 enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(450, easing = FastOutSlowInEasing)
-                ) + fadeIn(tween(300)),
+                    initialOffsetY = { fullHeight -> fullHeight },
+                    animationSpec = tween(
+                        durationMillis = 260,
+                        easing = FastOutSlowInEasing
+                    )
+                ) + fadeIn(
+                    animationSpec = tween(
+                        durationMillis = 180
+                    )
+                ),
                 exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = tween(450, easing = FastOutSlowInEasing)
-                ) + scaleOut(
-                    targetScale = 0.85f,
-                    animationSpec = tween(450)
-                ) + fadeOut(tween(300))
+                    targetOffsetY = { fullHeight -> fullHeight },
+                    animationSpec = tween(
+                        durationMillis = 260,
+                        easing = FastOutSlowInEasing
+                    )
+                ) + fadeOut(
+                    animationSpec = tween(
+                        durationMillis = 180
+                    )
+                )
             ) {
                 VoiceRoomScreen(
                     roomId = currentRoom.id,
-                    onMinimize = { _, muted ->
-                        RoomStateManager.minimizeRoom(currentRoom, muted)
+                    onMinimize = { isMuted ->
+                        RoomStateManager.minimizeRoom(isMuted)
                     },
                     onLeaveRoom = {
                         RoomStateManager.leaveRoom()

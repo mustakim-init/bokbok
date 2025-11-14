@@ -1,11 +1,10 @@
 package com.mustakim.bokbok.ui.navigation
 
-import androidx.compose.animation.core.CubicBezierEasing
+import android.content.pm.PackageManager
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
@@ -38,27 +37,45 @@ import com.mustakim.bokbok.viewmodel.UserViewModel
 
 // ✅ Centralized animation specs for consistency
 private object NavigationAnimations {
-    val defaultEnterTransition = fadeIn(tween(200))
-    val defaultExitTransition = fadeOut(tween(200))
 
+    // Keep global transitions very light and fast
+    val defaultEnterTransition = fadeIn(
+        animationSpec = tween(
+            durationMillis = 150
+        )
+    )
+
+    val defaultExitTransition = fadeOut(
+        animationSpec = tween(
+            durationMillis = 150
+        )
+    )
+
+    // Voice room enter: faster slide + fade, no extra scaling
     val roomEnterTransition = slideInVertically(
         initialOffsetY = { it },
         animationSpec = tween(
-            durationMillis = 450,
+            durationMillis = 260,
             easing = FastOutSlowInEasing
         )
-    ) + fadeIn(animationSpec = tween(300))
+    ) + fadeIn(
+        animationSpec = tween(
+            durationMillis = 180
+        )
+    )
 
+    // Voice room exit: matching speed, slightly eased out
     val roomExitTransition = slideOutVertically(
         targetOffsetY = { it },
         animationSpec = tween(
-            durationMillis = 450,
-            easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
+            durationMillis = 260,
+            easing = FastOutSlowInEasing
         )
-    ) + scaleOut(
-        targetScale = 0.85f,
-        animationSpec = tween(450, easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f))
-    ) + fadeOut(animationSpec = tween(300))
+    ) + fadeOut(
+        animationSpec = tween(
+            durationMillis = 180
+        )
+    )
 }
 
 @Composable
@@ -74,17 +91,18 @@ fun NavGraph(
     val friendsRepository = remember(userRepository) { FriendsRepository(userRepository) }
 
     // ✅ Memoize permission check logic
-    val checkRequiredPermissions = remember(context) {
+    val hasAllRequiredPermissions = remember(context) {
         {
             val requiredPermissions = PermissionsList.getRequiredPermissions()
             requiredPermissions.all { permission ->
                 ContextCompat.checkSelfPermission(
                     context,
                     permission.permission
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) == PackageManager.PERMISSION_GRANTED
             }
         }
     }
+
 
     NavHost(
         navController = navController,
@@ -101,7 +119,7 @@ fun NavGraph(
                     }
                 },
                 onNavigateToLounge = {
-                    val destination = if (checkRequiredPermissions()) {
+                    val destination = if (hasAllRequiredPermissions()) {
                         NavRoutes.Lounge.route
                     } else {
                         NavRoutes.Permissions.route
@@ -188,10 +206,11 @@ fun NavGraph(
         ) { backStackEntry ->
             val roomId = backStackEntry.arguments?.getString("roomId")
                 ?: return@composable
+
             VoiceRoomScreen(
                 roomId = roomId,
-                onMinimize = { room, isMuted ->
-                    RoomStateManager.minimizeRoom(room, isMuted)
+                onMinimize = { isMuted ->
+                    RoomStateManager.minimizeRoom(isMuted)
                     navController.popBackStack()
                 },
                 onLeaveRoom = {

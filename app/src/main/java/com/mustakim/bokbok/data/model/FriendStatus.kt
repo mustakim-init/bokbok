@@ -1,5 +1,9 @@
 package com.mustakim.bokbok.data.model
 
+import androidx.compose.runtime.Immutable
+
+
+@Immutable
 data class FriendStatus(
     val userId: String,
     val username: String,

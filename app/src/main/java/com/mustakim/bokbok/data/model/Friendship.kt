@@ -1,8 +1,11 @@
 package com.mustakim.bokbok.data.model
 
+import androidx.compose.runtime.Immutable
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 
+
+@Immutable
 data class Friendship(
     @DocumentId
     val id: String = "",

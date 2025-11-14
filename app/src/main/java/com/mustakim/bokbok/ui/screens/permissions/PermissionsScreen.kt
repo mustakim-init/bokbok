@@ -30,6 +30,17 @@ fun PermissionsScreen(
 
     var grantedPermissions by remember { mutableStateOf(setOf<String>()) }
 
+    val requiredPermissions = remember {
+        val allRequired = PermissionsList.getRequiredPermissions()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            allRequired
+        } else {
+            // On Android 12 and below, ignore POST_NOTIFICATIONS as a "required" permission
+            allRequired.filter { it.permission != android.Manifest.permission.POST_NOTIFICATIONS }
+        }
+    }
+
+
     // Permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -37,7 +48,7 @@ fun PermissionsScreen(
         grantedPermissions = results.filter { it.value }.keys
 
         // Auto-advance to next screen if all required permissions granted
-        val requiredGranted = PermissionsList.getRequiredPermissions().all {
+        val requiredGranted = requiredPermissions.all {
             grantedPermissions.contains(it.permission)
         }
 
@@ -143,7 +154,7 @@ fun PermissionsScreen(
             } else {
                 Button(
                     onClick = {
-                        val permissionsToRequest = PermissionsList.getRequiredPermissions()
+                        val permissionsToRequest = requiredPermissions
                             .filter { !grantedPermissions.contains(it.permission) }
                             .map { it.permission }
                             .toTypedArray()

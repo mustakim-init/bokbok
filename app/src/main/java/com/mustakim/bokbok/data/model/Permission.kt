@@ -3,8 +3,11 @@ package com.mustakim.bokbok.data.model
 import android.os.Build
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
 
+
+@Immutable
 data class AppPermission(
     val permission: String,
     val title: String,

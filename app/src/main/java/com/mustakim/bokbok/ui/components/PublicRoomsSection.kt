@@ -29,16 +29,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,10 +53,16 @@ fun PublicRoomsSection(
     onRefresh: () -> Unit,
     onRoomClick: (VoiceRoom) -> Unit,
     modifier: Modifier = Modifier,
-    isRefreshing: Boolean = false  // ✅ Add this parameter
+    isRefreshing: Boolean = false
 ) {
+    if (rooms.isEmpty()) return
+
+    // ✅ Pre-chunk rooms so we don't recompute on every recomposition
+    val roomRows = remember(rooms) { rooms.chunked(2) }
+    val currentOnRoomClick by rememberUpdatedState(onRoomClick)
+
     Column(modifier = modifier) {
-        // Section Header with rotating refresh button
+        // Header + refresh
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -71,14 +76,13 @@ fun PublicRoomsSection(
                 fontWeight = FontWeight.Bold
             )
 
-            // ✅ Refresh button with loading animation
             RefreshButton(
                 isRefreshing = isRefreshing,
                 onClick = onRefresh
             )
         }
 
-        // Stats cards
+        // Stats row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,7 +94,6 @@ fun PublicRoomsSection(
                 value = totalRooms.toString(),
                 modifier = Modifier.weight(1f)
             )
-
             StatCard(
                 title = "Online Users",
                 value = totalParticipants.toString(),
@@ -100,12 +103,7 @@ fun PublicRoomsSection(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-
-        val roomRows by remember(rooms) {
-            mutableStateOf(rooms.chunked(2))
-        }
-
-        // Rooms grid
+        // Rooms grid - kept as simple Column of Rows to avoid nested scrolling
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -121,7 +119,7 @@ fun PublicRoomsSection(
                         Box(modifier = Modifier.weight(1f)) {
                             CompactRoomCard(
                                 room = room,
-                                onClick = { onRoomClick(room) }
+                                onClick = { currentOnRoomClick(room) }
                             )
                         }
                     }
@@ -134,19 +132,23 @@ fun PublicRoomsSection(
     }
 }
 
-// ✅ NEW: Refresh button with rotation animation
 @Composable
 private fun RefreshButton(
     isRefreshing: Boolean,
     onClick: () -> Unit
 ) {
-    // Rotation animation
+    // ✅ Only run infinite animation while refreshing, otherwise stay at 0°
+    val targetRotation = if (isRefreshing) 360f else 0f
     val rotation by animateFloatAsState(
-        targetValue = if (isRefreshing) 360f else 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
+        targetValue = targetRotation,
+        animationSpec = if (isRefreshing) {
+            infiniteRepeatable(
+                animation = tween(durationMillis = 1000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            )
+        } else {
+            tween(durationMillis = 0)
+        },
         label = "refresh_rotation"
     )
 
@@ -157,16 +159,16 @@ private fun RefreshButton(
         Icon(
             imageVector = Icons.Default.Refresh,
             contentDescription = "Refresh rooms",
-            tint = if (isRefreshing)
+            tint = if (isRefreshing) {
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-            else
-                MaterialTheme.colorScheme.primary,
-            modifier = Modifier.rotate(if (isRefreshing) rotation else 0f)
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+            modifier = Modifier.rotate(rotation)
         )
     }
 }
 
-// Keep your existing StatCard and CompactRoomCard composables...
 @Composable
 private fun StatCard(
     title: String,
@@ -200,6 +202,17 @@ private fun StatCard(
         }
     }
 }
+
+@Immutable
+private data class CompactRoomColors(
+    val hasImage: Boolean,
+    val categoryBg: Color?,
+    val categoryText: Color?,
+    val title: Color?,
+    val participantIcon: Color?,
+    val participantText: Color?,
+    val fallbackGradient: Brush
+)
 
 @Composable
 fun CompactRoomCard(
@@ -235,16 +248,12 @@ fun CompactRoomCard(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(180.dp)
-            .graphicsLayer {
-                compositingStrategy = CompositingStrategy.Offscreen
-            },
+            .height(180.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Background
             if (hasImage) {
                 AsyncImage(
                     model = room.imageUrl,
@@ -252,15 +261,21 @@ fun CompactRoomCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                Box(modifier = Modifier.fillMaxSize().background(imageGradient))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(imageGradient)
+                )
             } else {
-                Box(modifier = Modifier.fillMaxSize().background(colors.fallbackGradient))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.fallbackGradient)
+                )
             }
 
-            // Content
             CompactRoomCardContent(room = room, colors = colors)
 
-            // Privacy icon
             if (!room.isPublic) {
                 Icon(
                     imageVector = Icons.Default.Lock,
@@ -275,16 +290,6 @@ fun CompactRoomCard(
         }
     }
 }
-
-private data class CompactRoomColors(
-    val hasImage: Boolean,
-    val categoryBg: Color?,
-    val categoryText: Color?,
-    val title: Color?,
-    val participantIcon: Color?,
-    val participantText: Color?,
-    val fallbackGradient: Brush
-)
 
 @Composable
 private fun CompactRoomCardContent(
@@ -332,6 +337,7 @@ private fun CompactRoomCardContent(
                     modifier = Modifier.size(16.dp),
                     tint = colors.participantIcon ?: MaterialTheme.colorScheme.primary
                 )
+
                 Text(
                     text = "${room.participantCount}/${room.maxParticipants}",
                     style = MaterialTheme.typography.bodySmall,

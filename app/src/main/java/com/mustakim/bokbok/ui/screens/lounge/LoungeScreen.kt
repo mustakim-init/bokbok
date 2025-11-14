@@ -1,27 +1,43 @@
 package com.mustakim.bokbok.ui.screens.lounge
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.data.model.FriendStatus
 import com.mustakim.bokbok.data.model.VoiceRoom
+import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.FriendsStatusSection
 import com.mustakim.bokbok.ui.components.PublicRoomsSection
 import com.mustakim.bokbok.ui.components.RoundedParallaxCarousel
@@ -30,7 +46,6 @@ import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.LoungeUiState
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
-import com.mustakim.bokbok.state.RoomStateManager
 
 
 @Composable
@@ -171,18 +186,16 @@ private fun LazyListScope.friendsSection(
     if (friends.isEmpty()) return
 
     item(key = "friends_section", contentType = "friends") {
-        Box(
+        Column(
             modifier = Modifier
-                .graphicsLayer {
-                    compositingStrategy = CompositingStrategy.Offscreen
-                }
+                .fillMaxWidth()
+                .padding(bottom = 24.dp) // spacing moved here
         ) {
-            FriendsStatusSection(friends = friends, onFriendClick = onFriendClick)
+            FriendsStatusSection(
+                friends = friends,
+                onFriendClick = onFriendClick
+            )
         }
-    }
-
-    item(key = "friends_spacer", contentType = "spacer") {
-        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
@@ -200,32 +213,32 @@ private fun LazyListScope.myRoomsSection(
     }
 
     item(key = "my_rooms_carousel", contentType = "carousel") {
-        Box(
+        Column(
             modifier = Modifier
-                .height(420.dp)
-                .graphicsLayer {
-                    compositingStrategy = CompositingStrategy.Offscreen
-                }
+                .fillMaxWidth()
+                .padding(bottom = 32.dp) // spacing moved here
         ) {
-            if (rooms.isEmpty()) {
-                EmptyRoomsCard()
-            } else {
-                RoundedParallaxCarousel(
-                    items = rooms,
-                    modifier = Modifier.fillMaxSize()
-                ) { room, _ ->
-                    VoiceRoomCard(
-                        room = room,
-                        onClick = { onRoomClick(room) },
-                        onImageSelected = null
-                    )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+            ) {
+                if (rooms.isEmpty()) {
+                    EmptyRoomsCard()
+                } else {
+                    RoundedParallaxCarousel(
+                        items = rooms,
+                        modifier = Modifier.fillMaxSize()
+                    ) { room, _ ->
+                        VoiceRoomCard(
+                            room = room,
+                            onClick = { onRoomClick(room) },
+                            onImageSelected = null
+                        )
+                    }
                 }
             }
         }
-    }
-
-    item(key = "my_rooms_spacer", contentType = "spacer") {
-        Spacer(modifier = Modifier.height(32.dp))
     }
 }
 

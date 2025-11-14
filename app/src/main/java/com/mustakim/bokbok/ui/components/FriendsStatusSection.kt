@@ -2,18 +2,34 @@ package com.mustakim.bokbok.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -29,7 +45,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-// ✅ GLOBAL SINGLETON: Shape created ONCE for entire app
+// Global scallop shape cached once
 private val CachedScallopShape = ScallopShape()
 
 @Composable
@@ -38,6 +54,7 @@ fun FriendsStatusSection(
     onFriendClick: (FriendStatus) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Only compute online friends once per friends list change
     val onlineFriends = remember(friends) {
         friends.filter { it.status != UserStatus.OFFLINE }
     }
@@ -61,19 +78,12 @@ fun FriendsStatusSection(
             items(
                 items = onlineFriends,
                 key = { friend -> friend.userId },
-                contentType = { "friend_card" }  // ✅ Add content type
+                contentType = { "friend_card" }
             ) { friend ->
-                // ✅ Wrap each card in GPU cache
-                Box(
-                    modifier = Modifier.graphicsLayer {
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                ) {
-                    FriendStatusCard(
-                        friend = friend,
-                        onClick = { onFriendClick(friend) }
-                    )
-                }
+                FriendStatusCard(
+                    friend = friend,
+                    onClick = { onFriendClick(friend) }
+                )
             }
         }
     }
@@ -142,10 +152,10 @@ fun FriendStatusCard(
                             color = onPrimaryColor,
                             fontWeight = FontWeight.Bold
                         )
-                    }  // ✅ Close inner Box (with profile)
-                }  // ✅ Close if/else
-            }  // ✅ Close outer Box (fillMaxSize)
-        }  // ✅ Close Card
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -158,8 +168,6 @@ fun FriendStatusCard(
         )
     }
 }
-
-
 
 @Composable
 fun ThoughtBubbleBadge(
@@ -201,7 +209,7 @@ fun ThoughtBubbleBadge(
             )
         }
 
-        // ✅ FIXED: Tail with proper coordinates
+        // Tail
         Canvas(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -209,10 +217,9 @@ fun ThoughtBubbleBadge(
                 .size(14.dp, 10.dp)
         ) {
             val tailPath = Path().apply {
-                // Angled triangle pointing toward profile center
-                moveTo(0f, 0f)              // Top-left
-                lineTo(size.width * 0.6f, 0f)  // Top-right (60% width)
-                lineTo(size.width, size.height) // Bottom-right (tip)
+                moveTo(0f, 0f)
+                lineTo(size.width * 0.6f, 0f)
+                lineTo(size.width, size.height)
                 close()
             }
 
@@ -224,8 +231,7 @@ fun ThoughtBubbleBadge(
     }
 }
 
-
-// ✅ OPTIMIZED SHAPE: Path cached in singleton
+// Scallop shape with cached path so it's cheap at runtime
 class ScallopShape(
     private val lobes: Int = 9,
     private val innerRadiusRatio: Float = 0.87f,
@@ -233,7 +239,6 @@ class ScallopShape(
     private val rotationDegrees: Float = 30f
 ) : Shape {
 
-    // ✅ Cache the path calculation
     private var cachedPath: Path? = null
     private var cachedSize: Size? = null
 
@@ -242,12 +247,10 @@ class ScallopShape(
         layoutDirection: LayoutDirection,
         density: Density
     ): Outline {
-        // ✅ Only recalculate if size changes
         if (cachedPath == null || cachedSize != size) {
             cachedSize = size
             cachedPath = createScallopPath(size)
         }
-
         return Outline.Generic(cachedPath!!)
     }
 
@@ -255,7 +258,6 @@ class ScallopShape(
         val center = Offset(size.width / 2f, size.height / 2f)
         val outerRadius = size.minDimension / 2f
         val baseInnerRadius = outerRadius * innerRadiusRatio
-
         val points = buildAlternatingPoints(
             lobes = lobes,
             center = center,
@@ -263,7 +265,6 @@ class ScallopShape(
             baseInnerR = baseInnerRadius,
             rotationRad = Math.toRadians(rotationDegrees.toDouble()).toFloat()
         )
-
         return catmullRomClosedPath(points, smoothness)
     }
 
@@ -276,59 +277,47 @@ class ScallopShape(
     ): List<Offset> {
         val pts = mutableListOf<Offset>()
         val step = 2.0 * PI / lobes
-
         for (i in 0 until lobes) {
             val baseAngle = i * step + rotationRad
-
-            // Outer point
+            // Outer
             val aOuter = baseAngle
             val outerX = center.x + (outerR * cos(aOuter)).toFloat()
             val outerY = center.y + (outerR * sin(aOuter)).toFloat()
             pts.add(Offset(outerX, outerY))
-
-            // Inner point
+            // Inner
             val aInner = baseAngle + step / 2.0
             val innerX = center.x + (baseInnerR * cos(aInner)).toFloat()
             val innerY = center.y + (baseInnerR * sin(aInner)).toFloat()
             pts.add(Offset(innerX, innerY))
         }
-
         return pts
     }
 
     private fun catmullRomClosedPath(points: List<Offset>, smoothness: Float): Path {
         val path = Path()
         if (points.isEmpty()) return path
-
         val n = points.size
         path.moveTo(points[0].x, points[0].y)
-
         val tension = 1f - smoothness
         val factor = (1f - tension) / 6f
-
         for (i in 0 until n) {
             val im1 = (i - 1 + n) % n
             val ip1 = (i + 1) % n
             val ip2 = (i + 2) % n
-
             val P0 = points[im1]
             val P1 = points[i]
             val P2 = points[ip1]
             val P3 = points[ip2]
-
             val c1 = Offset(
                 x = P1.x + (P2.x - P0.x) * factor,
                 y = P1.y + (P2.y - P0.y) * factor
             )
-
             val c2 = Offset(
                 x = P2.x - (P3.x - P1.x) * factor,
                 y = P2.y - (P3.y - P1.y) * factor
             )
-
             path.cubicTo(c1.x, c1.y, c2.x, c2.y, P2.x, P2.y)
         }
-
         path.close()
         return path
     }

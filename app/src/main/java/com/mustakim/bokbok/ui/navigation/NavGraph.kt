@@ -1,7 +1,7 @@
 package com.mustakim.bokbok.ui.navigation
 
-import android.os.Build
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,7 +12,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -37,19 +36,63 @@ import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 
+// ✅ Centralized animation specs for consistency
+private object NavigationAnimations {
+    val defaultEnterTransition = fadeIn(tween(200))
+    val defaultExitTransition = fadeOut(tween(200))
+
+    val roomEnterTransition = slideInVertically(
+        initialOffsetY = { it },
+        animationSpec = tween(
+            durationMillis = 450,
+            easing = FastOutSlowInEasing
+        )
+    ) + fadeIn(animationSpec = tween(300))
+
+    val roomExitTransition = slideOutVertically(
+        targetOffsetY = { it },
+        animationSpec = tween(
+            durationMillis = 450,
+            easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
+        )
+    ) + scaleOut(
+        targetScale = 0.85f,
+        animationSpec = tween(450, easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f))
+    ) + fadeOut(animationSpec = tween(300))
+}
 
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    themeViewModel: ThemeViewModel
+    themeViewModel: ThemeViewModel,
+    userViewModel: UserViewModel // ✅ Receive from parent
 ) {
-    val userViewModel: UserViewModel = viewModel()
     val context = LocalContext.current
+
+    // ✅ Memoize repositories at NavGraph level
+    val userRepository = remember(context) { UserRepository(context) }
+    val friendsRepository = remember(userRepository) { FriendsRepository(userRepository) }
+
+    // ✅ Memoize permission check logic
+    val checkRequiredPermissions = remember(context) {
+        {
+            val requiredPermissions = PermissionsList.getRequiredPermissions()
+            requiredPermissions.all { permission ->
+                ContextCompat.checkSelfPermission(
+                    context,
+                    permission.permission
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
-        startDestination = NavRoutes.Splash.route
+        startDestination = NavRoutes.Splash.route,
+        enterTransition = { NavigationAnimations.defaultEnterTransition },
+        exitTransition = { NavigationAnimations.defaultExitTransition }
     ) {
+        // ============= AUTH FLOW =============
         composable(NavRoutes.Splash.route) {
             SplashScreen(
                 onNavigateToLogin = {
@@ -58,33 +101,13 @@ fun NavGraph(
                     }
                 },
                 onNavigateToLounge = {
-                    // Check if required permissions are granted
-                    val requiredPermissions = PermissionsList.getRequiredPermissions()
-                    val allRequiredGranted = requiredPermissions.all { permission ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                            permission.permission == android.Manifest.permission.POST_NOTIFICATIONS) {
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                permission.permission
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        } else {
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                permission.permission
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        }
-                    }
-
-                    if (allRequiredGranted) {
-                        // All permissions granted, go to lounge
-                        navController.navigate(NavRoutes.Lounge.route) {
-                            popUpTo(NavRoutes.Splash.route) { inclusive = true }
-                        }
+                    val destination = if (checkRequiredPermissions()) {
+                        NavRoutes.Lounge.route
                     } else {
-                        // Need permissions, show permission screen
-                        navController.navigate(NavRoutes.Permissions.route) {
-                            popUpTo(NavRoutes.Splash.route) { inclusive = true }
-                        }
+                        NavRoutes.Permissions.route
+                    }
+                    navController.navigate(destination) {
+                        popUpTo(NavRoutes.Splash.route) { inclusive = true }
                     }
                 }
             )
@@ -104,9 +127,7 @@ fun NavGraph(
             )
         }
 
-
-        // In your NavGraph setup
-        composable("google_signup") {
+        composable(NavRoutes.GoogleSignup.route) {
             GoogleSignupScreen(
                 navController = navController,
                 userViewModel = userViewModel
@@ -117,20 +138,20 @@ fun NavGraph(
             PermissionsScreen(navController = navController)
         }
 
+        // ============= MAIN APP FLOW =============
         composable(NavRoutes.Lounge.route) {
             LoungeScreen(navController, userViewModel)
         }
 
         composable(NavRoutes.Chats.route) {
-            val context = LocalContext.current
-            val userRepository = remember { UserRepository(context) }
-            val friendsRepository = remember { FriendsRepository(userRepository) }
-
+            // ✅ Use memoized repositories from NavGraph
             ChatsScreen(
                 friendsRepository = friendsRepository,
-                onFriendClick = { userId -> },
-                navController = navController,  // ✅ Pass navController
-                userViewModel = userViewModel   // ✅ Pass userViewModel
+                onFriendClick = { userId ->
+                    navController.navigate(NavRoutes.Chat.createRoute(userId))
+                },
+                navController = navController,
+                userViewModel = userViewModel
             )
         }
 
@@ -138,6 +159,7 @@ fun NavGraph(
             GameBoostScreen(navController, userViewModel)
         }
 
+        // ============= SECONDARY SCREENS =============
         composable(NavRoutes.Notifications.route) {
             NotificationsScreen(navController)
         }
@@ -150,60 +172,49 @@ fun NavGraph(
             SettingsScreen(navController, themeViewModel)
         }
 
-        // Voice Room screen
-        // Voice Room screen
+        // ============= VOICE ROOM =============
         composable(
-            route = "voice_room/{roomId}",
-            arguments = listOf(navArgument("roomId") { type = NavType.StringType }),
-            enterTransition = {
-                slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(
-                        durationMillis = 450,
-                        easing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
-                    )
-                ) + fadeIn(
-                    animationSpec = tween(300)
-                )
-            },
-            exitTransition = null,  // ✅ Disable exit (we use popExit instead)
-            popEnterTransition = {
-                // Lounge reappears
-                fadeIn(animationSpec = tween(200))
-            },
-            popExitTransition = {
-                // ✅ THIS is the minimize animation
-                slideOutVertically(
-                    targetOffsetY = { it },  // Slide down
-                    animationSpec = tween(
-                        durationMillis = 450,
-                        easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
-                    )
-                ) + scaleOut(
-                    targetScale = 0.85f,
-                    animationSpec = tween(
-                        durationMillis = 450,
-                        easing = CubicBezierEasing(0.4f, 0.0f, 1.0f, 1.0f)
-                    )
-                ) + fadeOut(
-                    animationSpec = tween(300)
-                )
-            }
+            route = NavRoutes.Room.route,
+            arguments = listOf(
+                navArgument("roomId") {
+                    type = NavType.StringType
+                    nullable = false
+                }
+            ),
+            enterTransition = { NavigationAnimations.roomEnterTransition },
+            exitTransition = { null }, // Disable exit (use popExit)
+            popEnterTransition = { fadeIn(animationSpec = tween(200)) },
+            popExitTransition = { NavigationAnimations.roomExitTransition }
         ) { backStackEntry ->
-            val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
-
-            // ✅ NO coroutine scope needed!
+            val roomId = backStackEntry.arguments?.getString("roomId")
+                ?: return@composable
             VoiceRoomScreen(
                 roomId = roomId,
                 onMinimize = { room, isMuted ->
                     RoomStateManager.minimizeRoom(room, isMuted)
-                    navController.popBackStack()  // ✅ Animation happens automatically
+                    navController.popBackStack()
                 },
                 onLeaveRoom = {
                     RoomStateManager.leaveRoom()
                     navController.popBackStack()
                 }
             )
+        }
+
+        // ============= CHAT SCREEN (Future) =============
+        composable(
+            route = NavRoutes.Chat.route,
+            arguments = listOf(
+                navArgument("userId") {
+                    type = NavType.StringType
+                    nullable = false
+                }
+            )
+        ) { backStackEntry ->
+            val userId = backStackEntry.arguments?.getString("userId")
+                ?: return@composable
+            // TODO: Implement ChatScreen
+            // ChatScreen(userId = userId, navController = navController)
         }
     }
 }

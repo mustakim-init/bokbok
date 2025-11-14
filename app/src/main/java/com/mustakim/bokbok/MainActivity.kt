@@ -16,15 +16,17 @@ import androidx.navigation.compose.rememberNavController
 import com.mustakim.bokbok.ui.navigation.NavGraph
 import com.mustakim.bokbok.ui.theme.BokBokTheme
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
+import com.mustakim.bokbok.viewmodel.UserViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
-
         setContent {
+            // ✅ Hoist both ViewModels
             val themeViewModel: ThemeViewModel = viewModel()
+            val userViewModel: UserViewModel = viewModel()
+
             val selectedTheme by themeViewModel.selectedTheme.collectAsState()
             val darkTheme = isSystemInDarkTheme()
 
@@ -39,7 +41,8 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     NavGraph(
                         navController = navController,
-                        themeViewModel = themeViewModel  // ← PASS IT HERE
+                        themeViewModel = themeViewModel,
+                        userViewModel = userViewModel
                     )
                 }
             }

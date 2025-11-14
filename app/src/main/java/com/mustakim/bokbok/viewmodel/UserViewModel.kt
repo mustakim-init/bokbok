@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.Stable
 
+@Stable
 class UserViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = UserRepository(application.applicationContext)
 

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import android.net.Uri
+import androidx.compose.runtime.Stable
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -28,6 +29,7 @@ data class LoungeUiState(
     val error: String? = null
 )
 
+@Stable
 class LoungeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RoomRepository()
 

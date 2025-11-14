@@ -72,8 +72,6 @@ fun <T> RoundedParallaxCarousel(
                     translationX = transformations.third
                     alpha = transformations.second
 
-                    // ✅ CRITICAL: Cache each page to GPU
-                    compositingStrategy = CompositingStrategy.Offscreen
                 }
         ) {
             content(items[page], page)

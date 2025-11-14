@@ -76,19 +76,11 @@ fun VoiceRoomCard(
     )
 
     Card(
-        onClick = {
-            if (imagePickerLauncher != null) {
-                imagePickerLauncher.launch("image/*")
-            } else {
-                onClick()
-            }
+        onClick = { onClick()
         },
         modifier = modifier
             .fillMaxWidth()
-            .height(400.dp)
-            .graphicsLayer {
-                compositingStrategy = CompositingStrategy.Offscreen
-            },
+            .height(400.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),

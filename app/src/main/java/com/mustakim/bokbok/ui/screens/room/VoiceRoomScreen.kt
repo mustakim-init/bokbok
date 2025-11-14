@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -149,17 +150,23 @@ fun VoiceRoomScreen(
             )
         },
         sheetContent = {
-            // Bottom sheet content
-            VoiceControlsSheet(
-                isMuted = uiState.isMuted,
-                isSpeakerOn = uiState.isSpeakerOn,
-                onToggleMic = viewModel::toggleMic,
-                onToggleSpeaker = viewModel::toggleSpeaker,
-                onOpenChat = { /* TODO */ },
-                onOpenVoiceEffects = { /* TODO */ },
-                onShareInvite = { /* TODO */ },
-                onLeaveRoom = onLeaveRoom
-            )
+            // Give the sheet more height than the peek, so it can actually expand
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 320.dp) // > sheetPeekHeight (140.dp)
+            ) {
+                VoiceControlsSheet(
+                    isMuted = uiState.isMuted,
+                    isSpeakerOn = uiState.isSpeakerOn,
+                    onToggleMic = viewModel::toggleMic,
+                    onToggleSpeaker = viewModel::toggleSpeaker,
+                    onOpenChat = { /* TODO */ },
+                    onOpenVoiceEffects = { /* TODO */ },
+                    onShareInvite = { /* TODO */ },
+                    onLeaveRoom = onLeaveRoom
+                )
+            }
         }
     ) { paddingValues ->
         // Main content - can be interacted with even when sheet is open

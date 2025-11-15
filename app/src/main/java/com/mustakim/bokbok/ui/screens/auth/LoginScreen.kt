@@ -148,19 +148,17 @@ fun LoginScreen(
             // Google Sign-In Button
             OutlinedButton(
                 onClick = {
-                    if (authViewModel.supportsModernAuth()) {
-                        // Modern: Check if user exists first
-                        if (activity != null) {
-                            authViewModel.signInWithGoogle(activity)
-                        } else {
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Error: Activity not found")
+                    if (activity != null) {
+                        authViewModel.signInWithGoogleWithFallback(
+                            activity = activity,
+                            onLegacyIntentReady = { intent ->
+                                // Launch legacy GoogleSignIn when fallback is needed
+                                legacyGoogleSignInLauncher.launch(intent)
                             }
-                        }
+                        )
                     } else {
-                        // Legacy: Use existing flow
-                        authViewModel.startLegacyGoogleSignIn { intent ->
-                            legacyGoogleSignInLauncher.launch(intent)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Error: Activity not found")
                         }
                     }
                 },

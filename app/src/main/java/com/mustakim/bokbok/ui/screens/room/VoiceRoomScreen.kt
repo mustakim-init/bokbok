@@ -55,6 +55,7 @@ import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 import com.mustakim.bokbok.ui.components.ParticipantCard
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
+import com.mustakim.bokbok.state.RoomStateManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +70,16 @@ fun VoiceRoomScreen(
     }
 
     val uiState by viewModel.uiState.collectAsState()
+
+
+    val globalMuted by RoomStateManager.isMuted
+
+    // When minimized bar toggles mute, sync back into ViewModel
+    LaunchedEffect(globalMuted) {
+        viewModel.setMutedFromGlobal(globalMuted)
+    }
+
+
     val colorScheme = MaterialTheme.colorScheme
     val isDarkTheme = isSystemInDarkTheme()
 

@@ -58,9 +58,9 @@ fun MainScaffold(
     }
     val (currentRoom, isMinimized, isMuted) = roomState
 
-    val showBars by remember {
-        derivedStateOf { currentRoom == null || isMinimized }
-    }
+    // Just compute it each recomposition, no remember
+    val showBars = currentRoom == null || isMinimized
+
 
     val onMenuClick: () -> Unit = remember(scope, drawerState) {
         {

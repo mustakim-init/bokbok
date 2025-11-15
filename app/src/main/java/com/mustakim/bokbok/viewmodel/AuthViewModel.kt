@@ -121,6 +121,73 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun signInWithGoogleWithFallback(
+        activity: Activity,
+        onLegacyIntentReady: (Intent) -> Unit
+    ) {
+        viewModelScope.launch {
+            // Start loading
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
+            // First try Credential Manager if supported
+            val supportsModern = repository.supportsCredentialManager()
+
+            if (supportsModern) {
+                val modernResult = repository.signInWithGoogle(activity)
+                modernResult.fold(
+                    onSuccess = { (user, isNewUser) ->
+                        if (isNewUser) {
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                isLoggedIn = false,
+                                isNewGoogleUser = true
+                            )
+                            _authEvents.value = AuthEvent.NavigateToUsernameSetup
+                        } else {
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                isLoggedIn = true,
+                                isNewGoogleUser = false
+                            )
+                            _authEvents.value = AuthEvent.NavigateToPermissions
+                        }
+                    },
+                    onFailure = { error ->
+                        // Credential Manager failed -> fall back to legacy
+                        try {
+                            val intent = repository.getGoogleSignInIntent()
+                            // Keep loading true; legacy flow will finish it
+                            onLegacyIntentReady(intent)
+                        } catch (e: Exception) {
+                            _uiState.value = _uiState.value.copy(
+                                isLoading = false,
+                                error = error.message ?: "Failed to sign in with Google"
+                            )
+                            _authEvents.value = AuthEvent.ShowError(
+                                error.message ?: "Failed to sign in with Google"
+                            )
+                        }
+                    }
+                )
+            } else {
+                // Older Android: go straight to legacy
+                try {
+                    val intent = repository.getGoogleSignInIntent()
+                    onLegacyIntentReady(intent)
+                } catch (e: Exception) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to sign in with Google"
+                    )
+                    _authEvents.value = AuthEvent.ShowError(
+                        e.message ?: "Failed to sign in with Google"
+                    )
+                }
+            }
+        }
+    }
+
+
     // Complete account creation for new Google users
     fun completeGoogleSignUp(username: String) {
         viewModelScope.launch {

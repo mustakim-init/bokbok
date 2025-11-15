@@ -23,9 +23,14 @@ object RoomStateManager {
     }
 
     fun minimizeRoom(muted: Boolean) {
-        // Only minimize if a room is active
         if (_currentRoom.value != null) {
             _isMinimized.value = true
+            setMuted(muted)
+        }
+    }
+
+    fun setMuted(muted: Boolean) {
+        if (_currentRoom.value != null) {
             _isMuted.value = muted
         }
     }
@@ -44,7 +49,7 @@ object RoomStateManager {
 
     fun toggleMute() {
         if (_currentRoom.value != null) {
-            _isMuted.value = !_isMuted.value
+            setMuted(!_isMuted.value)
         }
     }
 }

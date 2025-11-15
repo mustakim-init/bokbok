@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.mustakim.bokbok.data.repository.RoomRepository
+import com.mustakim.bokbok.state.JoinMode
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.MinimizedRoomBar
 import com.mustakim.bokbok.ui.navigation.NavRoutes
@@ -46,6 +48,9 @@ fun MainScaffold(
     val scope = rememberCoroutineScope()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+
+    val roomRepository = remember { RoomRepository() }
 
     val roomState by remember {
         derivedStateOf {
@@ -207,7 +212,18 @@ fun MainScaffold(
                                 isMuted = isMuted,
                                 onExpand = { RoomStateManager.expandRoom() },
                                 onToggleMute = { RoomStateManager.toggleMute() },
-                                onLeaveRoom = { RoomStateManager.leaveRoom() },
+                                onLeaveRoom = {
+                                    val modeSnapshot = RoomStateManager.joinMode.value
+                                    val roomSnapshot = currentRoom
+
+                                    if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                                        scope.launch {
+                                            roomRepository.leaveRoom(roomSnapshot.id)
+                                        }
+                                    }
+
+                                    RoomStateManager.leaveRoom()
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -251,6 +267,14 @@ fun MainScaffold(
                         RoomStateManager.minimizeRoom(isMuted)
                     },
                     onLeaveRoom = {
+                        val roomSnapshot = currentRoom  // capture local copy
+                        val modeSnapshot = RoomStateManager.joinMode.value
+
+                        if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                            scope.launch {
+                                roomRepository.leaveRoom(roomSnapshot.id)
+                            }
+                        }
                         RoomStateManager.leaveRoom()
                     }
                 )

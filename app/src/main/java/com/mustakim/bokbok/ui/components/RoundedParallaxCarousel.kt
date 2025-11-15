@@ -42,7 +42,7 @@ fun <T> RoundedParallaxCarousel(
         modifier = modifier,
         contentPadding = contentPadding,
         pageSpacing = itemSpacing.dp,
-        key = { page -> items[page].hashCode() },
+        key = { page -> page },
         beyondViewportPageCount = 1  // ✅ Limit pre-composition
     ) { page ->
         // ✅ Use derivedStateOf to prevent recomposition on every scroll frame

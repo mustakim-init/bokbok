@@ -48,6 +48,7 @@ import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.LoungeUiState
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import com.mustakim.bokbok.state.JoinMode
 
 @Composable
 fun LoungeScreen(
@@ -75,7 +76,7 @@ fun LoungeScreen(
             // My Rooms tap → join call session only
             onRoomClick = remember {
                 { room: VoiceRoom ->
-                    RoomStateManager.joinRoom(room)
+                    RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
                 }
             },
             onRefresh = remember(loungeViewModel) { { loungeViewModel.refreshAllData() } },
@@ -83,13 +84,15 @@ fun LoungeScreen(
             // Public Rooms: tap / "Join call only"
             onJoinCallOnly = remember {
                 { room: VoiceRoom ->
-                    RoomStateManager.joinRoom(room)
+                    loungeViewModel.joinRoomSessionOnly(room)
+                    RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
                 }
             },
             // Public Rooms: long‑press / "Join permanently"
             onJoinPermanently = remember(loungeViewModel) {
                 { room: VoiceRoom ->
                     loungeViewModel.joinRoomPermanently(room)
+                    RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
                 }
             },
             onDeleteRoom = remember(loungeViewModel) { { room: VoiceRoom -> loungeViewModel.deleteRoomAsHost(room) } },

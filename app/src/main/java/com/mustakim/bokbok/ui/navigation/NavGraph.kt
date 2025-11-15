@@ -34,6 +34,11 @@ import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.mustakim.bokbok.data.repository.RoomRepository
+import com.mustakim.bokbok.state.JoinMode
+
 
 // ✅ Centralized animation specs for consistency
 private object NavigationAnimations {
@@ -207,6 +212,9 @@ fun NavGraph(
             val roomId = backStackEntry.arguments?.getString("roomId")
                 ?: return@composable
 
+            val scope = rememberCoroutineScope()
+            val roomRepository = remember { RoomRepository() }
+
             VoiceRoomScreen(
                 roomId = roomId,
                 onMinimize = { isMuted ->
@@ -214,6 +222,15 @@ fun NavGraph(
                     navController.popBackStack()
                 },
                 onLeaveRoom = {
+                    val modeSnapshot = RoomStateManager.joinMode.value
+                    val currentRoom = RoomStateManager.currentRoom.value
+
+                    if (modeSnapshot == JoinMode.SESSION_ONLY && currentRoom != null) {
+                        scope.launch {
+                            roomRepository.leaveRoom(currentRoom.id)
+                        }
+                    }
+
                     RoomStateManager.leaveRoom()
                     navController.popBackStack()
                 }

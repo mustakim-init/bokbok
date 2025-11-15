@@ -270,6 +270,25 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         loadMyRoomsFromFirestore()
     }
 
+    // LoungeViewModel.kt
+
+    fun joinRoomSessionOnly(room: VoiceRoom) {
+        viewModelScope.launch {
+            // optional: clear previous error
+            _uiState.update { it.copy(error = null) }
+
+            val result = repository.joinRoom(room.id)
+            result.onFailure { e ->
+                _uiState.update {
+                    it.copy(error = "Failed to join room: ${e.message}")
+                }
+            }
+            // IMPORTANT: do NOT add to myRooms here,
+            // so session-only joins don't appear in My Rooms
+        }
+    }
+
+
     fun joinRoomPermanently(room: VoiceRoom) {
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }

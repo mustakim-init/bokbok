@@ -1,6 +1,7 @@
 package com.mustakim.bokbok.data.repository
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.mustakim.bokbok.data.model.RoomCategory
@@ -8,16 +9,43 @@ import com.mustakim.bokbok.data.model.VoiceRoom
 import kotlinx.coroutines.tasks.await
 
 class RoomRepository {
+
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private val roomsCollection = firestore.collection("rooms")
 
+    /**
+     * Load active rooms from Firestore.
+     * For now we DO NOT filter by isPublic to avoid any index issues.
+     * Later we can add .whereEqualTo("isPublic", true) once indexes are set up.
+     */
     suspend fun getActiveRooms(): Result<List<VoiceRoom>> {
         return try {
             val snapshot = roomsCollection
-                .whereEqualTo("isPublic", true)
                 .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(10)
+                .limit(20)
+                .get()
+                .await()
+
+            val rooms = snapshot.documents.mapNotNull { doc ->
+                doc.data?.let { VoiceRoom.fromMap(it) }
+            }
+            Result.success(rooms)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get all rooms that the current user is a participant of.
+     */
+    suspend fun getMyRooms(): Result<List<VoiceRoom>> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
+            val snapshot = roomsCollection
+                .whereEqualTo("hostId", currentUser.uid)
                 .get()
                 .await()
 
@@ -31,33 +59,30 @@ class RoomRepository {
         }
     }
 
+    /**
+     * Create a new room document in Firestore and return its id.
+     */
     suspend fun createRoom(
         name: String,
         description: String,
         maxParticipants: Int,
         category: RoomCategory,
-        isPublic: Boolean
+        isPublic: Boolean,
+        imageUrl: String
     ): Result<String> {
         return try {
-            val currentUser = auth.currentUser ?: throw Exception("User not authenticated")
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
 
-            // Get user data from Firestore
-            val userDoc = firestore.collection("users")
-                .document(currentUser.uid)
-                .get()
-                .await()
-
-            val displayName = userDoc.getString("displayName") ?: "Unknown"
-            val profileImageUrl = userDoc.getString("profileImageUrl") ?: ""
-
-            val roomId = roomsCollection.document().id
+            val docRef = roomsCollection.document()
 
             val room = VoiceRoom(
-                id = roomId,
+                id = docRef.id,
                 name = name,
                 hostId = currentUser.uid,
-                hostName = displayName,
-                hostImageUrl = profileImageUrl,
+                hostName = currentUser.displayName ?: "",
+                hostImageUrl = currentUser.photoUrl?.toString() ?: "",
+                imageUrl = imageUrl,
                 description = description,
                 participants = listOf(currentUser.uid),
                 maxParticipants = maxParticipants,
@@ -66,83 +91,59 @@ class RoomRepository {
                 createdAt = System.currentTimeMillis()
             )
 
-            roomsCollection.document(roomId)
-                .set(room.toMap())
-                .await()
+            docRef.set(room.toMap()).await()
 
-            Result.success(roomId)
+            Result.success(room.id)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    suspend fun joinRoom(roomId: String): Result<Unit> {
-        return try {
-            val currentUser = auth.currentUser ?: throw Exception("User not authenticated")
-
-            // Get room
-            val roomDoc = roomsCollection.document(roomId).get().await()
-            val room = roomDoc.data?.let { VoiceRoom.fromMap(it) }
-                ?: throw Exception("Room not found")
-
-            // Check if room is full
-            if (room.isFull) {
-                throw Exception("Room is full")
-            }
-
-            // Check if already in room
-            if (room.participants.contains(currentUser.uid)) {
-                return Result.success(Unit)
-            }
-
-            // Add user to room
-            val updatedParticipants = room.participants + currentUser.uid
-
-            roomsCollection.document(roomId)
-                .update("participants", updatedParticipants)
-                .await()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun leaveRoom(roomId: String): Result<Unit> {
-        return try {
-            val currentUser = auth.currentUser ?: throw Exception("User not authenticated")
-
-            // Get room
-            val roomDoc = roomsCollection.document(roomId).get().await()
-            val room = roomDoc.data?.let { VoiceRoom.fromMap(it) }
-                ?: throw Exception("Room not found")
-
-            // Remove user from room
-            val updatedParticipants = room.participants.filter { it != currentUser.uid }
-
-            if (updatedParticipants.isEmpty()) {
-                // Delete room if no participants left
-                roomsCollection.document(roomId).delete().await()
-            } else {
-                // Update participants
-                roomsCollection.document(roomId)
-                    .update("participants", updatedParticipants)
-                    .await()
-            }
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
+    /**
+     * Load a single room by id.
+     */
     suspend fun getRoom(roomId: String): Result<VoiceRoom> {
         return try {
-            val roomDoc = roomsCollection.document(roomId).get().await()
-            val room = roomDoc.data?.let { VoiceRoom.fromMap(it) }
-                ?: throw Exception("Room not found")
-
+            val doc = roomsCollection.document(roomId).get().await()
+            val data = doc.data ?: return Result.failure(Exception("Room not found"))
+            val room = VoiceRoom.fromMap(data)
             Result.success(room)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Join a room by adding the current user uid to participants.
+     */
+    suspend fun joinRoom(roomId: String): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
+            roomsCollection.document(roomId)
+                .update("participants", FieldValue.arrayUnion(currentUser.uid))
+                .await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Leave a room by removing the current user uid from participants.
+     */
+    suspend fun leaveRoom(roomId: String): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
+            roomsCollection.document(roomId)
+                .update("participants", FieldValue.arrayRemove(currentUser.uid))
+                .await()
+
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

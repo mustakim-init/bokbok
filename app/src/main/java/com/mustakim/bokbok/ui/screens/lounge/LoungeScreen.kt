@@ -253,7 +253,6 @@ private fun LazyListScope.publicRoomsSection(
     onRefresh: () -> Unit,
     onJoinRoom: (String) -> Unit
 ) {
-    if (rooms.isEmpty()) return
 
     item(key = "public_rooms_section", contentType = "public_rooms") {
         PublicRoomsSection(

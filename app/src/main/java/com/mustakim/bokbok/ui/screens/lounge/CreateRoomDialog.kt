@@ -94,7 +94,7 @@ fun CreateRoomDialog(
                 OutlinedTextField(
                     value = maxParticipants,
                     onValueChange = {
-                        if (it.isEmpty() || it.toIntOrNull() in 2..50) {
+                        if (it.isEmpty() || it.toIntOrNull() in 0..50) {
                             maxParticipants = it
                         }
                     },
@@ -177,10 +177,12 @@ fun CreateRoomDialog(
             Button(
                 onClick = {
                     if (roomName.isNotBlank()) {
+
+                        val max = maxParticipants.toIntOrNull()?.coerceIn(2, 50) ?: 10
                         onConfirm(
                             roomName.trim(),
                             description.trim(),
-                            maxParticipants.toIntOrNull() ?: 10,
+                            max,
                             selectedCategory,
                             isPublic,
                             selectedImageUri  // ✅ Pass image URI

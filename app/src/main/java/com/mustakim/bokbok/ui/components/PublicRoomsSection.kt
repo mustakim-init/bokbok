@@ -55,8 +55,6 @@ fun PublicRoomsSection(
     modifier: Modifier = Modifier,
     isRefreshing: Boolean = false
 ) {
-    if (rooms.isEmpty()) return
-
     // ✅ Pre-chunk rooms so we don't recompute on every recomposition
     val roomRows = remember(rooms) { rooms.chunked(2) }
     val currentOnRoomClick by rememberUpdatedState(onRoomClick)

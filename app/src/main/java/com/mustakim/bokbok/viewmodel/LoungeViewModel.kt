@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import android.net.Uri
 import androidx.compose.runtime.Stable
+import android.util.Base64
+import com.mustakim.bokbok.data.api.ImgBBApi
+import com.mustakim.bokbok.BuildConfig
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -33,17 +36,21 @@ data class LoungeUiState(
 class LoungeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RoomRepository()
 
+    // ImgBB
+    private val imgbbApi = ImgBBApi.create()
+    private val imgbbApiKey = BuildConfig.IMGBB_API_KEY
+
     private val _uiState = MutableStateFlow(
         LoungeUiState(
-            // ✅ Load data immediately in the initial state
             friends = SampleDataHelper.getSampleFriends(),
-            myRooms = SampleDataHelper.getSampleMyRooms(),
-            publicRooms = SampleDataHelper.getSamplePublicRooms(),
-            totalActiveRooms = 247,
-            totalOnlineUsers = 1829,
+            myRooms = emptyList(),
+            publicRooms = emptyList(),      // start empty, will be filled from Firestore
+            totalActiveRooms = 0,
+            totalOnlineUsers = 0,
             isLoading = false
         )
     )
+
     val uiState: StateFlow<LoungeUiState> = _uiState.asStateFlow()
 
     private val _roomImages = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -53,32 +60,119 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         _roomImages.value = _roomImages.value + (roomId to imageUrl)
     }
 
+    private suspend fun uploadRoomImage(imageUri: Uri): String? {
+        return try {
+            val context = getApplication<Application>()
+            val bytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
+                ?: return null
+
+            val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
+
+            val response = imgbbApi.uploadImage(
+                apiKey = imgbbApiKey,
+                base64Image = base64
+            )
+
+            if (response.success && response.data != null) {
+                response.data.url // the direct image URL
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Load public rooms from Firestore instead of dummy data
+    private fun loadPublicRoomsFromFirestore() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    isRefreshingPublicRooms = true,
+                    error = null
+                )
+            }
+
+            val result = repository.getActiveRooms()
+            result.fold(
+                onSuccess = { rooms ->
+                    _uiState.update {
+                        it.copy(
+                            publicRooms = rooms,
+                            totalActiveRooms = rooms.size,
+                            // keep totalOnlineUsers as-is for now (still dummy based on friends)
+                            isLoading = false,
+                            isRefreshingPublicRooms = false
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshingPublicRooms = false,
+                            error = "Failed to load rooms: ${e.message}"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    /**
+     * Load my rooms from Firestore.
+     */
+    private fun loadMyRoomsFromFirestore() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+
+            val result = repository.getMyRooms()
+            result.fold(
+                onSuccess = { rooms ->
+                    _uiState.update {
+                        it.copy(
+                            myRooms = rooms,
+                            isLoading = false
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Failed to load my rooms: ${e.message}"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+
 
     // ✅ Pull-to-refresh function
     fun refreshAllData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
+            _uiState.update { it.copy(isRefreshing = true, error = null) }
 
             try {
-                // Simulate network refresh
-                delay(1500)  // Realistic refresh time
+                // Simulate refresh for friends + myRooms (still dummy)
+                delay(1500)
 
-                // Reload all data
                 val friends = SampleDataHelper.getSampleFriends()
-                val myRooms = SampleDataHelper.getSampleMyRooms()
-                val publicRooms = SampleDataHelper.getSamplePublicRooms()
 
                 _uiState.update {
                     it.copy(
                         friends = friends,
-                        myRooms = myRooms,
-                        publicRooms = publicRooms,
-                        totalActiveRooms = (200..300).random(),
-                        totalOnlineUsers = (1500..2000).random(),
-                        isRefreshing = false,
-                        error = null
+                        totalOnlineUsers = friends.size,
+                        isRefreshing = false
                     )
                 }
+
+                // Load real rooms from Firestore
+                loadMyRoomsFromFirestore()
+                loadPublicRoomsFromFirestore()
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -91,32 +185,8 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshPublicRooms() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshingPublicRooms = true) }
-
-            try {
-                // Simulate network call
-                delay(800)
-
-                val newRooms = SampleDataHelper.getSamplePublicRooms()
-
-                _uiState.update {
-                    it.copy(
-                        publicRooms = newRooms,
-                        totalActiveRooms = (200..300).random(),
-                        totalOnlineUsers = (1500..2000).random(),
-                        isRefreshingPublicRooms = false
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isRefreshingPublicRooms = false,
-                        error = "Failed to refresh public rooms"
-                    )
-                }
-            }
-        }
+        // Just trigger Firestore reload; flags are handled inside
+        loadPublicRoomsFromFirestore()
     }
 
     fun createRoom(
@@ -125,49 +195,79 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         maxParticipants: Int,
         category: RoomCategory,
         isPublic: Boolean,
-        imageUri: Uri?  // ✅ Add this parameter
+        imageUri: Uri?
     ) {
         viewModelScope.launch {
-            try {
-                // For now, just log or store locally
-                // When you add backend, upload image here
+            _uiState.update { it.copy(isLoading = true, error = null) }
 
-                val imageUrl = if (imageUri != null) {
-                    // TODO: Upload to ImgBB or your storage
-                    // For now, use local URI
-                    imageUri.toString()
+            try {
+                // 1) Upload image if provided
+                val uploadedImageUrl = if (imageUri != null) {
+                    uploadRoomImage(imageUri) ?: ""
                 } else {
                     ""
                 }
 
-                // Create room with image
-                delay(500)
-
-                // Add to my rooms
-                val newRoom = VoiceRoom(
-                    id = "room_${System.currentTimeMillis()}",
+                // 2) Create room in Firestore with the imageUrl
+                val result = repository.createRoom(
                     name = name,
-                    hostId = "me",
-                    hostName = "You",
-                    hostImageUrl = "",
-                    imageUrl = imageUrl,  // ✅ Use uploaded image
                     description = description,
-                    participants = listOf("me"),
                     maxParticipants = maxParticipants,
-                    isPublic = isPublic,
                     category = category,
-                    createdAt = System.currentTimeMillis()
+                    isPublic = isPublic,
+                    imageUrl = uploadedImageUrl
                 )
 
-                _uiState.update {
-                    it.copy(myRooms = it.myRooms + newRoom)
-                }
+                result.fold(
+                    onSuccess = { roomId ->
+                        // 3) Load the created room and update state
+                        val roomResult = repository.getRoom(roomId)
+                        roomResult.fold(
+                            onSuccess = { room ->
+                                _uiState.update {
+                                    it.copy(
+                                        myRooms = it.myRooms + room,
+                                        isLoading = false
+                                    )
+                                }
+                                if (room.isPublic) {
+                                    loadPublicRoomsFromFirestore()
+                                }
+                            },
+                            onFailure = { e ->
+                                _uiState.update {
+                                    it.copy(
+                                        isLoading = false,
+                                        error = "Room created but failed to load: ${e.message}"
+                                    )
+                                }
+                            }
+                        )
+                    },
+                    onFailure = { e ->
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = "Failed to create room: ${e.message}"
+                            )
+                        }
+                    }
+                )
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(error = "Failed to create room: ${e.message}")
+                    it.copy(
+                        isLoading = false,
+                        error = "Failed to create room: ${e.message}"
+                    )
                 }
             }
         }
+    }
+
+    init {
+        // Replace dummy public rooms with real ones as soon as possible
+        loadPublicRoomsFromFirestore()
+        loadMyRoomsFromFirestore()
     }
 
 

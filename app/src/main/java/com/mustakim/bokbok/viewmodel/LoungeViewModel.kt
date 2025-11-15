@@ -270,6 +270,81 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         loadMyRoomsFromFirestore()
     }
 
+    fun joinRoomPermanently(room: VoiceRoom) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+
+            val result = repository.joinRoom(room.id)
+            result.fold(
+                onSuccess = {
+                    _uiState.update { state ->
+                        // Add to myRooms if not already there
+                        if (state.myRooms.any { it.id == room.id }) {
+                            state
+                        } else {
+                            state.copy(myRooms = state.myRooms + room)
+                        }
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(error = "Failed to join room: ${e.message}")
+                    }
+                }
+            )
+        }
+    }
+
+    fun leaveRoomPermanently(room: VoiceRoom) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+
+            val result = repository.leaveRoom(room.id)
+            result.fold(
+                onSuccess = {
+                    // Remove from My Rooms list locally
+                    _uiState.update { state ->
+                        state.copy(myRooms = state.myRooms.filter { it.id != room.id })
+                    }
+                    // Also refresh Public Rooms, in case participant count changed or room was deleted
+                    refreshPublicRooms()
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(error = "Failed to leave room: ${e.message}")
+                    }
+                }
+            )
+        }
+    }
+
+    fun deleteRoomAsHost(room: VoiceRoom) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null, isLoading = true) }
+
+            val result = repository.deleteRoom(room.id)
+            result.fold(
+                onSuccess = {
+                    _uiState.update { state ->
+                        state.copy(
+                            myRooms = state.myRooms.filter { it.id != room.id },
+                            publicRooms = state.publicRooms.filter { it.id != room.id },
+                            isLoading = false
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Failed to delete room: ${e.message}"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
 
     fun joinRoom(roomId: String) {
         viewModelScope.launch {

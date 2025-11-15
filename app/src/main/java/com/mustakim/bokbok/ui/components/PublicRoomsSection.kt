@@ -28,9 +28,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -44,6 +47,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.VoiceRoom
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.runtime.mutableStateOf
+
 
 @Composable
 fun PublicRoomsSection(
@@ -51,13 +57,17 @@ fun PublicRoomsSection(
     totalRooms: Int,
     totalParticipants: Int,
     onRefresh: () -> Unit,
-    onRoomClick: (VoiceRoom) -> Unit,
+    onJoinCallOnly: (VoiceRoom) -> Unit,
+    onJoinPermanently: (VoiceRoom) -> Unit,
     modifier: Modifier = Modifier,
     isRefreshing: Boolean = false
 ) {
-    // ✅ Pre-chunk rooms so we don't recompute on every recomposition
     val roomRows = remember(rooms) { rooms.chunked(2) }
-    val currentOnRoomClick by rememberUpdatedState(onRoomClick)
+    val currentOnJoinCallOnly by rememberUpdatedState(onJoinCallOnly)
+    val currentOnJoinPermanently by rememberUpdatedState(onJoinPermanently)
+
+    var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
+    var showJoinDialog by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
         // Header + refresh
@@ -101,7 +111,7 @@ fun PublicRoomsSection(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Rooms grid - kept as simple Column of Rows to avoid nested scrolling
+        // Rooms grid
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -114,10 +124,20 @@ fun PublicRoomsSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     rowRooms.forEach { room ->
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier.weight(1f)
+                        ) {
                             CompactRoomCard(
                                 room = room,
-                                onClick = { currentOnRoomClick(room) }
+                                onClick = {
+                                    // Tap → join call only
+                                    currentOnJoinCallOnly(room)
+                                },
+                                onLongClick = {
+                                    // Long press → show options dialog
+                                    selectedRoom = room
+                                    showJoinDialog = true
+                                }
                             )
                         }
                     }
@@ -127,6 +147,34 @@ fun PublicRoomsSection(
                 }
             }
         }
+    }
+
+    if (showJoinDialog && selectedRoom != null) {
+        AlertDialog(
+            onDismissRequest = { showJoinDialog = false },
+            title = { Text("Join room") },
+            text = { Text("How do you want to join this room?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        selectedRoom?.let { currentOnJoinPermanently(it) }
+                        showJoinDialog = false
+                    }
+                ) {
+                    Text("Join permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        selectedRoom?.let { currentOnJoinCallOnly(it) }
+                        showJoinDialog = false
+                    }
+                ) {
+                    Text("Join call only")
+                }
+            }
+        )
     }
 }
 
@@ -215,8 +263,9 @@ private data class CompactRoomColors(
 @Composable
 fun CompactRoomCard(
     room: VoiceRoom,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onLongClick: (() -> Unit)? = null
 ) {
     val hasImage = remember(room.imageUrl) { room.imageUrl.isNotEmpty() }
     val primaryContainer = MaterialTheme.colorScheme.primaryContainer
@@ -243,10 +292,13 @@ fun CompactRoomCard(
     }
 
     Card(
-        onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .height(180.dp),
+            .height(180.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { onLongClick?.invoke() }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         )

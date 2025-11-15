@@ -23,6 +23,8 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,6 +56,8 @@ fun LoungeScreen(
     loungeViewModel: LoungeViewModel = viewModel()
 ) {
     val uiState by loungeViewModel.uiState.collectAsState()
+    val currentUser by userViewModel.currentUser.collectAsState()
+    val currentUserId = currentUser?.uid
     var showCreateRoomDialog by remember { mutableStateOf(false) }
 
     MainScaffold(
@@ -65,21 +69,31 @@ fun LoungeScreen(
         LoungeContent(
             paddingValues = paddingValues,
             uiState = uiState,
+            currentUserId = currentUserId,
             onCreateRoom = { showCreateRoomDialog = true },
             onFriendClick = remember { { _: FriendStatus -> } },
-            // ✅ FIXED: Use RoomStateManager instead of navigation
+            // My Rooms tap → join call session only
             onRoomClick = remember {
                 { room: VoiceRoom ->
-                    RoomStateManager.joinRoom(room)  // ✅ Join room via state manager
+                    RoomStateManager.joinRoom(room)
                 }
             },
             onRefresh = remember(loungeViewModel) { { loungeViewModel.refreshAllData() } },
             onRefreshPublicRooms = remember(loungeViewModel) { { loungeViewModel.refreshPublicRooms() } },
-            // ✅ FIXED: Use RoomStateManager for public rooms too
-            onJoinRoom = { roomId: String ->
-                val room = uiState.publicRooms.find { it.id == roomId }
-                room?.let { RoomStateManager.joinRoom(it) }
-            }
+            // Public Rooms: tap / "Join call only"
+            onJoinCallOnly = remember {
+                { room: VoiceRoom ->
+                    RoomStateManager.joinRoom(room)
+                }
+            },
+            // Public Rooms: long‑press / "Join permanently"
+            onJoinPermanently = remember(loungeViewModel) {
+                { room: VoiceRoom ->
+                    loungeViewModel.joinRoomPermanently(room)
+                }
+            },
+            onDeleteRoom = remember(loungeViewModel) { { room: VoiceRoom -> loungeViewModel.deleteRoomAsHost(room) } },
+            onLeaveRoom = remember(loungeViewModel) { { room: VoiceRoom -> loungeViewModel.leaveRoomPermanently(room) } }
         )
     }
 
@@ -101,22 +115,23 @@ fun LoungeScreen(
     }
 }
 
-
-
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun LoungeContent(
     paddingValues: PaddingValues,
     uiState: LoungeUiState,
+    currentUserId: String?,
     onCreateRoom: () -> Unit,
     isMinimized: Boolean = RoomStateManager.isMinimized.value,
     onFriendClick: (FriendStatus) -> Unit,
     onRoomClick: (VoiceRoom) -> Unit,
-    onRefresh: () -> Unit,  // ✅ Pull-to-refresh callback
+    onRefresh: () -> Unit,
     onRefreshPublicRooms: () -> Unit,
-    onJoinRoom: (String) -> Unit
+    onJoinCallOnly: (VoiceRoom) -> Unit,
+    onJoinPermanently: (VoiceRoom) -> Unit,
+    onDeleteRoom: (VoiceRoom) -> Unit,
+    onLeaveRoom: (VoiceRoom) -> Unit
 ) {
-    // ✅ Pull-to-refresh state
     val pullRefreshState = rememberPullRefreshState(
         refreshing = uiState.isRefreshing,
         onRefresh = onRefresh
@@ -126,7 +141,7 @@ private fun LoungeContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(paddingValues)
-            .pullRefresh(pullRefreshState)  // ✅ Enable pull-to-refresh
+            .pullRefresh(pullRefreshState)
     ) {
         val listState = rememberLazyListState()
 
@@ -139,24 +154,27 @@ private fun LoungeContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Friends section
             friendsSection(friends = uiState.friends, onFriendClick = onFriendClick)
 
-            // My Rooms section
-            myRoomsSection(rooms = uiState.myRooms, onRoomClick = onRoomClick)
+            myRoomsSection(
+                rooms = uiState.myRooms,
+                currentUserId = currentUserId,
+                onRoomClick = onRoomClick,
+                onDeleteRoom = onDeleteRoom,
+                onLeaveRoom = onLeaveRoom
+            )
 
-            // Public Rooms section
             publicRoomsSection(
                 rooms = uiState.publicRooms,
                 totalRooms = uiState.totalActiveRooms,
                 totalParticipants = uiState.totalOnlineUsers,
                 isRefreshing = uiState.isRefreshingPublicRooms,
                 onRefresh = onRefreshPublicRooms,
-                onJoinRoom = onJoinRoom
+                onJoinCallOnly = onJoinCallOnly,
+                onJoinPermanently = onJoinPermanently
             )
         }
 
-        // ✅ Pull-to-refresh indicator
         PullRefreshIndicator(
             refreshing = uiState.isRefreshing,
             state = pullRefreshState,
@@ -165,7 +183,6 @@ private fun LoungeContent(
             contentColor = MaterialTheme.colorScheme.primary
         )
 
-        // FAB
         FloatingActionButton(
             onClick = onCreateRoom,
             modifier = Modifier
@@ -181,7 +198,6 @@ private fun LoungeContent(
     }
 }
 
-// Keep your existing extension functions...
 private fun LazyListScope.friendsSection(
     friends: List<FriendStatus>,
     onFriendClick: (FriendStatus) -> Unit
@@ -192,7 +208,7 @@ private fun LazyListScope.friendsSection(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 24.dp) // spacing moved here
+                .padding(bottom = 24.dp)
         ) {
             FriendsStatusSection(
                 friends = friends,
@@ -204,7 +220,10 @@ private fun LazyListScope.friendsSection(
 
 private fun LazyListScope.myRoomsSection(
     rooms: List<VoiceRoom>,
-    onRoomClick: (VoiceRoom) -> Unit
+    currentUserId: String?,
+    onRoomClick: (VoiceRoom) -> Unit,
+    onDeleteRoom: (VoiceRoom) -> Unit,
+    onLeaveRoom: (VoiceRoom) -> Unit
 ) {
     item(key = "my_rooms_header", contentType = "header") {
         Text(
@@ -216,10 +235,14 @@ private fun LazyListScope.myRoomsSection(
     }
 
     item(key = "my_rooms_carousel", contentType = "carousel") {
+        var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
+        var showDeleteDialog by remember { mutableStateOf(false) }
+        var showLeaveDialog by remember { mutableStateOf(false) }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 32.dp) // spacing moved here
+                .padding(bottom = 32.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -236,11 +259,68 @@ private fun LazyListScope.myRoomsSection(
                         VoiceRoomCard(
                             room = room,
                             onClick = { onRoomClick(room) },
-                            onImageSelected = null
+                            onLongClick = {
+                                selectedRoom = room
+                                if (currentUserId != null && room.hostId == currentUserId) {
+                                    showDeleteDialog = true
+                                } else {
+                                    showLeaveDialog = true
+                                }
+                            }
                         )
                     }
                 }
             }
+        }
+
+        if (showDeleteDialog && selectedRoom != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("Delete room") },
+                text = { Text("Are you sure you want to delete this room for everyone?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            selectedRoom?.let { onDeleteRoom(it) }
+                            showDeleteDialog = false
+                        }
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showDeleteDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showLeaveDialog && selectedRoom != null) {
+            AlertDialog(
+                onDismissRequest = { showLeaveDialog = false },
+                title = { Text("Leave room") },
+                text = { Text("Leave this room and remove it from your My Rooms list?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            selectedRoom?.let { onLeaveRoom(it) }
+                            showLeaveDialog = false
+                        }
+                    ) {
+                        Text("Leave")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showLeaveDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }
@@ -251,8 +331,10 @@ private fun LazyListScope.publicRoomsSection(
     totalParticipants: Int,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
-    onJoinRoom: (String) -> Unit
+    onJoinCallOnly: (VoiceRoom) -> Unit,
+    onJoinPermanently: (VoiceRoom) -> Unit
 ) {
+    if (rooms.isEmpty()) return
 
     item(key = "public_rooms_section", contentType = "public_rooms") {
         PublicRoomsSection(
@@ -261,7 +343,8 @@ private fun LazyListScope.publicRoomsSection(
             totalParticipants = totalParticipants,
             isRefreshing = isRefreshing,
             onRefresh = onRefresh,
-            onRoomClick = { room -> onJoinRoom(room.id) }
+            onJoinCallOnly = onJoinCallOnly,
+            onJoinPermanently = onJoinPermanently
         )
     }
 }

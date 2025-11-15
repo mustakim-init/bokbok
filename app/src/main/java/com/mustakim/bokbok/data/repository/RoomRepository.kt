@@ -45,7 +45,7 @@ class RoomRepository {
                 ?: return Result.failure(Exception("User not logged in"))
 
             val snapshot = roomsCollection
-                .whereEqualTo("hostId", currentUser.uid)
+                .whereArrayContains("participants", currentUser.uid)
                 .get()
                 .await()
 
@@ -143,6 +143,29 @@ class RoomRepository {
                 .update("participants", FieldValue.arrayRemove(currentUser.uid))
                 .await()
 
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Delete a room by removing it from Firestore(only host is allowed to do this).
+     */
+    suspend fun deleteRoom(roomId: String): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not authenticated"))
+
+            val doc = roomsCollection.document(roomId).get().await()
+            val room = doc.data?.let { VoiceRoom.fromMap(it) }
+                ?: return Result.failure(Exception("Room not found"))
+
+            if (room.hostId != currentUser.uid) {
+                return Result.failure(Exception("Only host can delete this room"))
+            }
+
+            roomsCollection.document(roomId).delete().await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

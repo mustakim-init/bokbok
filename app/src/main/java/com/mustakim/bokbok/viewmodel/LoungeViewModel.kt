@@ -53,12 +53,6 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
 
     val uiState: StateFlow<LoungeUiState> = _uiState.asStateFlow()
 
-    private val _roomImages = MutableStateFlow<Map<String, String>>(emptyMap())
-    val roomImages: StateFlow<Map<String, String>> = _roomImages.asStateFlow()
-
-    fun updateRoomImage(roomId: String, imageUrl: String) {
-        _roomImages.value = _roomImages.value + (roomId to imageUrl)
-    }
 
     private suspend fun uploadRoomImage(imageUri: Uri): String? {
         return try {
@@ -78,7 +72,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 null
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -361,14 +355,6 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             )
-        }
-    }
-
-
-    fun joinRoom(roomId: String) {
-        viewModelScope.launch {
-            delay(300)
-            // Join room logic
         }
     }
 }

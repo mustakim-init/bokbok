@@ -46,6 +46,10 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setCurrentUser(user: User?) {
+        _currentUser.value = user
+    }
+
     fun refreshUser() {
         loadCurrentUser()
     }

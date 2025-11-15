@@ -39,10 +39,9 @@ import kotlinx.coroutines.launch
 fun LoginScreen(
     navController: NavHostController,
     authViewModel: AuthViewModel = viewModel(),
-    userViewModel: UserViewModel
+    userViewModel: UserViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
     val scope = rememberCoroutineScope()
     val uiState by authViewModel.uiState.collectAsState()
     val authEvent by authViewModel.authEvents.collectAsState()
@@ -148,12 +147,16 @@ fun LoginScreen(
             // Google Sign-In Button
             OutlinedButton(
                 onClick = {
+                    val activity = context as? Activity
                     if (activity != null) {
                         authViewModel.signInWithGoogleWithFallback(
                             activity = activity,
                             onLegacyIntentReady = { intent ->
-                                // Launch legacy GoogleSignIn when fallback is needed
                                 legacyGoogleSignInLauncher.launch(intent)
+                            },
+                            onUserLoaded = { userFromDb, firebaseUser ->
+                                // Cache the user profile in UserViewModel (if you added setCurrentUser)
+                                userViewModel.setCurrentUser(userFromDb)
                             }
                         )
                     } else {

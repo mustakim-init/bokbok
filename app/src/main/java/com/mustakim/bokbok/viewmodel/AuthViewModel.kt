@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.google.firebase.auth.FirebaseUser
+import com.mustakim.bokbok.data.model.User
 
 sealed class AuthEvent {
     object NavigateToUsernameSetup : AuthEvent()
@@ -57,11 +59,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         onIntentReady(intent)
     }
 
-    fun handleLegacyGoogleSignIn(data: Intent?) {
+    fun handleLegacyGoogleSignIn(
+        data: Intent?,
+        onUserLoaded: (User?, FirebaseUser) -> Unit = { _, _ -> }
+    ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
             repository.handleLegacyGoogleSignInResult(data).fold(
-                onSuccess = { (user, isNewUser) ->
+                onSuccess = { triple ->
+                    val (firebaseUser, existingUser, isNewUser) = triple
+
+                    // Optionally cache user in UserViewModel from the caller
+                    onUserLoaded(existingUser, firebaseUser)
+
                     if (isNewUser) {
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
@@ -83,17 +94,25 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoading = false,
                         error = error.message ?: "Failed to sign in with Google"
                     )
-                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to sign in with Google")
+                    _authEvents.value = AuthEvent.ShowError(
+                        error.message ?: "Failed to sign in with Google"
+                    )
                 }
             )
         }
     }
 
-    fun signInWithGoogle(activity: Activity) {
+    fun signInWithGoogle(activity: Activity, onUserLoaded: (User?, FirebaseUser) -> Unit = { _, _ -> }) {
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            repository.signInWithGoogle(activity).fold(
-                onSuccess = { (user, isNewUser) ->
+            val result = repository.signInWithGoogle(activity)
+            result.fold(
+                onSuccess = { triple ->
+                    val (firebaseUser, existingUser, isNewUser) = triple
+
+                    onUserLoaded(existingUser, firebaseUser)
+
                     if (isNewUser) {
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
@@ -115,27 +134,35 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoading = false,
                         error = error.message ?: "Failed to sign in with Google"
                     )
-                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to sign in with Google")
+                    _authEvents.value = AuthEvent.ShowError(
+                        error.message ?: "Failed to sign in with Google"
+                    )
                 }
             )
         }
     }
+
 
     fun signInWithGoogleWithFallback(
         activity: Activity,
-        onLegacyIntentReady: (Intent) -> Unit
+        onLegacyIntentReady: (Intent) -> Unit,
+        onUserLoaded: (User?, FirebaseUser) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch {
-            // Start loading
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            // First try Credential Manager if supported
             val supportsModern = repository.supportsCredentialManager()
 
             if (supportsModern) {
+                // First try Credential Manager
                 val modernResult = repository.signInWithGoogle(activity)
                 modernResult.fold(
-                    onSuccess = { (user, isNewUser) ->
+                    onSuccess = { triple ->
+                        val (firebaseUser, existingUser, isNewUser) = triple
+
+                        // Give UI/ViewModel the loaded user
+                        onUserLoaded(existingUser, firebaseUser)
+
                         if (isNewUser) {
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
@@ -153,10 +180,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     },
                     onFailure = { error ->
-                        // Credential Manager failed -> fall back to legacy
+                        // Modern path failed → fallback to legacy intent
                         try {
                             val intent = repository.getGoogleSignInIntent()
-                            // Keep loading true; legacy flow will finish it
+                            // keep isLoading true; legacy result will finish it
                             onLegacyIntentReady(intent)
                         } catch (e: Exception) {
                             _uiState.value = _uiState.value.copy(
@@ -170,7 +197,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 )
             } else {
-                // Older Android: go straight to legacy
+                // Older Android → go straight to legacy intent
                 try {
                     val intent = repository.getGoogleSignInIntent()
                     onLegacyIntentReady(intent)

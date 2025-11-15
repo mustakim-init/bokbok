@@ -61,7 +61,12 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    suspend fun signInWithGoogle(activity: Activity): Result<Pair<FirebaseUser, Boolean>> {
+
+
+    // Modern Google sign-in using Credential Manager
+    suspend fun signInWithGoogle(
+        activity: Activity
+    ): Result<Triple<FirebaseUser, User?, Boolean>> {
         return try {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
                 return Result.failure(Exception("Use legacy sign-in for older devices"))
@@ -84,32 +89,58 @@ class AuthRepository(private val context: Context) {
 
             val credential = GoogleIdTokenCredential.createFrom(result.credential.data)
             val idToken = credential.idToken
-
             val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
             val authResult = auth.signInWithCredential(firebaseCredential).await()
             val firebaseUser = authResult.user ?: throw Exception("Failed to sign in with Google")
 
-            val userExists = checkIfUserExists(firebaseUser.uid).getOrThrow()
+            // Single Firestore read
+            val userDoc = firestore.collection("users")
+                .document(firebaseUser.uid)
+                .get()
+                .await()
 
-            Result.success(firebaseUser to !userExists)
+            val existingUser: User? = if (userDoc.exists()) {
+                val data = userDoc.data ?: emptyMap<String, Any>()
+                User.fromMap(data)
+            } else {
+                null
+            }
+            val isNewUser = existingUser == null
+
+            Result.success(Triple(firebaseUser, existingUser, isNewUser))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    suspend fun handleLegacyGoogleSignInResult(data: Intent?): Result<Pair<FirebaseUser, Boolean>> {
+
+    // Legacy Google Sign-In (for fallback / older devices)
+    suspend fun handleLegacyGoogleSignInResult(
+        data: Intent?
+    ): Result<Triple<FirebaseUser, User?, Boolean>> {
         return try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(data)
             val account = task.getResult(ApiException::class.java)
-
             val idToken = account.idToken ?: throw Exception("No ID token found")
+
             val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
             val authResult = auth.signInWithCredential(firebaseCredential).await()
             val firebaseUser = authResult.user ?: throw Exception("Failed to sign in with Google")
 
-            val userExists = checkIfUserExists(firebaseUser.uid).getOrThrow()
+            val userDoc = firestore.collection("users")
+                .document(firebaseUser.uid)
+                .get()
+                .await()
 
-            Result.success(firebaseUser to !userExists)
+            val existingUser: User? = if (userDoc.exists()) {
+                val data = userDoc.data ?: emptyMap<String, Any>()
+                User.fromMap(data)
+            } else {
+                null
+            }
+            val isNewUser = existingUser == null
+
+            Result.success(Triple(firebaseUser, existingUser, isNewUser))
         } catch (e: Exception) {
             Result.failure(e)
         }

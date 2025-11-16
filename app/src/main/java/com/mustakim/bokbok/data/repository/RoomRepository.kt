@@ -149,6 +149,25 @@ class RoomRepository {
         }
     }
 
+    suspend fun safeLeaveRoomIfNotHost(
+        roomRepository: RoomRepository,
+        userRepository: UserRepository,
+        roomId: String
+    ) {
+        val roomResult = roomRepository.getRoom(roomId)
+        val room = roomResult.getOrNull() ?: return
+
+        val currentUserId = userRepository.getCurrentUserId() ?: return
+
+        // If current user is host, NEVER remove membership via leaveRoom
+        if (room.hostId == currentUserId) {
+            return
+        }
+
+        // Otherwise ok to remove membership
+        roomRepository.leaveRoom(roomId)
+    }
+
     /**
      * Delete a room by removing it from Firestore(only host is allowed to do this).
      */

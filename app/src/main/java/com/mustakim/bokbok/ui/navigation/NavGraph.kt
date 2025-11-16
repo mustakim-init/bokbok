@@ -214,6 +214,7 @@ fun NavGraph(
 
             val scope = rememberCoroutineScope()
             val roomRepository = remember { RoomRepository() }
+            val userRepository = remember{ UserRepository(context.applicationContext) }
 
             VoiceRoomScreen(
                 roomId = roomId,
@@ -225,14 +226,29 @@ fun NavGraph(
                     val modeSnapshot = RoomStateManager.joinMode.value
                     val currentRoom = RoomStateManager.currentRoom.value
 
-                    if (modeSnapshot == JoinMode.SESSION_ONLY && currentRoom != null) {
+                    if (currentRoom != null) {
                         scope.launch {
-                            roomRepository.leaveRoom(currentRoom.id)
-                        }
-                    }
+                            // Clear "in call" marker for this user regardless of mode
+                            userRepository.setCurrentRoom(null)
 
-                    RoomStateManager.leaveRoom()
-                    navController.popBackStack()
+                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                                val roomResult = roomRepository.getRoom(currentRoom.id)
+                                val room = roomResult.getOrNull()
+                                val currentUserId = userRepository.getCurrentUserId()
+
+                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
+                                    roomRepository.leaveRoom(currentRoom.id)
+                                }
+
+                                RoomStateManager.leaveRoom()
+                            } else {
+                                RoomStateManager.leaveRoom()
+                                navController.popBackStack()
+                            }
+                        }
+                    } else {
+                        navController.popBackStack()
+                    }
                 }
             )
         }

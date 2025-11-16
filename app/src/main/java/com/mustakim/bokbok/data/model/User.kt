@@ -2,7 +2,6 @@ package com.mustakim.bokbok.data.model
 
 import androidx.compose.runtime.Immutable
 
-
 @Immutable
 data class User(
     val uid: String = "",
@@ -13,9 +12,11 @@ data class User(
     val profileImageUrl: String = "",
     val phoneNumber: String = "",
     val createdAt: Long = System.currentTimeMillis(),
-    val lastSeen: Long = System.currentTimeMillis()
+    val lastSeen: Long = System.currentTimeMillis(),
+    // NEW: which room call this user is currently in (null if not in any)
+    val currentRoomId: String? = null
 ) {
-    fun toMap(): Map<String, Any> = mapOf(
+    fun toMap(): Map<String, Any?> = mapOf(
         "uid" to uid,
         "username" to username,
         "email" to email,
@@ -24,11 +25,12 @@ data class User(
         "profileImageUrl" to profileImageUrl,
         "phoneNumber" to phoneNumber,
         "createdAt" to createdAt,
-        "lastSeen" to lastSeen
+        "lastSeen" to lastSeen,
+        "currentRoomId" to currentRoomId
     )
 
     companion object {
-        fun fromMap(map: Map<String, Any>): User = User(
+        fun fromMap(map: Map<String, Any?>): User = User(
             uid = map["uid"] as? String ?: "",
             username = map["username"] as? String ?: "",
             email = map["email"] as? String ?: "",
@@ -37,7 +39,8 @@ data class User(
             profileImageUrl = map["profileImageUrl"] as? String ?: "",
             phoneNumber = map["phoneNumber"] as? String ?: "",
             createdAt = map["createdAt"] as? Long ?: 0L,
-            lastSeen = map["lastSeen"] as? Long ?: 0L
+            lastSeen = map["lastSeen"] as? Long ?: 0L,
+            currentRoomId = map["currentRoomId"] as? String
         )
     }
 }

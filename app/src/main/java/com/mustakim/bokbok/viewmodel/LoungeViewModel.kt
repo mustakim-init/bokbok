@@ -19,6 +19,7 @@ import androidx.compose.runtime.Stable
 import android.util.Base64
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.BuildConfig
+import com.mustakim.bokbok.data.repository.UserRepository
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -35,6 +36,9 @@ data class LoungeUiState(
 @Stable
 class LoungeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RoomRepository()
+
+    private val userRepository = UserRepository(getApplication<Application>().applicationContext)
+
 
     // ImgBB
     private val imgbbApi = ImgBBApi.create()
@@ -264,45 +268,55 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         loadMyRoomsFromFirestore()
     }
 
-    // LoungeViewModel.kt
-
-    fun joinRoomSessionOnly(room: VoiceRoom) {
+    /**
+     * User is already a permanent member (My Rooms).
+     * When they tap a My Room card to enter the call session,
+     * we only need to mark them as "currently in this room".
+     */
+    fun enterRoomFromMyRooms(room: VoiceRoom) {
         viewModelScope.launch {
-            // optional: clear previous error
             _uiState.update { it.copy(error = null) }
-
-            val result = repository.joinRoom(room.id)
-            result.onFailure { e ->
-                _uiState.update {
-                    it.copy(error = "Failed to join room: ${e.message}")
-                }
-            }
-            // IMPORTANT: do NOT add to myRooms here,
-            // so session-only joins don't appear in My Rooms
+            userRepository.setCurrentRoom(room.id)
         }
     }
 
+
+
+    fun joinRoomSessionOnly(room: VoiceRoom) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(error = null) }
+
+            // 1) Add user as a temporary member of the room
+            val result = repository.joinRoom(room.id)
+            result.onFailure { e ->
+                _uiState.update { it.copy(error = "Failed to join room: ${e.message}") }
+                return@launch
+            }
+
+            // 2) Mark user as currently in this room's call session
+            userRepository.setCurrentRoom(room.id)
+        }
+    }
 
     fun joinRoomPermanently(room: VoiceRoom) {
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
+            // 1) Add to permanent members
             val result = repository.joinRoom(room.id)
             result.fold(
                 onSuccess = {
+                    // 2) Mark user as in this call session too
+                    userRepository.setCurrentRoom(room.id)
+
+                    // 3) Add to My Rooms list locally if not already there
                     _uiState.update { state ->
-                        // Add to myRooms if not already there
-                        if (state.myRooms.any { it.id == room.id }) {
-                            state
-                        } else {
-                            state.copy(myRooms = state.myRooms + room)
-                        }
+                        if (state.myRooms.any { it.id == room.id }) state
+                        else state.copy(myRooms = state.myRooms + room)
                     }
                 },
                 onFailure = { e ->
-                    _uiState.update {
-                        it.copy(error = "Failed to join room: ${e.message}")
-                    }
+                    _uiState.update { it.copy(error = "Failed to join room: ${e.message}") }
                 }
             )
         }
@@ -312,20 +326,20 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
+            // 1) Clear any current call session marker
+            userRepository.setCurrentRoom(null)
+
+            // 2) Remove from permanent members
             val result = repository.leaveRoom(room.id)
             result.fold(
                 onSuccess = {
-                    // Remove from My Rooms list locally
                     _uiState.update { state ->
                         state.copy(myRooms = state.myRooms.filter { it.id != room.id })
                     }
-                    // Also refresh Public Rooms, in case participant count changed or room was deleted
                     refreshPublicRooms()
                 },
                 onFailure = { e ->
-                    _uiState.update {
-                        it.copy(error = "Failed to leave room: ${e.message}")
-                    }
+                    _uiState.update { it.copy(error = "Failed to leave room: ${e.message}") }
                 }
             )
         }

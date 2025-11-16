@@ -93,6 +93,27 @@ class UserRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Set or clear which room call the current user is in.
+     * roomId = null means "not in any call session".
+     */
+    suspend fun setCurrentRoom(roomId: String?): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not logged in"))
+
+            val update: Map<String, Any?> = mapOf("currentRoomId" to roomId)
+
+            usersCollection
+                .document(currentUser.uid)
+                .update(update)
+                .await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
 
     suspend fun deleteProfileImage(userId: String): Result<Unit> {

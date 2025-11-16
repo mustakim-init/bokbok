@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -33,7 +34,7 @@ import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
-
+import com.mustakim.bokbok.data.repository.UserRepository
 
 @Composable
 fun MainScaffold(
@@ -49,6 +50,9 @@ fun MainScaffold(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
+    val context = LocalContext.current
+
+    val userRepository = remember { UserRepository(context.applicationContext) }
 
     val roomRepository = remember { RoomRepository() }
 
@@ -213,16 +217,28 @@ fun MainScaffold(
                                 onExpand = { RoomStateManager.expandRoom() },
                                 onToggleMute = { RoomStateManager.toggleMute() },
                                 onLeaveRoom = {
+                                    val roomSnapshot = RoomStateManager.currentRoom.value
                                     val modeSnapshot = RoomStateManager.joinMode.value
-                                    val roomSnapshot = currentRoom
 
-                                    if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                                    if (roomSnapshot != null) {
                                         scope.launch {
-                                            roomRepository.leaveRoom(roomSnapshot.id)
+                                            // Always clear "currently in call"
+                                            userRepository.setCurrentRoom(null)
+
+                                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                                                // Session-only: drop membership ONLY if not the host
+                                                val roomResult = roomRepository.getRoom(roomSnapshot.id)
+                                                val room = roomResult.getOrNull()
+                                                val currentUserId = userRepository.getCurrentUserId()
+
+                                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
+                                                    roomRepository.leaveRoom(roomSnapshot.id)
+                                                }
+                                            }
+                                            // In both modes, clear local room state
+                                            RoomStateManager.leaveRoom()
                                         }
                                     }
-
-                                    RoomStateManager.leaveRoom()
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -270,12 +286,23 @@ fun MainScaffold(
                         val roomSnapshot = currentRoom  // capture local copy
                         val modeSnapshot = RoomStateManager.joinMode.value
 
-                        if (modeSnapshot == JoinMode.SESSION_ONLY) {
-                            scope.launch {
-                                roomRepository.leaveRoom(roomSnapshot.id)
+                        scope.launch {
+                            // Always clear "currently in call" for this user
+                            userRepository.setCurrentRoom(null)
+
+                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
+                                // Session-only: drop membership ONLY if not the host
+                                val roomResult = roomRepository.getRoom(roomSnapshot.id)
+                                val room = roomResult.getOrNull()
+                                val currentUserId = userRepository.getCurrentUserId()
+
+                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
+                                    roomRepository.leaveRoom(roomSnapshot.id)
+                                }
                             }
+                            // In both modes, clear local room state
+                            RoomStateManager.leaveRoom()
                         }
-                        RoomStateManager.leaveRoom()
                     }
                 )
             }

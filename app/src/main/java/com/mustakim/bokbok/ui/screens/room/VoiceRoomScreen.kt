@@ -67,6 +67,14 @@ fun VoiceRoomScreen(
 ) {
     LaunchedEffect(roomId) {
         viewModel.loadRoom(roomId)
+        viewModel.startCallEngine(roomId)
+    }
+
+    // Stop WebRTC when this screen leaves composition (nav back, etc.)
+    DisposableEffect(roomId) {
+        onDispose {
+            viewModel.stopCallEngine()
+        }
     }
 
     val uiState by viewModel.uiState.collectAsState()

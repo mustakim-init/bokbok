@@ -13,7 +13,7 @@ class FirestoreSignaling(
     private val selfId: String
 ) : SignalingBackend {
 
-    private val TAG = "FirestoreSignaling"
+    private val tag = "FirestoreSignaling"
 
 
     private val sessionStart = System.currentTimeMillis()
@@ -35,13 +35,13 @@ class FirestoreSignaling(
             "sdp" to sdp,
             "timestamp" to System.currentTimeMillis()
         )
-        Log.d(TAG, "sendOffer to=$to, sdpLength=${sdp.length}")
+        Log.d(tag, "sendOffer to=$to, sdpLength=${sdp.length}")
         signalsRef.add(data)
             .addOnSuccessListener {
-                Log.d(TAG, "sendOffer succeeded, docId=${it.id}")
+                Log.d(tag, "sendOffer succeeded, docId=${it.id}")
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "sendOffer failed", e)
+                Log.e(tag, "sendOffer failed", e)
             }
     }
 
@@ -53,13 +53,13 @@ class FirestoreSignaling(
             "sdp" to sdp,
             "timestamp" to System.currentTimeMillis()
         )
-        Log.d(TAG, "sendAnswer to=$to, sdpLength=${sdp.length}")
+        Log.d(tag, "sendAnswer to=$to, sdpLength=${sdp.length}")
         signalsRef.add(data)
             .addOnSuccessListener {
-                Log.d(TAG, "sendAnswer succeeded, docId=${it.id}")
+                Log.d(tag, "sendAnswer succeeded, docId=${it.id}")
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "sendAnswer failed", e)
+                Log.e(tag, "sendAnswer failed", e)
             }
     }
 
@@ -74,40 +74,40 @@ class FirestoreSignaling(
             "timestamp" to System.currentTimeMillis()
         )
         Log.d(
-            TAG,
+            tag,
             "sendIceCandidate to=$to, mid=${candidate.sdpMid}, mLine=${candidate.sdpMLineIndex}"
         )
         signalsRef.add(data)
             .addOnSuccessListener {
-                Log.d(TAG, "sendIceCandidate succeeded, docId=${it.id}")
+                Log.d(tag, "sendIceCandidate succeeded, docId=${it.id}")
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "sendIceCandidate failed", e)
+                Log.e(tag, "sendIceCandidate failed", e)
             }
     }
 
     override fun observeSignals(onSignal: (SignalMessage) -> Unit) {
-        Log.d(TAG, "observeSignals() for selfId=$selfId, roomId=$roomId")
+        Log.d(tag, "observeSignals() for selfId=$selfId, roomId=$roomId")
 
         listener = signalsRef
             .whereGreaterThan("timestamp", sessionStart)
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e(TAG, "listen failed", error)
+                    Log.e(tag, "listen failed", error)
                     return@addSnapshotListener
                 }
 
                 if (snapshot == null || snapshot.isEmpty) return@addSnapshotListener
 
-                Log.d(TAG, "Signals snapshot: changes=${snapshot.documentChanges.size}")
+                Log.d(tag, "Signals snapshot: changes=${snapshot.documentChanges.size}")
 
                 for (docChange in snapshot.documentChanges) {
                     val doc = docChange.document
 
                     // Skip messages we've already processed in this session
                     if (!processedIds.add(doc.id)) {
-                        Log.d(TAG, "Skip already-processed docId=${doc.id}")
+                        Log.d(tag, "Skip already-processed docId=${doc.id}")
                         continue
                     }
 
@@ -118,19 +118,19 @@ class FirestoreSignaling(
                     val type = data["type"] as? String ?: continue
 
                     if (from == selfId) {
-                        Log.d(TAG, "Skipping own message from=$from type=$type")
+                        Log.d(tag, "Skipping own message from=$from type=$type")
                         continue
                     }
 
                     if (to != null && to != selfId) {
-                        Log.d(TAG, "Skipping message not for me: to=$to type=$type")
+                        Log.d(tag, "Skipping message not for me: to=$to type=$type")
                         continue
                     }
 
                     val signal = when (type) {
                         "offer", "answer" -> {
                             val sdp = data["sdp"] as? String
-                            Log.d(TAG, "Received $type from=$from, to=$to, sdpLength=${sdp?.length ?: 0}")
+                            Log.d(tag, "Received $type from=$from, to=$to, sdpLength=${sdp?.length ?: 0}")
                             SignalMessage(
                                 from = from,
                                 to = to,
@@ -144,7 +144,7 @@ class FirestoreSignaling(
                             val sdpMLineIndex = (data["sdpMLineIndex"] as? Long)?.toInt() ?: 0
                             val cand = data["candidate"] as? String ?: continue
 
-                            Log.d(TAG, "Received ICE from=$from, to=$to, mid=$sdpMid, mLine=$sdpMLineIndex")
+                            Log.d(tag, "Received ICE from=$from, to=$to, mid=$sdpMid, mLine=$sdpMLineIndex")
 
                             val ice = IceCandidate(sdpMid, sdpMLineIndex, cand)
                             SignalMessage(
@@ -156,7 +156,7 @@ class FirestoreSignaling(
                         }
 
                         else -> {
-                            Log.d(TAG, "Unknown signal type=$type from=$from")
+                            Log.d(tag, "Unknown signal type=$type from=$from")
                             continue
                         }
                     }

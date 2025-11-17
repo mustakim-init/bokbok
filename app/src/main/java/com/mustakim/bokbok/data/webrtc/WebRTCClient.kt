@@ -23,7 +23,7 @@ class WebRTCClient(
     private val roomId: String
 ) {
 
-    private val TAG = "WebRTCClient"
+    private val tag = "WebRTCClient"
 
     private val appContext: Context = context.applicationContext
     private val peerConnections = mutableMapOf<String, PeerConnection>()
@@ -67,38 +67,38 @@ class WebRTCClient(
 
 
     fun connect() {
-        Log.d(TAG, "connect() called for selfId=$selfId roomId=$roomId")
+        Log.d(tag, "connect() called for selfId=$selfId roomId=$roomId")
 
         initPeerConnectionFactory()
         initLocalAudio()
         startListeningForSignals()
 
-        Log.d(TAG, "connect() finished setup for selfId=$selfId")
+        Log.d(tag, "connect() finished setup for selfId=$selfId")
     }
 
     fun disconnect() {
-        Log.d(TAG, "disconnect() called for selfId=$selfId roomId=$roomId")
+        Log.d(tag, "disconnect() called for selfId=$selfId roomId=$roomId")
 
         signalingBackend.dispose()
-        Log.d(TAG, "signalingBackend.dispose() done")
+        Log.d(tag, "signalingBackend.dispose() done")
 
         peerConnections.values.forEach { pc ->
             try {
                 pc.close()
             } catch (e: Exception) {
-                Log.w(TAG, "Error closing PeerConnection: ${e.message}")
+                Log.w(tag, "Error closing PeerConnection: ${e.message}")
             }
         }
         peerConnections.clear()
-        Log.d(TAG, "All PeerConnections closed and cleared")
+        Log.d(tag, "All PeerConnections closed and cleared")
 
         try {
             localAudioTrack?.dispose()
             audioSource?.dispose()
             peerConnectionFactory?.dispose()
-            Log.d(TAG, "Audio track/source and factory disposed")
+            Log.d(tag, "Audio track/source and factory disposed")
         } catch (e: Exception) {
-            Log.w(TAG, "Error disposing WebRTC resources: ${e.message}")
+            Log.w(tag, "Error disposing WebRTC resources: ${e.message}")
         }
     }
 
@@ -113,17 +113,17 @@ class WebRTCClient(
     fun createConnectionTo(remoteUserId: String) {
         // Only one side (deterministic) is allowed to initiate an offer
         if (!shouldInitiateTo(remoteUserId)) {
-            Log.d(TAG, "createConnectionTo($remoteUserId) skipped by design (selfId=$selfId)")
+            Log.d(tag, "createConnectionTo($remoteUserId) skipped by design (selfId=$selfId)")
             return
         }
 
         val state = peerStates[remoteUserId] ?: PeerState.NEW
         if (state != PeerState.NEW) {
-            Log.d(TAG, "createConnectionTo($remoteUserId) ignored, state=$state")
+            Log.d(tag, "createConnectionTo($remoteUserId) ignored, state=$state")
             return
         }
 
-        Log.d(TAG, "createConnectionTo($remoteUserId) starting offer")
+        Log.d(tag, "createConnectionTo($remoteUserId) starting offer")
         val pc = getOrCreatePeerConnection(remoteUserId)
         peerStates[remoteUserId] = PeerState.OFFER_SENT
 
@@ -132,11 +132,11 @@ class WebRTCClient(
                 val sdp = sessionDescription ?: return
                 pc.setLocalDescription(SimpleSdpObserver(), sdp)
                 signalingBackend.sendOffer(remoteUserId, sdp.description)
-                Log.d(TAG, "Offer sent to $remoteUserId")
+                Log.d(tag, "Offer sent to $remoteUserId")
             }
 
             override fun onCreateFailure(p0: String?) {
-                Log.e(TAG, "createOffer failed for $remoteUserId: $p0")
+                Log.e(tag, "createOffer failed for $remoteUserId: $p0")
                 peerStates[remoteUserId] = PeerState.NEW
             }
         }, audioConstraints)
@@ -184,7 +184,7 @@ class WebRTCClient(
 
     private fun getOrCreatePeerConnection(remoteUserId: String): PeerConnection {
         peerConnections[remoteUserId]?.let {
-            Log.d(TAG, "Reusing existing PeerConnection for $remoteUserId")
+            Log.d(tag, "Reusing existing PeerConnection for $remoteUserId")
             return it
         }
 
@@ -200,33 +200,33 @@ class WebRTCClient(
             rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE
         }
 
-        Log.d(TAG, "Creating new PeerConnection for $remoteUserId")
+        Log.d(tag, "Creating new PeerConnection for $remoteUserId")
 
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(newState: PeerConnection.SignalingState?) {
-                Log.d(TAG, "[$remoteUserId] onSignalingChange: $newState")
+                Log.d(tag, "[$remoteUserId] onSignalingChange: $newState")
             }
 
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
-                Log.d(TAG, "[$remoteUserId] onIceConnectionChange: $newState")
+                Log.d(tag, "[$remoteUserId] onIceConnectionChange: $newState")
                 if (newState == PeerConnection.IceConnectionState.CONNECTED) {
                     peerStates[remoteUserId] = PeerState.CONNECTED
-                    Log.d(TAG, "[$remoteUserId] marked as CONNECTED")
+                    Log.d(tag, "[$remoteUserId] marked as CONNECTED")
                 }
             }
 
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
-                Log.d(TAG, "[$remoteUserId] onConnectionChange: $newState")
+                Log.d(tag, "[$remoteUserId] onConnectionChange: $newState")
             }
 
             override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState?) {
-                Log.d(TAG, "[$remoteUserId] onIceGatheringChange: $newState")
+                Log.d(tag, "[$remoteUserId] onIceGatheringChange: $newState")
             }
 
             override fun onIceCandidate(candidate: IceCandidate?) {
                 if (candidate == null) return
                 Log.d(
-                    TAG,
+                    tag,
                     "[$remoteUserId] onIceCandidate: sdpMid=${candidate.sdpMid}, " +
                             "mLine=${candidate.sdpMLineIndex}"
                 )
@@ -234,34 +234,34 @@ class WebRTCClient(
             }
 
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {
-                Log.d(TAG, "[$remoteUserId] onIceCandidatesRemoved: ${candidates?.size ?: 0}")
+                Log.d(tag, "[$remoteUserId] onIceCandidatesRemoved: ${candidates?.size ?: 0}")
             }
 
             override fun onIceConnectionReceivingChange(p0: Boolean) {
-                Log.d(TAG, "[$remoteUserId] onIceConnectionReceivingChange: $p0")
+                Log.d(tag, "[$remoteUserId] onIceConnectionReceivingChange: $p0")
             }
 
             override fun onAddStream(stream: org.webrtc.MediaStream?) {
-                Log.d(TAG, "[$remoteUserId] onAddStream")
+                Log.d(tag, "[$remoteUserId] onAddStream")
             }
 
             override fun onRemoveStream(stream: org.webrtc.MediaStream?) {
-                Log.d(TAG, "[$remoteUserId] onRemoveStream")
+                Log.d(tag, "[$remoteUserId] onRemoveStream")
             }
 
             override fun onDataChannel(dc: org.webrtc.DataChannel?) {
-                Log.d(TAG, "[$remoteUserId] onDataChannel: ${dc?.label()}")
+                Log.d(tag, "[$remoteUserId] onDataChannel: ${dc?.label()}")
             }
 
             override fun onRenegotiationNeeded() {
-                Log.d(TAG, "[$remoteUserId] onRenegotiationNeeded")
+                Log.d(tag, "[$remoteUserId] onRenegotiationNeeded")
             }
 
             override fun onAddTrack(
                 receiver: org.webrtc.RtpReceiver?,
                 streams: Array<out org.webrtc.MediaStream>?
             ) {
-                Log.d(TAG, "[$remoteUserId] onAddTrack, streams=${streams?.size ?: 0}")
+                Log.d(tag, "[$remoteUserId] onAddTrack, streams=${streams?.size ?: 0}")
             }
         }
 
@@ -270,7 +270,7 @@ class WebRTCClient(
 
         localAudioTrack?.let { audioTrack ->
             pc.addTrack(audioTrack, listOf("LOCAL_AUDIO_STREAM"))
-            Log.d(TAG, "[$remoteUserId] Local audio track added")
+            Log.d(tag, "[$remoteUserId] Local audio track added")
         }
 
         peerConnections[remoteUserId] = pc
@@ -291,14 +291,14 @@ class WebRTCClient(
         val from = message.from
         val sdp = message.sdp ?: return
 
-        Log.d(TAG, "handleRemoteOffer from=$from, sdpLength=${sdp.length}")
+        Log.d(tag, "handleRemoteOffer from=$from, sdpLength=${sdp.length}")
 
         val pc = getOrCreatePeerConnection(from)
 
         val state = pc.signalingState()
         if (state != PeerConnection.SignalingState.STABLE &&
             state != PeerConnection.SignalingState.HAVE_REMOTE_OFFER) {
-            Log.d(TAG, "Ignoring OFFER from $from in state=$state")
+            Log.d(tag, "Ignoring OFFER from $from in state=$state")
             return
         }
 
@@ -306,24 +306,24 @@ class WebRTCClient(
 
         pc.setRemoteDescription(object : SimpleSdpObserver() {
             override fun onSetSuccess() {
-                Log.d(TAG, "Remote OFFER set for $from, creating ANSWER")
+                Log.d(tag, "Remote OFFER set for $from, creating ANSWER")
                 pc.createAnswer(object : SimpleSdpObserver() {
                     override fun onCreateSuccess(sessionDescription: SessionDescription?) {
                         if (sessionDescription == null) return
-                        Log.d(TAG, "Answer created for $from, length=${sessionDescription.description.length}")
+                        Log.d(tag, "Answer created for $from, length=${sessionDescription.description.length}")
                         pc.setLocalDescription(SimpleSdpObserver(), sessionDescription)
                         signalingBackend.sendAnswer(from, sessionDescription.description)
-                        Log.d(TAG, "Answer sent to $from")
+                        Log.d(tag, "Answer sent to $from")
                     }
 
                     override fun onCreateFailure(p0: String?) {
-                        Log.e(TAG, "createAnswer failed for $from: $p0")
+                        Log.e(tag, "createAnswer failed for $from: $p0")
                     }
                 }, audioConstraints)
             }
 
             override fun onSetFailure(p0: String?) {
-                Log.e(TAG, "setRemoteDescription(OFFER) failed for $from: $p0")
+                Log.e(tag, "setRemoteDescription(OFFER) failed for $from: $p0")
             }
         }, remoteSdp)
     }
@@ -335,20 +335,20 @@ class WebRTCClient(
         val pc = getOrCreatePeerConnection(from)
         val state = pc.signalingState()
         if (state != PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
-            Log.d(TAG, "Ignoring ANSWER from $from in state=$state")
+            Log.d(tag, "Ignoring ANSWER from $from in state=$state")
             return
         }
 
-        Log.d(TAG, "handleRemoteAnswer from=$from, sdpLength=${sdp.length}")
+        Log.d(tag, "handleRemoteAnswer from=$from, sdpLength=${sdp.length}")
         val remoteSdp = SessionDescription(SessionDescription.Type.ANSWER, sdp)
         pc.setRemoteDescription(object : SimpleSdpObserver() {
             override fun onSetSuccess() {
-                Log.d(TAG, "Remote ANSWER set for $from")
+                Log.d(tag, "Remote ANSWER set for $from")
                 peerStates[from] = PeerState.ANSWERED
             }
 
             override fun onSetFailure(p0: String?) {
-                Log.e(TAG, "setRemoteDescription(ANSWER) failed for $from: $p0")
+                Log.e(tag, "setRemoteDescription(ANSWER) failed for $from: $p0")
             }
         }, remoteSdp)
     }
@@ -357,10 +357,10 @@ class WebRTCClient(
         val from = message.from
         val candidate = message.candidate ?: return
 
-        Log.d(TAG, "handleRemoteIce from=$from, mid=${candidate.sdpMid}, mLine=${candidate.sdpMLineIndex}")
+        Log.d(tag, "handleRemoteIce from=$from, mid=${candidate.sdpMid}, mLine=${candidate.sdpMLineIndex}")
 
         val pc = getOrCreatePeerConnection(from)
         val result = pc.addIceCandidate(candidate)
-        Log.d(TAG, "addIceCandidate for $from result=$result")
+        Log.d(tag, "addIceCandidate for $from result=$result")
     }
 }

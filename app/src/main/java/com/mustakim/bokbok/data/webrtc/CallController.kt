@@ -4,21 +4,29 @@ import android.content.Context
 
 object CallController {
 
+    // Store app context so we can start/stop the service later
+    private var appContext: Context? = null
+
     fun startCall(context: Context, roomId: String, selfId: String) {
-        VoiceService.start(context.applicationContext, roomId, selfId)
+        appContext = context.applicationContext
+        VoiceService.start(appContext!!, roomId, selfId)
     }
 
-    fun endCall(context: Context? = null) {
-        // Optional: require context to stop explicitly
-        context?.let { VoiceService.stop(it.applicationContext) }
+    fun endCall() {
+        appContext?.let { ctx ->
+            VoiceService.stop(ctx)
+        }
     }
 
-    fun setMuted(muted: Boolean, context: Context? = null) {
-        context?.let { VoiceService.setMuted(it.applicationContext, muted) }
+    fun setMuted(muted: Boolean) {
+        appContext?.let { ctx ->
+            VoiceService.setMuted(ctx, muted)
+        }
     }
 
-    fun connectToParticipants(context: Context, remoteUserIds: List<String>) {
+    fun connectToParticipants(remoteUserIds: List<String>) {
         if (remoteUserIds.isEmpty()) return
-        VoiceService.connectTo(context.applicationContext, remoteUserIds)
+        val ctx = appContext ?: return
+        VoiceService.connectTo(ctx, remoteUserIds)
     }
 }

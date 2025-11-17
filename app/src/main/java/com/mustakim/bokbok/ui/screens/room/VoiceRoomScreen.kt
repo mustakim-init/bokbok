@@ -56,6 +56,8 @@ import com.mustakim.bokbok.ui.components.ParticipantCard
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 import com.mustakim.bokbok.state.RoomStateManager
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,10 +67,10 @@ fun VoiceRoomScreen(
     onLeaveRoom: () -> Unit,
     viewModel: VoiceRoomViewModel = viewModel()
 ) {
-    LaunchedEffect(roomId) {
-        viewModel.loadRoom(roomId)
-        viewModel.startCallEngine(roomId)
-    }
+//    LaunchedEffect(roomId) {
+//        viewModel.loadRoom(roomId)
+//        viewModel.startCallEngine(roomId)
+//    }
 
     // Stop WebRTC when this screen leaves composition (nav back, etc.)
     DisposableEffect(roomId) {
@@ -76,6 +78,30 @@ fun VoiceRoomScreen(
             viewModel.stopCallEngine()
         }
     }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.all { it.value }
+
+        if (granted) {
+            viewModel.startCallEngine(roomId)
+        } else {
+            // You already have error handling in the ViewModel; just call a function
+            viewModel.onPermissionDenied()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.loadRoom(roomId)
+
+        if (viewModel.hasRequiredCallPermissions()) {
+            viewModel.startCallEngine(roomId)
+        } else {
+            permissionLauncher.launch(viewModel.getRequiredPermissions())
+        }
+    }
+
 
     val uiState by viewModel.uiState.collectAsState()
 

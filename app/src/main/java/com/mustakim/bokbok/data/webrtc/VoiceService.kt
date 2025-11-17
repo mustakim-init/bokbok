@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.R
 
 class VoiceService : Service() {
@@ -33,12 +34,12 @@ class VoiceService : Service() {
                 putExtra(EXTRA_ROOM_ID, roomId)
                 putExtra(EXTRA_SELF_ID, selfId)
             }
-            androidx.core.content.ContextCompat.startForegroundService(context, i)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun stop(context: Context) {
             val i = Intent(context, VoiceService::class.java).apply { action = ACTION_STOP }
-            androidx.core.content.ContextCompat.startForegroundService(context, i)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun setMuted(context: Context, muted: Boolean) {
@@ -46,7 +47,7 @@ class VoiceService : Service() {
                 action = ACTION_SET_MUTED
                 putExtra(EXTRA_MUTED, muted)
             }
-            androidx.core.content.ContextCompat.startForegroundService(context, i)
+            ContextCompat.startForegroundService(context, i)
         }
 
         fun connectTo(context: Context, ids: List<String>) {
@@ -54,7 +55,7 @@ class VoiceService : Service() {
                 action = ACTION_CONNECT_TO
                 putStringArrayListExtra(EXTRA_REMOTE_IDS, ArrayList(ids))
             }
-            androidx.core.content.ContextCompat.startForegroundService(context, i)
+            ContextCompat.startForegroundService(context, i)
         }
     }
 
@@ -140,8 +141,7 @@ class VoiceService : Service() {
             startForeground(
                 notificationId,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             )
         } else {
             startForeground(notificationId, notification)

@@ -12,6 +12,8 @@ import kotlinx.coroutines.tasks.await
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
+import com.google.firebase.firestore.ListenerRegistration
+
 
 
 class UserRepository(private val context: Context) {
@@ -115,6 +117,37 @@ class UserRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Observe all users who are currently in a given call session.
+     * A user is "in call" when user.currentRoomId == roomId.
+     *
+     * Returns a ListenerRegistration so the caller can remove() it.
+     */
+    fun observeUsersInRoom(
+        roomId: String,
+        onUpdate: (List<User>) -> Unit,
+        onError: (Throwable) -> Unit
+    ): ListenerRegistration {
+        return usersCollection
+            .whereEqualTo("currentRoomId", roomId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null || snapshot.isEmpty) {
+                    onUpdate(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val users = snapshot.documents.mapNotNull { doc ->
+                    doc.data?.let { data -> User.fromMap(data) }
+                }
+
+                onUpdate(users)
+            }
+    }
 
     suspend fun deleteProfileImage(userId: String): Result<Unit> {
         return try {

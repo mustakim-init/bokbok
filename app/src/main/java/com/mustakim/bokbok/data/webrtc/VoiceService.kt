@@ -84,7 +84,10 @@ class VoiceService : Service() {
                 val selfId = intent.getStringExtra(EXTRA_SELF_ID)
                 if (roomId != null && selfId != null) startCall(roomId, selfId)
             }
-            ACTION_STOP -> stopCall()
+            ACTION_STOP -> {
+                stopCall()
+                stopSelf()
+            }
             ACTION_SET_MUTED -> {
                 val muted = intent.getBooleanExtra(EXTRA_MUTED, false)
                 client?.setAudioEnabled(!muted)

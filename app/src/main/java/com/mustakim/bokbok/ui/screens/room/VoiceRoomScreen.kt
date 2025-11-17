@@ -67,17 +67,6 @@ fun VoiceRoomScreen(
     onLeaveRoom: () -> Unit,
     viewModel: VoiceRoomViewModel = viewModel()
 ) {
-//    LaunchedEffect(roomId) {
-//        viewModel.loadRoom(roomId)
-//        viewModel.startCallEngine(roomId)
-//    }
-
-    // Stop WebRTC when this screen leaves composition (nav back, etc.)
-    DisposableEffect(roomId) {
-        onDispose {
-            viewModel.stopCallEngine()
-        }
-    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -209,7 +198,13 @@ fun VoiceRoomScreen(
                     onOpenChat = { /* TODO */ },
                     onOpenVoiceEffects = { /* TODO */ },
                     onShareInvite = { /* TODO */ },
-                    onLeaveRoom = onLeaveRoom
+                    onLeaveRoom = {
+                        // 1) Stop WebRTC + foreground service
+                        viewModel.leaveRoom()
+
+                        // 2) Run the parent logic: clear Firestore membership + RoomStateManager
+                        onLeaveRoom()
+                    }
                 )
             }
         }

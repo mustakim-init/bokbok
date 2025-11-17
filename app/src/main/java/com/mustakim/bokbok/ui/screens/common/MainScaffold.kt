@@ -35,6 +35,8 @@ import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.launch
 import com.mustakim.bokbok.data.repository.UserRepository
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 
 @Composable
 fun MainScaffold(
@@ -55,6 +57,8 @@ fun MainScaffold(
     val userRepository = remember { UserRepository(context.applicationContext) }
 
     val roomRepository = remember { RoomRepository() }
+
+    val voiceRoomViewModel: VoiceRoomViewModel = viewModel()
 
     val roomState by remember {
         derivedStateOf {
@@ -220,13 +224,15 @@ fun MainScaffold(
                                     val roomSnapshot = RoomStateManager.currentRoom.value
                                     val modeSnapshot = RoomStateManager.joinMode.value
 
+                                    // 1) Stop WebRTC + foreground service
+                                    voiceRoomViewModel.leaveRoom()
+
                                     if (roomSnapshot != null) {
                                         scope.launch {
-                                            // Always clear "currently in call"
+                                            // 2) Clear "currently in call"
                                             userRepository.setCurrentRoom(null)
 
                                             if (modeSnapshot == JoinMode.SESSION_ONLY) {
-                                                // Session-only: drop membership ONLY if not the host
                                                 val roomResult = roomRepository.getRoom(roomSnapshot.id)
                                                 val room = roomResult.getOrNull()
                                                 val currentUserId = userRepository.getCurrentUserId()
@@ -235,7 +241,7 @@ fun MainScaffold(
                                                     roomRepository.leaveRoom(roomSnapshot.id)
                                                 }
                                             }
-                                            // In both modes, clear local room state
+                                            // 3) Clear local room state
                                             RoomStateManager.leaveRoom()
                                         }
                                     }

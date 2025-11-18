@@ -20,6 +20,7 @@ import android.util.Base64
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.BuildConfig
 import com.mustakim.bokbok.data.repository.PresenceRepository
+import kotlinx.coroutines.async
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -95,14 +96,30 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
             val result = repository.getActiveRooms()
             result.fold(
                 onSuccess = { rooms ->
-                    _uiState.update {
-                        it.copy(
-                            publicRooms = rooms,
-                            totalActiveRooms = rooms.size,
-                            // keep totalOnlineUsers as-is for now (still dummy based on friends)
-                            isLoading = false,
-                            isRefreshingPublicRooms = false
-                        )
+                    viewModelScope.launch {
+                        // Fetch presence counts in parallel
+                        val enriched = rooms.map { room ->
+                            async {
+                                val online = try {
+                                    presenceRepository.getOnlineCount(room.id)
+                                } catch (_: Exception) {
+                                    0
+                                }
+                                room.copy(currentOnline = online)
+                            }
+                        }.map { it.await() }
+
+                        val totalOnline = enriched.sumOf { it.currentOnline }
+
+                        _uiState.update {
+                            it.copy(
+                                publicRooms = enriched,
+                                totalActiveRooms = enriched.size,
+                                totalOnlineUsers = totalOnline,
+                                isLoading = false,
+                                isRefreshingPublicRooms = false
+                            )
+                        }
                     }
                 },
                 onFailure = { e ->

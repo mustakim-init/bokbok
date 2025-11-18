@@ -182,7 +182,7 @@ class RealtimeSignaling(
 
         onSignal(signal)
 
-        // Optional: delete after handling to keep tree small (same as FirestoreSignaling)
+        // Optional: delete after handling to keep tree small
         snapshot.ref.removeValue()
             .addOnSuccessListener {
                 Log.d(tag, "Deleted handled signal key=$key")
@@ -198,7 +198,7 @@ class RealtimeSignaling(
         }
         listener = null
 
-        // Best-effort cleanup similar to FirestoreSignaling (optional)
+
         try {
             // Delete signals sent by this user
             signalsRef.orderByChild("from").equalTo(selfId)

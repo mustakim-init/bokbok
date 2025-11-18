@@ -299,7 +299,7 @@ private fun ParticipantsSection(room: VoiceRoom, hasImage: Boolean) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "${room.participantCount}/${room.maxParticipants}",
+                    text = "${room.currentOnline}/${room.maxParticipants}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (hasImage)

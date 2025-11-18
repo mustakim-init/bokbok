@@ -389,7 +389,7 @@ private fun CompactRoomCardContent(
                 )
 
                 Text(
-                    text = "${room.participantCount}/${room.maxParticipants}",
+                    text = "${room.currentOnline}/${room.maxParticipants}",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
                     color = colors.participantText ?: MaterialTheme.colorScheme.onSurface

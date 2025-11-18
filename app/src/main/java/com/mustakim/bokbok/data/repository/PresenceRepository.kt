@@ -52,6 +52,25 @@ class PresenceRepository {
         presenceRoot.child(roomId).removeEventListener(listener)
     }
 
+    // In PresenceRepository
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun getOnlineCount(roomId: String): Int =
+        suspendCancellableCoroutine { cont ->
+            val ref = presenceRoot.child(roomId)
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val count = snapshot.childrenCount.toInt()
+                    cont.resume(count) {}
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    cont.resume(0) {} // treat as 0 on error
+                }
+            }
+            ref.addListenerForSingleValueEvent(listener)
+            cont.invokeOnCancellation { ref.removeEventListener(listener) }
+        }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun canJoin(roomId: String, maxParticipants: Int): Boolean =
         suspendCancellableCoroutine { cont ->

@@ -16,7 +16,9 @@ data class VoiceRoom(
     val maxParticipants: Int = 10,
     val isPublic: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
-    val category: RoomCategory = RoomCategory.CASUAL
+    val category: RoomCategory = RoomCategory.CASUAL,
+    // NEW: how many are currently in the call (RTDB presence)
+    val currentOnline: Int = 0
 ) {
     val participantCount: Int get() = participants.size
     val isFull: Boolean get() = participants.size >= maxParticipants

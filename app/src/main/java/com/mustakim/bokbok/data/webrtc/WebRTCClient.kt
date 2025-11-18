@@ -149,19 +149,21 @@ class WebRTCClient(
         if (peerConnectionFactory != null) return
 
         val options = PeerConnectionFactory.InitializationOptions.builder(appContext)
-
             .setEnableInternalTracer(true)
+            .setFieldTrials("WebRTC-Audio-NetworkAdaptation/Enabled/")
             .createInitializationOptions()
+
         PeerConnectionFactory.initialize(options)
 
         val encoderFactory = DefaultVideoEncoderFactory(
             eglBase.eglBaseContext,
-            /* enableIntelVp8Encoder */ true,
-            /* enableH264HighProfile */ true
+            true,
+            true
         )
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
         peerConnectionFactory = PeerConnectionFactory.builder()
+            .setOptions(PeerConnectionFactory.Options())
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
@@ -171,10 +173,12 @@ class WebRTCClient(
         val factory = peerConnectionFactory ?: return
 
         val audioConstraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
         }
 
         audioSource = factory.createAudioSource(audioConstraints)
@@ -278,8 +282,19 @@ class WebRTCClient(
             ?: throw IllegalStateException("Failed to create PeerConnection")
 
         localAudioTrack?.let { audioTrack ->
-            pc.addTrack(audioTrack, listOf("LOCAL_AUDIO_STREAM"))
+            val sender = pc.addTrack(audioTrack, listOf("LOCAL_AUDIO_STREAM"))
             Log.d(tag, "[$remoteUserId] Local audio track added")
+
+            try {
+                val params = sender.parameters
+                if (params.encodings.isNotEmpty()) {
+                    params.encodings[0].maxBitrateBps = 32000
+                    params.encodings[0].minBitrateBps = 16000
+                    sender.parameters = params
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "[$remoteUserId] Failed to set audio bitrate: ${e.message}")
+            }
         }
 
         peerConnections[remoteUserId] = pc

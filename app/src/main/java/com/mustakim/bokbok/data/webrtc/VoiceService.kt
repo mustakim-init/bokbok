@@ -31,6 +31,9 @@ class VoiceService : Service() {
         const val ACTION_SET_SPEAKER = "bokbok.voice.SET_SPEAKER"
         const val EXTRA_SPEAKER_ON = "speakerOn"
 
+        const val ACTION_DISCONNECT_FROM = "bokbok.voice.DISCONNECT_FROM"
+
+
 
         fun start(context: Context, roomId: String, selfId: String) {
             val i = Intent(context, VoiceService::class.java).apply {
@@ -58,6 +61,14 @@ class VoiceService : Service() {
             val i = Intent(context, VoiceService::class.java).apply {
                 action = ACTION_SET_MUTED
                 putExtra(EXTRA_MUTED, muted)
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
+
+        fun disconnectFrom(context: Context, ids: List<String>) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_DISCONNECT_FROM
+                putStringArrayListExtra(EXTRA_REMOTE_IDS, ArrayList(ids))
             }
             ContextCompat.startForegroundService(context, i)
         }
@@ -112,6 +123,11 @@ class VoiceService : Service() {
             ACTION_SET_SPEAKER -> {
                 val on = intent.getBooleanExtra(EXTRA_SPEAKER_ON, true)
                 audioRouter?.setSpeakerEnabled(on)
+            }
+            // NEW: drop specific peers
+            ACTION_DISCONNECT_FROM -> {
+                val ids = intent.getStringArrayListExtra(EXTRA_REMOTE_IDS) ?: arrayListOf()
+                ids.forEach { id -> client?.disconnectFrom(id) }
             }
         }
         return START_STICKY

@@ -164,6 +164,24 @@ class WebRTCClient(
         localAudioTrack?.setEnabled(enabled)
     }
 
+    fun disconnectFrom(remoteUserId: String) {
+        Log.d(tag, "disconnectFrom($remoteUserId)")
+
+        // Close and remove the PeerConnection
+        peerConnections[remoteUserId]?.let { pc ->
+            try {
+                pc.close()
+            } catch (e: Exception) {
+                Log.w(tag, "Error closing PeerConnection for $remoteUserId: ${e.message}")
+            }
+        }
+        peerConnections.remove(remoteUserId)
+
+        // Clear any state associated with this peer
+        peerStates.remove(remoteUserId)
+        pendingRemoteCandidates.remove(remoteUserId)
+    }
+
     /**
      * Call this when a new remote participant joins and you want
      * to initiate a connection to them (send offer).

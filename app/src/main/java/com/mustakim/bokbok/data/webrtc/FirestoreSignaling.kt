@@ -7,7 +7,6 @@ import com.google.firebase.firestore.Query
 import org.webrtc.IceCandidate
 import java.util.Collections
 
-
 class FirestoreSignaling(
     private val roomId: String,
     private val selfId: String
@@ -15,10 +14,8 @@ class FirestoreSignaling(
 
     private val tag = "FirestoreSignaling"
 
-
-    private val sessionStart = System.currentTimeMillis()
+    // In-memory set to avoid double-processing while this instance is alive
     private val processedIds = Collections.synchronizedSet(mutableSetOf<String>())
-
 
     private val db = FirebaseFirestore.getInstance()
     private val signalsRef = db.collection("rooms")
@@ -90,7 +87,7 @@ class FirestoreSignaling(
         Log.d(tag, "observeSignals() for selfId=$selfId, roomId=$roomId")
 
         listener = signalsRef
-            .whereGreaterThan("timestamp", sessionStart)
+            // Remove the sessionStart filter
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -130,7 +127,10 @@ class FirestoreSignaling(
                     val signal = when (type) {
                         "offer", "answer" -> {
                             val sdp = data["sdp"] as? String
-                            Log.d(tag, "Received $type from=$from, to=$to, sdpLength=${sdp?.length ?: 0}")
+                            Log.d(
+                                tag,
+                                "Received $type from=$from, to=$to, sdpLength=${sdp?.length ?: 0}"
+                            )
                             SignalMessage(
                                 from = from,
                                 to = to,
@@ -144,7 +144,10 @@ class FirestoreSignaling(
                             val sdpMLineIndex = (data["sdpMLineIndex"] as? Long)?.toInt() ?: 0
                             val cand = data["candidate"] as? String ?: continue
 
-                            Log.d(tag, "Received ICE from=$from, to=$to, mid=$sdpMid, mLine=$sdpMLineIndex")
+                            Log.d(
+                                tag,
+                                "Received ICE from=$from, to=$to, mid=$sdpMid, mLine=$sdpMLineIndex"
+                            )
 
                             val ice = IceCandidate(sdpMid, sdpMLineIndex, cand)
                             SignalMessage(
@@ -161,7 +164,17 @@ class FirestoreSignaling(
                         }
                     }
 
+                    // Deliver to WebRTC
                     onSignal(signal)
+
+                    // Delete after handling so it never affects future sessions
+                    doc.reference.delete()
+                        .addOnSuccessListener {
+                            Log.d(tag, "Deleted handled signal docId=${doc.id}")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(tag, "Failed to delete handled signal ${doc.id}: ${e.message}")
+                        }
                 }
             }
     }
@@ -169,5 +182,50 @@ class FirestoreSignaling(
     override fun dispose() {
         listener?.remove()
         listener = null
+
+        // Best-effort cleanup of any leftover signals involving this user
+        try {
+            // Delete docs where this user is the sender
+            signalsRef
+                .whereEqualTo("from", selfId)
+                .get()
+                .addOnSuccessListener { snap ->
+                    if (snap.isEmpty) return@addOnSuccessListener
+                    val batch = db.batch()
+                    for (doc in snap.documents) {
+                        batch.delete(doc.reference)
+                    }
+                    batch.commit()
+                        .addOnSuccessListener {
+                            Log.d(tag, "Cleaned up signals sent by $selfId")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(tag, "Failed to clean up sent signals: ${e.message}")
+                        }
+                }
+
+            // Delete docs where this user is the receiver
+            signalsRef
+                .whereEqualTo("to", selfId)
+                .get()
+                .addOnSuccessListener { snap ->
+                    if (snap.isEmpty) return@addOnSuccessListener
+                    val batch = db.batch()
+                    for (doc in snap.documents) {
+                        batch.delete(doc.reference)
+                    }
+                    batch.commit()
+                        .addOnSuccessListener {
+                            Log.d(tag, "Cleaned up signals addressed to $selfId")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(tag, "Failed to clean up received signals: ${e.message}")
+                        }
+                }
+        } catch (e: Exception) {
+            Log.w(tag, "dispose cleanup error: ${e.message}")
+        }
+
+        Log.d(tag, "FirestoreSignaling disposed for selfId=$selfId roomId=$roomId")
     }
 }

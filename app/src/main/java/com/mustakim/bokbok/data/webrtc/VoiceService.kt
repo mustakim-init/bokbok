@@ -155,6 +155,13 @@ class VoiceService : Service() {
                 val speakingIds = speakingMap.filterValues { it }.keys.toSet()
                 com.mustakim.bokbok.state.SpeakingStateManager.updateSpeakingIds(speakingIds)
             }
+            webrtc.onPeerConnectionStateChanged = { remoteId, connected ->   // NEW
+                if (connected) {
+                    com.mustakim.bokbok.state.ConnectionStateManager.markConnected(remoteId)
+                } else {
+                    com.mustakim.bokbok.state.ConnectionStateManager.markDisconnected(remoteId)
+                }
+            }
             webrtc.connect()
         }
 

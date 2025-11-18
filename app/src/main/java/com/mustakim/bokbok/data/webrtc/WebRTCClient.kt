@@ -46,6 +46,9 @@ class WebRTCClient(
     private val statsHandler = Handler(Looper.getMainLooper())
     private var statsPolling = false
 
+    // NEW: connection state callback
+    var onPeerConnectionStateChanged: ((remoteUserId: String, connected: Boolean) -> Unit)? = null
+
 
     // Decide which side is allowed to initiate offers for a given pair.
     // Here: only the "smaller" UID starts offers, the other always waits to answer.
@@ -293,11 +296,20 @@ class WebRTCClient(
                     PeerConnection.IceConnectionState.CONNECTED -> {
                         peerStates[remoteUserId] = PeerState.CONNECTED
                         Log.d(tag, "[$remoteUserId] marked as CONNECTED at tier=$currentTier")
+                        onPeerConnectionStateChanged?.invoke(remoteUserId, true)
                     }
-                    PeerConnection.IceConnectionState.FAILED,
+
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        Log.w(tag, "[$remoteUserId] ICE state=$newState at tier=$currentTier")
+                        Log.w(tag, "[$remoteUserId] ICE state=DISCONNECTED at tier=$currentTier")
+                        // Try higher tier first; if that also closes, we'll mark as disconnected on CLOSED/FAILED
                         maybeEscalateIceTierAndRetry(remoteUserId)
+                    }
+
+                    PeerConnection.IceConnectionState.FAILED,
+                    PeerConnection.IceConnectionState.CLOSED -> {
+                        Log.w(tag, "[$remoteUserId] ICE state=$newState at tier=$currentTier")
+                        // At this point, treat peer as gone for this client
+                        onPeerConnectionStateChanged?.invoke(remoteUserId, false)
                     }
                     else -> Unit
                 }
@@ -484,6 +496,8 @@ class WebRTCClient(
             IceTier.PRIMARY_TURN -> IceTier.FALLBACK_TURN
             IceTier.FALLBACK_TURN -> {
                 Log.w(tag, "Already at FALLBACK_TURN, cannot escalate further")
+                // Treat this peer as gone for this client
+                onPeerConnectionStateChanged?.invoke(remoteUserId, false)   // NEW
                 return
             }
         }
@@ -497,7 +511,6 @@ class WebRTCClient(
         peerConnections.remove(remoteUserId)
         peerStates[remoteUserId] = PeerState.NEW
 
-        // If we are the offerer, try again with a new PeerConnection at the new tier
         if (shouldInitiateTo(remoteUserId)) {
             createConnectionTo(remoteUserId)
         } else {

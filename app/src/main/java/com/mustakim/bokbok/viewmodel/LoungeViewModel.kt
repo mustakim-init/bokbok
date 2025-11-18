@@ -263,6 +263,11 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
+        // Best-effort: assume fresh app launch means "not in any active call".
+        viewModelScope.launch {
+            userRepository.setCurrentRoom(null)
+        }
+
         // Replace dummy public rooms with real ones as soon as possible
         loadPublicRoomsFromFirestore()
         loadMyRoomsFromFirestore()
@@ -286,15 +291,13 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            // 1) Add user as a temporary member of the room
-            val result = repository.joinRoom(room.id)
+            // Session-only: do NOT modify room.participants.
+            // Just mark that I'm currently in this room's call session.
+            val result = userRepository.setCurrentRoom(room.id)
+
             result.onFailure { e ->
                 _uiState.update { it.copy(error = "Failed to join room: ${e.message}") }
-                return@launch
             }
-
-            // 2) Mark user as currently in this room's call session
-            userRepository.setCurrentRoom(room.id)
         }
     }
 

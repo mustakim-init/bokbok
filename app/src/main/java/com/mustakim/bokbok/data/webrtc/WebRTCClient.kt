@@ -12,6 +12,8 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.SessionDescription
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 
 
 private enum class PeerState { NEW, OFFER_SENT, ANSWERED, CONNECTED }
@@ -38,6 +40,11 @@ class WebRTCClient(
     private val pendingRemoteCandidates =
         mutableMapOf<String, MutableList<IceCandidate>>()
 
+
+    // Speaking detection
+    var onSpeakingStateChanged: ((Map<String, Boolean>) -> Unit)? = null
+    private val statsHandler = Handler(Looper.getMainLooper())
+    private var statsPolling = false
 
 
     // Decide which side is allowed to initiate offers for a given pair.
@@ -74,12 +81,62 @@ class WebRTCClient(
         initLocalAudio()
         startListeningForSignals()
 
+        startStatsPolling()
+
         Log.d(tag, "connect() finished setup for selfId=$selfId")
+    }
+
+    // These are for speaking indicator
+    private fun startStatsPolling() {
+        if (statsPolling) return
+        statsPolling = true
+        statsHandler.post(statsPollRunnable)
+    }
+
+    private fun stopStatsPolling() {
+        statsPolling = false
+        statsHandler.removeCallbacks(statsPollRunnable)
+    }
+
+    private val statsPollRunnable = object : Runnable {
+        override fun run() {
+            if (!statsPolling) return
+
+            val speakingMap = mutableMapOf<String, Boolean>()
+
+            // For each peer connection, poll stats
+            peerConnections.forEach { (remoteUserId, pc) ->
+                try {
+                    pc.getStats { report ->
+                        try {
+                            // For modern WebRTC: report.statsMap values
+                            val anySpeaking = report.statsMap.values.any { stats ->
+                                stats.type == "inbound-rtp" &&
+                                        (stats.members["kind"] == "audio" ||
+                                                stats.members["mediaType"] == "audio") &&
+                                        ((stats.members["audioLevel"] as? Double) ?: 0.0) > 0.02
+                            }
+                            speakingMap[remoteUserId] = anySpeaking
+                            // After last pc callback, push aggregated map
+                            onSpeakingStateChanged?.invoke(speakingMap.toMap())
+                        } catch (e: Exception) {
+                            Log.w(tag, "Error parsing stats for $remoteUserId: ${e.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(tag, "getStats failed for $remoteUserId: ${e.message}")
+                }
+            }
+
+            // Poll every 200ms
+            statsHandler.postDelayed(this, 200L)
+        }
     }
 
     fun disconnect() {
         Log.d(tag, "disconnect() called for selfId=$selfId roomId=$roomId")
 
+        stopStatsPolling() //stops the speaking indicator
         signalingBackend.dispose()
         Log.d(tag, "signalingBackend.dispose() done")
 

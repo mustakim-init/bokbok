@@ -133,7 +133,15 @@ class VoiceService : Service() {
             signalingBackend = signaling!!,
             selfId = selfId,
             roomId = roomId
-        ).also { it.connect() }
+        ).also { webrtc ->
+            webrtc.onSpeakingStateChanged = { speakingMap ->
+                // Keep only IDs that are currently speaking
+                val speakingIds = speakingMap.filterValues { it }.keys.toSet()
+                com.mustakim.bokbok.state.SpeakingStateManager.updateSpeakingIds(speakingIds)
+            }
+            webrtc.connect()
+        }
+
         Log.d(tag, "VoiceService started call room=$roomId self=$selfId")
     }
 

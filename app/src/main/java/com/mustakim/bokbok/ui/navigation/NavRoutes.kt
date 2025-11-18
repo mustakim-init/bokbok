@@ -11,8 +11,6 @@ sealed class NavRoutes(val route: String) {
     object Login : NavRoutes("login")
     object Signup : NavRoutes("signup")
     object GoogleSignup : NavRoutes("google_signup")
-    object Onboarding : NavRoutes("onboarding")
-    object SetupUsername : NavRoutes("setup_username")
     object Permissions : NavRoutes("permissions")
 
     // ============= MAIN APP =============
@@ -41,38 +39,4 @@ sealed class NavRoutes(val route: String) {
         }
     }
 
-    companion object {
-        /**
-         * ✅ Check if a route is part of the main app flow (shows bottom nav)
-         */
-        fun isMainAppRoute(route: String?): Boolean {
-            return route in listOf(
-                Lounge.route,
-                Chats.route,
-                GameBoost.route
-            )
-        }
-
-        /**
-         * ✅ Check if a route is part of auth flow
-         */
-        fun isAuthRoute(route: String?): Boolean {
-            return route in listOf(
-                Splash.route,
-                Login.route,
-                Signup.route,
-                GoogleSignup.route,
-                Onboarding.route,
-                SetupUsername.route,
-                Permissions.route
-            )
-        }
-
-        /**
-         * ✅ Get the base route without parameters
-         */
-        fun getBaseRoute(route: String?): String? {
-            return route?.substringBefore("/")
-        }
-    }
 }

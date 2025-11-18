@@ -17,7 +17,7 @@ data class ImgBBResponse(
 
 data class ImgBBData(
     val url: String,
-    val display_url: String
+    val displayUrl: String
 )
 
 interface ImgBBApi {

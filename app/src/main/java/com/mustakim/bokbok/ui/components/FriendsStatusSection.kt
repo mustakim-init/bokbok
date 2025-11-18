@@ -304,19 +304,19 @@ class ScallopShape(
             val im1 = (i - 1 + n) % n
             val ip1 = (i + 1) % n
             val ip2 = (i + 2) % n
-            val P0 = points[im1]
-            val P1 = points[i]
-            val P2 = points[ip1]
-            val P3 = points[ip2]
+            val p0 = points[im1]
+            val p1 = points[i]
+            val p2 = points[ip1]
+            val p3 = points[ip2]
             val c1 = Offset(
-                x = P1.x + (P2.x - P0.x) * factor,
-                y = P1.y + (P2.y - P0.y) * factor
+                x = p1.x + (p2.x - p0.x) * factor,
+                y = p1.y + (p2.y - p0.y) * factor
             )
             val c2 = Offset(
-                x = P2.x - (P3.x - P1.x) * factor,
-                y = P2.y - (P3.y - P1.y) * factor
+                x = p2.x - (p3.x - p1.x) * factor,
+                y = p2.y - (p3.y - p1.y) * factor
             )
-            path.cubicTo(c1.x, c1.y, c2.x, c2.y, P2.x, P2.y)
+            path.cubicTo(c1.x, c1.y, c2.x, c2.y, p2.x, p2.y)
         }
         path.close()
         return path

@@ -1,6 +1,8 @@
 package com.mustakim.bokbok.data.repository
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import com.google.firebase.auth.FirebaseAuth
@@ -9,11 +11,7 @@ import com.mustakim.bokbok.BuildConfig
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.model.User
 import kotlinx.coroutines.tasks.await
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
-import com.google.firebase.firestore.ListenerRegistration
-
 
 
 class UserRepository(private val context: Context) {
@@ -24,8 +22,6 @@ class UserRepository(private val context: Context) {
     private val usersCollection = firestore.collection("users")
 
     fun getCurrentUserId(): String? = auth.currentUser?.uid
-
-    fun getCurrentUserEmail(): String? = auth.currentUser?.email
 
     suspend fun getUserProfile(userId: String): Result<User> {
         return try {
@@ -95,59 +91,6 @@ class UserRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Set or clear which room call the current user is in.
-     * roomId = null means "not in any call session".
-     */
-    suspend fun setCurrentRoom(roomId: String?): Result<Unit> {
-        return try {
-            val currentUser = auth.currentUser
-                ?: return Result.failure(Exception("User not logged in"))
-
-            val update: Map<String, Any?> = mapOf("currentRoomId" to roomId)
-
-            usersCollection
-                .document(currentUser.uid)
-                .update(update)
-                .await()
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Observe all users who are currently in a given call session.
-     * A user is "in call" when user.currentRoomId == roomId.
-     *
-     * Returns a ListenerRegistration so the caller can remove() it.
-     */
-    fun observeUsersInRoom(
-        roomId: String,
-        onUpdate: (List<User>) -> Unit,
-        onError: (Throwable) -> Unit
-    ): ListenerRegistration {
-        return usersCollection
-            .whereEqualTo("currentRoomId", roomId)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    onError(error)
-                    return@addSnapshotListener
-                }
-
-                if (snapshot == null || snapshot.isEmpty) {
-                    onUpdate(emptyList())
-                    return@addSnapshotListener
-                }
-
-                val users = snapshot.documents.mapNotNull { doc ->
-                    doc.data?.let { data -> User.fromMap(data) }
-                }
-
-                onUpdate(users)
-            }
-    }
 
     suspend fun deleteProfileImage(userId: String): Result<Unit> {
         return try {
@@ -160,14 +103,4 @@ class UserRepository(private val context: Context) {
         }
     }
 
-    suspend fun createOrUpdateUser(user: User): Result<Unit> {
-        return try {
-            usersCollection.document(user.uid)
-                .set(user.toMap())
-                .await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 }

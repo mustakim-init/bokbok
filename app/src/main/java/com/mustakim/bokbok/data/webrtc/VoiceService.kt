@@ -65,13 +65,6 @@ class VoiceService : Service() {
             ContextCompat.startForegroundService(context, i)
         }
 
-        fun disconnectFrom(context: Context, ids: List<String>) {
-            val i = Intent(context, VoiceService::class.java).apply {
-                action = ACTION_DISCONNECT_FROM
-                putStringArrayListExtra(EXTRA_REMOTE_IDS, ArrayList(ids))
-            }
-            ContextCompat.startForegroundService(context, i)
-        }
 
         fun connectTo(context: Context, ids: List<String>) {
             val i = Intent(context, VoiceService::class.java).apply {
@@ -139,14 +132,12 @@ class VoiceService : Service() {
         currentRoomId = roomId
         currentSelfId = selfId
 
-        // NEW: reset WebRTC connection flags for this fresh call
         com.mustakim.bokbok.state.ConnectionStateManager.clear()
 
-        // Start audio routing
         audioRouter = audioRouter ?: AudioRouteController(applicationContext)
         audioRouter?.start(defaultToSpeaker = true)
 
-        signaling = FirestoreSignaling(roomId, selfId)
+        signaling = RealtimeSignaling(roomId, selfId)
         client = WebRTCClient(
             context = applicationContext,
             signalingBackend = signaling!!,
@@ -167,7 +158,7 @@ class VoiceService : Service() {
             webrtc.connect()
         }
 
-        Log.d(tag, "VoiceService started call room=$roomId self=$selfId")
+        Log.d(tag, "VoiceService started call room=$roomId self=$selfId (RTDB signaling)")
     }
 
     private fun stopCall() {

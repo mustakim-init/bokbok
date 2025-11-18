@@ -77,7 +77,7 @@ fun LoungeScreen(
             onRoomClick = remember {
                 { room: VoiceRoom ->
                     // 1) Mark user as currently in this room's call
-                    loungeViewModel.enterRoomFromMyRooms(room)
+                    loungeViewModel.enterRoomFromMyRooms()
                     // 2) Join as PERMANENT so leave does NOT drop membership
                     RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
                 }

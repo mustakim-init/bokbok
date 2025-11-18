@@ -19,10 +19,6 @@ data class Friendship(
     fun getOtherUserId(currentUserId: String): String {
         return if (userId1 == currentUserId) userId2 else userId1
     }
-
-    fun isRequestedByCurrentUser(currentUserId: String): Boolean {
-        return requestedBy == currentUserId
-    }
 }
 
 enum class FriendshipStatus {

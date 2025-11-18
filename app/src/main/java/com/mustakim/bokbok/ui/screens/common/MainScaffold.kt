@@ -22,21 +22,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.state.JoinMode
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.MinimizedRoomBar
 import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.UserViewModel
-import kotlinx.coroutines.launch
-import com.mustakim.bokbok.data.repository.UserRepository
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun MainScaffold(
@@ -52,11 +48,6 @@ fun MainScaffold(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val context = LocalContext.current
-
-    val userRepository = remember { UserRepository(context.applicationContext) }
-
-    val roomRepository = remember { RoomRepository() }
 
     val voiceRoomViewModel: VoiceRoomViewModel = viewModel()
 
@@ -221,30 +212,11 @@ fun MainScaffold(
                                 onExpand = { RoomStateManager.expandRoom() },
                                 onToggleMute = { RoomStateManager.toggleMute() },
                                 onLeaveRoom = {
-                                    val roomSnapshot = RoomStateManager.currentRoom.value
-                                    val modeSnapshot = RoomStateManager.joinMode.value
-
-                                    // 1) Stop WebRTC + foreground service
+                                    // 1) Stop WebRTC + RealTimeDB presence via ViewModel
                                     voiceRoomViewModel.leaveRoom()
 
-                                    if (roomSnapshot != null) {
-                                        scope.launch {
-                                            // 2) Clear "currently in call"
-                                            userRepository.setCurrentRoom(null)
-
-                                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
-                                                val roomResult = roomRepository.getRoom(roomSnapshot.id)
-                                                val room = roomResult.getOrNull()
-                                                val currentUserId = userRepository.getCurrentUserId()
-
-                                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
-                                                    roomRepository.leaveRoom(roomSnapshot.id)
-                                                }
-                                            }
-                                            // 3) Clear local room state
-                                            RoomStateManager.leaveRoom()
-                                        }
-                                    }
+                                    // 2) Clear local room state only
+                                    RoomStateManager.leaveRoom()
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -289,27 +261,11 @@ fun MainScaffold(
                         RoomStateManager.minimizeRoom(isMuted)
                     },
                     onLeaveRoom = {
-                        val roomSnapshot = currentRoom  // capture local copy
-                        val modeSnapshot = RoomStateManager.joinMode.value
+                        // Just clear local room state
+                        RoomStateManager.leaveRoom()
+                    },
+                    viewModel = voiceRoomViewModel
 
-                        scope.launch {
-                            // Always clear "currently in call" for this user
-                            userRepository.setCurrentRoom(null)
-
-                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
-                                // Session-only: drop membership ONLY if not the host
-                                val roomResult = roomRepository.getRoom(roomSnapshot.id)
-                                val room = roomResult.getOrNull()
-                                val currentUserId = userRepository.getCurrentUserId()
-
-                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
-                                    roomRepository.leaveRoom(roomSnapshot.id)
-                                }
-                            }
-                            // In both modes, clear local room state
-                            RoomStateManager.leaveRoom()
-                        }
-                    }
                 )
             }
         }

@@ -28,7 +28,6 @@ object RoomStateManager {
 
     // NEW: how this room was joined
     private val _joinMode = mutableStateOf(JoinMode.SESSION_ONLY)
-    val joinMode: State<JoinMode> = _joinMode
 
 
     fun joinRoom(room: VoiceRoom, mode: JoinMode = JoinMode.SESSION_ONLY) {

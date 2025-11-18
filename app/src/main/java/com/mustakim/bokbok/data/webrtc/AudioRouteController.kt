@@ -7,7 +7,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.util.Log
 
-class AudioRouteController(private val context: Context) {
+class AudioRouteController(context: Context) {
 
     private val tag = "AudioRouteController"
     private val audioManager: AudioManager =
@@ -38,8 +38,6 @@ class AudioRouteController(private val context: Context) {
         speakerOn = enabled
         applySpeakerState()
     }
-
-    fun isSpeakerEnabled(): Boolean = speakerOn
 
     fun stop() {
         try {

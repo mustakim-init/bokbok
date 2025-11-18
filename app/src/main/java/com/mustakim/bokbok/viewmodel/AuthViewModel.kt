@@ -16,7 +16,7 @@ import com.mustakim.bokbok.data.model.User
 sealed class AuthEvent {
     object NavigateToUsernameSetup : AuthEvent()
     object NavigateToPermissions : AuthEvent()
-    object NavigateToLounge : AuthEvent()
+
     data class ShowError(val message: String) : AuthEvent()
 }
 
@@ -50,14 +50,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         _authEvents.value = null
     }
 
-    fun supportsModernAuth(): Boolean {
-        return repository.supportsCredentialManager()
-    }
 
-    fun startLegacyGoogleSignIn(onIntentReady: (Intent) -> Unit) {
-        val intent = repository.getGoogleSignInIntent()
-        onIntentReady(intent)
-    }
 
     fun handleLegacyGoogleSignIn(
         data: Intent?,
@@ -102,45 +95,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun signInWithGoogle(activity: Activity, onUserLoaded: (User?, FirebaseUser) -> Unit = { _, _ -> }) {
-        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-        viewModelScope.launch {
-            val result = repository.signInWithGoogle(activity)
-            result.fold(
-                onSuccess = { triple ->
-                    val (firebaseUser, existingUser, isNewUser) = triple
-
-                    onUserLoaded(existingUser, firebaseUser)
-
-                    if (isNewUser) {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            isLoggedIn = false,
-                            isNewGoogleUser = true
-                        )
-                        _authEvents.value = AuthEvent.NavigateToUsernameSetup
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            isLoggedIn = true,
-                            isNewGoogleUser = false
-                        )
-                        _authEvents.value = AuthEvent.NavigateToPermissions
-                    }
-                },
-                onFailure = { error ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = error.message ?: "Failed to sign in with Google"
-                    )
-                    _authEvents.value = AuthEvent.ShowError(
-                        error.message ?: "Failed to sign in with Google"
-                    )
-                }
-            )
-        }
-    }
 
 
     fun signInWithGoogleWithFallback(
@@ -185,7 +140,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             val intent = repository.getGoogleSignInIntent()
                             // keep isLoading true; legacy result will finish it
                             onLegacyIntentReady(intent)
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
                                 error = error.message ?: "Failed to sign in with Google"
@@ -325,9 +280,5 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    fun clearSuccessMessage() {
-        _uiState.value = _uiState.value.copy(successMessage = null)
     }
 }

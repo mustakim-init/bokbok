@@ -34,10 +34,6 @@ import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
-import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.state.JoinMode
 
 
 // ✅ Centralized animation specs for consistency
@@ -212,9 +208,6 @@ fun NavGraph(
             val roomId = backStackEntry.arguments?.getString("roomId")
                 ?: return@composable
 
-            val scope = rememberCoroutineScope()
-            val roomRepository = remember { RoomRepository() }
-            val userRepository = remember{ UserRepository(context.applicationContext) }
 
             VoiceRoomScreen(
                 roomId = roomId,
@@ -223,32 +216,9 @@ fun NavGraph(
                     navController.popBackStack()
                 },
                 onLeaveRoom = {
-                    val modeSnapshot = RoomStateManager.joinMode.value
-                    val currentRoom = RoomStateManager.currentRoom.value
-
-                    if (currentRoom != null) {
-                        scope.launch {
-                            // Clear "in call" marker for this user regardless of mode
-                            userRepository.setCurrentRoom(null)
-
-                            if (modeSnapshot == JoinMode.SESSION_ONLY) {
-                                val roomResult = roomRepository.getRoom(currentRoom.id)
-                                val room = roomResult.getOrNull()
-                                val currentUserId = userRepository.getCurrentUserId()
-
-                                if (room != null && currentUserId != null && room.hostId != currentUserId) {
-                                    roomRepository.leaveRoom(currentRoom.id)
-                                }
-
-                                RoomStateManager.leaveRoom()
-                            } else {
-                                RoomStateManager.leaveRoom()
-                                navController.popBackStack()
-                            }
-                        }
-                    } else {
-                        navController.popBackStack()
-                    }
+                    // ViewModel handles presence + WebRTC; here just clear state and navigate back
+                    RoomStateManager.leaveRoom()
+                    navController.popBackStack()
                 }
             )
         }

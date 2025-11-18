@@ -67,6 +67,7 @@ fun VoiceRoomScreen(
     onLeaveRoom: () -> Unit,
     viewModel: VoiceRoomViewModel = viewModel()
 ) {
+    val uiState by viewModel.uiState.collectAsState()
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -74,25 +75,30 @@ fun VoiceRoomScreen(
         val granted = permissions.all { it.value }
 
         if (granted) {
-            viewModel.startCallEngine(roomId)
+            // Only start engine once room is loaded
+            uiState.room?.let { room ->
+                viewModel.startCallEngine(room.id)
+            }
         } else {
-            // You already have error handling in the ViewModel; just call a function
             viewModel.onPermissionDenied()
         }
     }
 
-    LaunchedEffect(Unit) {
+    // 1) Load room metadata and start RTDB presence listener
+    LaunchedEffect(roomId) {
         viewModel.loadRoom(roomId)
+    }
+
+    // 2) When room is loaded, then deal with permissions + start engine
+    LaunchedEffect(uiState.room) {
+        val room = uiState.room ?: return@LaunchedEffect
 
         if (viewModel.hasRequiredCallPermissions()) {
-            viewModel.startCallEngine(roomId)
+            viewModel.startCallEngine(room.id)
         } else {
             permissionLauncher.launch(viewModel.getRequiredPermissions())
         }
     }
-
-
-    val uiState by viewModel.uiState.collectAsState()
 
 
     val globalMuted by RoomStateManager.isMuted

@@ -19,7 +19,7 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
 
     init {
         loadCurrentUser()
@@ -48,9 +48,5 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCurrentUser(user: User?) {
         _currentUser.value = user
-    }
-
-    fun refreshUser() {
-        loadCurrentUser()
     }
 }

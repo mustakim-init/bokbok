@@ -19,7 +19,7 @@ import androidx.compose.runtime.Stable
 import android.util.Base64
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.BuildConfig
-import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.data.repository.PresenceRepository
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -37,7 +37,7 @@ data class LoungeUiState(
 class LoungeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = RoomRepository()
 
-    private val userRepository = UserRepository(getApplication<Application>().applicationContext)
+    private val presenceRepository = PresenceRepository()
 
 
     // ImgBB
@@ -263,11 +263,6 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
-        // Best-effort: assume fresh app launch means "not in any active call".
-        viewModelScope.launch {
-            userRepository.setCurrentRoom(null)
-        }
-
         // Replace dummy public rooms with real ones as soon as possible
         loadPublicRoomsFromFirestore()
         loadMyRoomsFromFirestore()
@@ -278,10 +273,10 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
      * When they tap a My Room card to enter the call session,
      * we only need to mark them as "currently in this room".
      */
-    fun enterRoomFromMyRooms(room: VoiceRoom) {
+    fun enterRoomFromMyRooms() {
         viewModelScope.launch {
+            // Just clear errors; navigation + presence are handled in the room screen
             _uiState.update { it.copy(error = null) }
-            userRepository.setCurrentRoom(room.id)
         }
     }
 
@@ -291,13 +286,15 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            // Session-only: do NOT modify room.participants.
-            // Just mark that I'm currently in this room's call session.
-            val result = userRepository.setCurrentRoom(room.id)
-
-            result.onFailure { e ->
-                _uiState.update { it.copy(error = "Failed to join room: ${e.message}") }
+            val canJoin = presenceRepository.canJoin(room.id, room.maxParticipants)
+            if (!canJoin) {
+                _uiState.update { it.copy(error = "Room is full") }
+                return@launch
             }
+
+            // Do NOT call presenceRepository.joinCall() here.
+            // Just navigate to VoiceRoomScreen; presence is joined in startCallEngine().
+            // e.g. navController.navigate("voiceRoom/${room.id}")
         }
     }
 
@@ -305,14 +302,10 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            // 1) Add to permanent members
-            val result = repository.joinRoom(room.id)
+            val result = repository.joinRoom(room.id) // Firestore: add to members
             result.fold(
                 onSuccess = {
-                    // 2) Mark user as in this call session too
-                    userRepository.setCurrentRoom(room.id)
-
-                    // 3) Add to My Rooms list locally if not already there
+                    // Add to My Rooms locally
                     _uiState.update { state ->
                         if (state.myRooms.any { it.id == room.id }) state
                         else state.copy(myRooms = state.myRooms + room)
@@ -329,10 +322,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            // 1) Clear any current call session marker
-            userRepository.setCurrentRoom(null)
-
-            // 2) Remove from permanent members
+            // Only remove from permanent members; call-session leave is done in VoiceRoomViewModel
             val result = repository.leaveRoom(room.id)
             result.fold(
                 onSuccess = {

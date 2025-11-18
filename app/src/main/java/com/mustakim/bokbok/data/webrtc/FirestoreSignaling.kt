@@ -7,6 +7,7 @@ import com.google.firebase.firestore.Query
 import org.webrtc.IceCandidate
 import java.util.Collections
 
+@Deprecated("Use RTDB instead")
 class FirestoreSignaling(
     private val roomId: String,
     private val selfId: String

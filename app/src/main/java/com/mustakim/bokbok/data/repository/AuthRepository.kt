@@ -49,18 +49,6 @@ class AuthRepository(private val context: Context) {
         return googleSignInClient.signInIntent
     }
 
-    suspend fun checkIfUserExists(uid: String): Result<Boolean> {
-        return try {
-            val doc = firestore.collection("users")
-                .document(uid)
-                .get()
-                .await()
-            Result.success(doc.exists())
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
 
 
     // Modern Google sign-in using Credential Manager

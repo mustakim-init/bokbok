@@ -30,6 +30,16 @@ class WebRTCClient(
 
     private val peerStates = mutableMapOf<String, PeerState>()
 
+    private var currentTier: IceTier = IceTier.STUN_ONLY
+    private var lastTierChangeTimeMs: Long = 0
+    private val tierChangeCooldownMs = 30_000L // don’t spam tiers
+
+    // For ICE candidates that arrive before we have a remote SDP
+    private val pendingRemoteCandidates =
+        mutableMapOf<String, MutableList<IceCandidate>>()
+
+
+
     // Decide which side is allowed to initiate offers for a given pair.
     // Here: only the "smaller" UID starts offers, the other always waits to answer.
     private fun shouldInitiateTo(remoteUserId: String): Boolean {
@@ -50,20 +60,11 @@ class WebRTCClient(
         optional.add(MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"))
     }
 
-    // Basic ICE server list (STUN + optional TURN)
-    private val iceServers: List<PeerConnection.IceServer> = listOf(
-        // Free Google STUN – good enough for dev and many real users
-        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302")
-            .createIceServer(),
-        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302")
-            .createIceServer()
-
-        // When you have a real TURN:
-        // PeerConnection.IceServer.builder("turn:your-turn.example.com:3478")
-        //     .setUsername("username")
-        //     .setPassword("password")
-        //     .createIceServer()
-    )
+    private fun currentIceServers(): List<PeerConnection.IceServer> {
+        val servers = TurnServerProvider.buildIceServers(currentTier)
+        Log.d(tag, "Using ICE tier=$currentTier with ${servers.size} servers")
+        return servers
+    }
 
 
     fun connect() {
@@ -191,7 +192,7 @@ class WebRTCClient(
         val factory = peerConnectionFactory
             ?: throw IllegalStateException("PeerConnectionFactory not initialized")
 
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(currentIceServers()).apply {
             // Later you can tune these if needed
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             iceTransportsType = PeerConnection.IceTransportsType.ALL
@@ -209,9 +210,17 @@ class WebRTCClient(
 
             override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
                 Log.d(tag, "[$remoteUserId] onIceConnectionChange: $newState")
-                if (newState == PeerConnection.IceConnectionState.CONNECTED) {
-                    peerStates[remoteUserId] = PeerState.CONNECTED
-                    Log.d(tag, "[$remoteUserId] marked as CONNECTED")
+                when (newState) {
+                    PeerConnection.IceConnectionState.CONNECTED -> {
+                        peerStates[remoteUserId] = PeerState.CONNECTED
+                        Log.d(tag, "[$remoteUserId] marked as CONNECTED at tier=$currentTier")
+                    }
+                    PeerConnection.IceConnectionState.FAILED,
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        Log.w(tag, "[$remoteUserId] ICE state=$newState at tier=$currentTier")
+                        maybeEscalateIceTierAndRetry(remoteUserId)
+                    }
+                    else -> Unit
                 }
             }
 
@@ -360,7 +369,49 @@ class WebRTCClient(
         Log.d(tag, "handleRemoteIce from=$from, mid=${candidate.sdpMid}, mLine=${candidate.sdpMLineIndex}")
 
         val pc = getOrCreatePeerConnection(from)
+
+        // If we don't have a remote description yet, buffer this candidate
+        if (pc.remoteDescription == null) {
+            Log.d(tag, "No remoteDescription for $from yet, buffering ICE")
+            val list = pendingRemoteCandidates.getOrPut(from) { mutableListOf() }
+            list += candidate
+            return
+        }
+
         val result = pc.addIceCandidate(candidate)
         Log.d(tag, "addIceCandidate for $from result=$result")
+    }
+
+    private fun maybeEscalateIceTierAndRetry(remoteUserId: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastTierChangeTimeMs < tierChangeCooldownMs) {
+            Log.d(tag, "Cooldown active, not escalating tier for $remoteUserId")
+            return
+        }
+
+        val nextTier = when (currentTier) {
+            IceTier.STUN_ONLY -> IceTier.PRIMARY_TURN
+            IceTier.PRIMARY_TURN -> IceTier.FALLBACK_TURN
+            IceTier.FALLBACK_TURN -> {
+                Log.w(tag, "Already at FALLBACK_TURN, cannot escalate further")
+                return
+            }
+        }
+
+        Log.w(tag, "Escalating ICE tier from $currentTier to $nextTier for $remoteUserId")
+        currentTier = nextTier
+        lastTierChangeTimeMs = now
+
+        // Tear down the old connection and recreate at the new tier
+        peerConnections[remoteUserId]?.close()
+        peerConnections.remove(remoteUserId)
+        peerStates[remoteUserId] = PeerState.NEW
+
+        // If we are the offerer, try again with a new PeerConnection at the new tier
+        if (shouldInitiateTo(remoteUserId)) {
+            createConnectionTo(remoteUserId)
+        } else {
+            Log.d(tag, "Waiting for remote side to re-offer at new tier $currentTier")
+        }
     }
 }

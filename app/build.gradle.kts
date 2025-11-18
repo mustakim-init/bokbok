@@ -24,11 +24,30 @@ android {
             useSupportLibrary = true
         }
 
-        // Read ImgBB API key
+        // Read keys from local.properties
         val properties = Properties()
         properties.load(project.rootProject.file("local.properties").inputStream())
-        buildConfigField("String", "IMGBB_API_KEY", "\"${properties.getProperty("imgbb.api.key")}\"")
 
+        // ImgBB
+        val imgbbKey = properties.getProperty("imgbb.api.key") ?: ""
+        buildConfigField("String", "IMGBB_API_KEY", "\"$imgbbKey\"")
+
+        // TURN
+        val turnUrl = properties.getProperty("TURN_URL") ?: ""
+        val turnUser = properties.getProperty("TURN_USERNAME") ?: ""
+        val turnPass = properties.getProperty("TURN_PASSWORD") ?: ""
+
+        buildConfigField("String", "TURN_URL", "\"$turnUrl\"")
+        buildConfigField("String", "TURN_USERNAME", "\"$turnUser\"")
+        buildConfigField("String", "TURN_PASSWORD", "\"$turnPass\"")
+
+        val fallbackUrl = properties.getProperty("TURN_FALLBACK_URL") ?: ""
+        val fallbackUser = properties.getProperty("TURN_FALLBACK_USERNAME") ?: ""
+        val fallbackPass = properties.getProperty("TURN_FALLBACK_PASSWORD") ?: ""
+
+        buildConfigField("String", "TURN_FALLBACK_URL", "\"$fallbackUrl\"")
+        buildConfigField("String", "TURN_FALLBACK_USERNAME", "\"$fallbackUser\"")
+        buildConfigField("String", "TURN_FALLBACK_PASSWORD", "\"$fallbackPass\"")
     }
 
     buildTypes {

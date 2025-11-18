@@ -28,6 +28,10 @@ class VoiceService : Service() {
         const val EXTRA_MUTED = "muted"
         const val EXTRA_REMOTE_IDS = "remoteIds"
 
+        const val ACTION_SET_SPEAKER = "bokbok.voice.SET_SPEAKER"
+        const val EXTRA_SPEAKER_ON = "speakerOn"
+
+
         fun start(context: Context, roomId: String, selfId: String) {
             val i = Intent(context, VoiceService::class.java).apply {
                 action = ACTION_START
@@ -39,6 +43,14 @@ class VoiceService : Service() {
 
         fun stop(context: Context) {
             val i = Intent(context, VoiceService::class.java).apply { action = ACTION_STOP }
+            ContextCompat.startForegroundService(context, i)
+        }
+
+        fun setSpeaker(context: Context, on: Boolean) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_SPEAKER
+                putExtra(EXTRA_SPEAKER_ON, on)
+            }
             ContextCompat.startForegroundService(context, i)
         }
 
@@ -68,6 +80,7 @@ class VoiceService : Service() {
     private var signaling: SignalingBackend? = null
     private var currentRoomId: String? = null
     private var currentSelfId: String? = null
+    private var audioRouter: AudioRouteController? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -96,6 +109,10 @@ class VoiceService : Service() {
                 val ids = intent.getStringArrayListExtra(EXTRA_REMOTE_IDS) ?: arrayListOf()
                 ids.forEach { id -> client?.createConnectionTo(id) }
             }
+            ACTION_SET_SPEAKER -> {
+                val on = intent.getBooleanExtra(EXTRA_SPEAKER_ON, true)
+                audioRouter?.setSpeakerEnabled(on)
+            }
         }
         return START_STICKY
     }
@@ -105,6 +122,11 @@ class VoiceService : Service() {
         stopCall()
         currentRoomId = roomId
         currentSelfId = selfId
+
+        // Start audio routing
+        audioRouter = audioRouter ?: AudioRouteController(applicationContext)
+        audioRouter?.start(defaultToSpeaker = true)
+
         signaling = FirestoreSignaling(roomId, selfId)
         client = WebRTCClient(
             context = applicationContext,
@@ -123,6 +145,10 @@ class VoiceService : Service() {
         signaling = null
         currentRoomId = null
         currentSelfId = null
+
+        audioRouter?.stop()
+        audioRouter = null
+
         Log.d(tag, "VoiceService stopped call")
     }
 

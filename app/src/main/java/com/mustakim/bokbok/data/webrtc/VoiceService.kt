@@ -139,6 +139,9 @@ class VoiceService : Service() {
         currentRoomId = roomId
         currentSelfId = selfId
 
+        // NEW: reset WebRTC connection flags for this fresh call
+        com.mustakim.bokbok.state.ConnectionStateManager.clear()
+
         // Start audio routing
         audioRouter = audioRouter ?: AudioRouteController(applicationContext)
         audioRouter?.start(defaultToSpeaker = true)
@@ -151,11 +154,10 @@ class VoiceService : Service() {
             roomId = roomId
         ).also { webrtc ->
             webrtc.onSpeakingStateChanged = { speakingMap ->
-                // Keep only IDs that are currently speaking
                 val speakingIds = speakingMap.filterValues { it }.keys.toSet()
                 com.mustakim.bokbok.state.SpeakingStateManager.updateSpeakingIds(speakingIds)
             }
-            webrtc.onPeerConnectionStateChanged = { remoteId, connected ->   // NEW
+            webrtc.onPeerConnectionStateChanged = { remoteId, connected ->
                 if (connected) {
                     com.mustakim.bokbok.state.ConnectionStateManager.markConnected(remoteId)
                 } else {

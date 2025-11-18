@@ -16,4 +16,9 @@ object ConnectionStateManager {
     fun markConnected(id: String) {
         _disconnectedIds.value = _disconnectedIds.value - id
     }
+
+    // NEW: reset for a fresh call session
+    fun clear() {
+        _disconnectedIds.value = emptySet()
+    }
 }

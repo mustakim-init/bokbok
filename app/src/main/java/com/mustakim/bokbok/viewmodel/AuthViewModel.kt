@@ -226,7 +226,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         displayName: String
     ) {
         viewModelScope.launch {
+            // Start loading
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
+            // 1) Check username availability in Firestore
+            val isAvailable = repository.isUsernameAvailable(username).getOrElse { false }
+
+            if (!isAvailable) {
+                // Username is taken → show error and stop
+                val message = "That username is already taken. Please choose another one."
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = message
+                )
+                _authEvents.value = AuthEvent.ShowError(message)
+                return@launch
+            }
+
+            // 2) Username is free → proceed with auth + profile creation
             repository.signUp(email, password, username, displayName).fold(
                 onSuccess = {
                     _uiState.value = _uiState.value.copy(
@@ -241,7 +258,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoading = false,
                         error = error.message ?: "Failed to create account"
                     )
-                    _authEvents.value = AuthEvent.ShowError(error.message ?: "Failed to create account")
+                    _authEvents.value = AuthEvent.ShowError(
+                        error.message ?: "Failed to create account"
+                    )
                 }
             )
         }

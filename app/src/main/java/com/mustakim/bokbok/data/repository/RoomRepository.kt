@@ -7,6 +7,7 @@ import com.google.firebase.firestore.Query
 import com.mustakim.bokbok.data.model.RoomCategory
 import com.mustakim.bokbok.data.model.VoiceRoom
 import kotlinx.coroutines.tasks.await
+import com.mustakim.bokbok.data.model.User
 
 class RoomRepository {
 
@@ -74,14 +75,23 @@ class RoomRepository {
             val currentUser = auth.currentUser
                 ?: return Result.failure(Exception("User not logged in"))
 
-            val docRef = roomsCollection.document()
+            val uid = currentUser.uid
+            // Load app profile from Firestore to get correct profileImageUrl
+            val userDoc = firestore.collection("users").document(uid).get().await()
+            val user = if (userDoc.exists()) {
+                User.fromMap(userDoc.data ?: emptyMap())
+            } else {
+                User(uid = uid) // fallback without image
+            }
+
+            val roomId = roomsCollection.document().id
 
             val room = VoiceRoom(
-                id = docRef.id,
+                id = roomId,
                 name = name,
                 hostId = currentUser.uid,
                 hostName = currentUser.displayName ?: "",
-                hostImageUrl = currentUser.photoUrl?.toString() ?: "",
+                hostImageUrl = user.profileImageUrl,
                 imageUrl = imageUrl,
                 description = description,
                 participants = listOf(currentUser.uid),
@@ -91,7 +101,7 @@ class RoomRepository {
                 createdAt = System.currentTimeMillis()
             )
 
-            docRef.set(room.toMap()).await()
+            roomsCollection.document(roomId).set(room.toMap()).await()
 
             Result.success(room.id)
         } catch (e: Exception) {

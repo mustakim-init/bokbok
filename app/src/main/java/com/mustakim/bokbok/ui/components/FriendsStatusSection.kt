@@ -44,6 +44,8 @@ import com.mustakim.bokbok.data.model.UserStatus
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import androidx.compose.foundation.combinedClickable
+
 
 // Global scallop shape cached once
 private val CachedScallopShape = ScallopShape()
@@ -51,8 +53,9 @@ private val CachedScallopShape = ScallopShape()
 @Composable
 fun FriendsStatusSection(
     friends: List<FriendStatus>,
+    modifier: Modifier = Modifier,
     onFriendClick: (FriendStatus) -> Unit,
-    modifier: Modifier = Modifier
+    onFriendLongClick: ((FriendStatus) -> Unit)? = null
 ) {
     // Only compute online friends once per friends list change
     val onlineFriends = remember(friends) {
@@ -82,7 +85,8 @@ fun FriendsStatusSection(
             ) { friend ->
                 FriendStatusCard(
                     friend = friend,
-                    onClick = { onFriendClick(friend) }
+                    onClick = { onFriendClick(friend) },
+                    onLongClick = { onFriendLongClick?.invoke(friend) }
                 )
             }
         }
@@ -92,7 +96,8 @@ fun FriendsStatusSection(
 @Composable
 fun FriendStatusCard(
     friend: FriendStatus,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     val badgeText = remember(friend.status, friend.currentRoomCategory) {
         when {
@@ -118,7 +123,13 @@ fun FriendStatusCard(
     ) {
         Box(
             contentAlignment = Alignment.BottomStart,
-            modifier = Modifier.height(42.dp)
+            modifier = Modifier
+                .height(42.dp)
+                .combinedClickable(
+                    enabled = friend.status == UserStatus.IN_ROOM && friend.currentRoomId != null,
+                    onClick = onClick,
+                    onLongClick = { onLongClick?.invoke() }
+                )
         ) {
             ThoughtBubbleBadge(
                 text = badgeText,
@@ -129,8 +140,8 @@ fun FriendStatusCard(
         Spacer(modifier = Modifier.height(4.dp))
 
         Card(
-            onClick = onClick,
-            modifier = Modifier.size(80.dp),
+            modifier = Modifier
+                .size(80.dp),
             shape = CachedScallopShape,
             colors = CardDefaults.cardColors(
                 containerColor = backgroundColor

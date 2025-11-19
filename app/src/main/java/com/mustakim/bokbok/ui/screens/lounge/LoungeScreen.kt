@@ -72,7 +72,6 @@ fun LoungeScreen(
             uiState = uiState,
             currentUserId = currentUserId,
             onCreateRoom = { showCreateRoomDialog = true },
-            onFriendClick = remember { { _: FriendStatus -> } },
             // My Rooms tap → join call session only
             onRoomClick = remember {
                 { room: VoiceRoom ->
@@ -129,7 +128,6 @@ private fun LoungeContent(
     currentUserId: String?,
     onCreateRoom: () -> Unit,
     isMinimized: Boolean = RoomStateManager.isMinimized.value,
-    onFriendClick: (FriendStatus) -> Unit,
     onRoomClick: (VoiceRoom) -> Unit,
     onRefresh: () -> Unit,
     onRefreshPublicRooms: () -> Unit,
@@ -160,7 +158,13 @@ private fun LoungeContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            friendsSection(friends = uiState.friends, onFriendClick = onFriendClick)
+            friendsSection(
+                friends = uiState.friends,
+                myRooms = uiState.myRooms,
+                publicRooms = uiState.publicRooms,
+                onJoinCallOnly = onJoinCallOnly,
+                onJoinPermanently = onJoinPermanently
+            )
 
             myRoomsSection(
                 rooms = uiState.myRooms,
@@ -206,11 +210,17 @@ private fun LoungeContent(
 
 private fun LazyListScope.friendsSection(
     friends: List<FriendStatus>,
-    onFriendClick: (FriendStatus) -> Unit
+    myRooms: List<VoiceRoom>,
+    publicRooms: List<VoiceRoom>,
+    onJoinCallOnly: (VoiceRoom) -> Unit,
+    onJoinPermanently: (VoiceRoom) -> Unit
 ) {
     if (friends.isEmpty()) return
 
     item(key = "friends_section", contentType = "friends") {
+        var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
+        var showJoinDialog by remember { mutableStateOf(false) }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -218,8 +228,56 @@ private fun LazyListScope.friendsSection(
         ) {
             FriendsStatusSection(
                 friends = friends,
-                onFriendClick = onFriendClick
+                onFriendClick = { friend ->
+                    // Tap: join their current room as call-only
+                    val roomId = friend.currentRoomId ?: return@FriendsStatusSection
+
+                    val room = myRooms.firstOrNull { it.id == roomId }
+                        ?: publicRooms.firstOrNull { it.id == roomId }
+                        ?: return@FriendsStatusSection
+
+                    onJoinCallOnly(room)
+                },
+                onFriendLongClick = { friend ->
+                    // Long press: show dialog with same options as PublicRoomsSection
+                    val roomId = friend.currentRoomId ?: return@FriendsStatusSection
+
+                    val room = myRooms.firstOrNull { it.id == roomId }
+                        ?: publicRooms.firstOrNull { it.id == roomId }
+                        ?: return@FriendsStatusSection
+
+                    selectedRoom = room
+                    showJoinDialog = true
+                }
             )
+
+            if (showJoinDialog && selectedRoom != null) {
+                AlertDialog(
+                    onDismissRequest = { showJoinDialog = false },
+                    title = { Text("Join room") },
+                    text = { Text("How do you want to join this room?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                selectedRoom?.let { onJoinPermanently(it) }
+                                showJoinDialog = false
+                            }
+                        ) {
+                            Text("Join permanently")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                selectedRoom?.let { onJoinCallOnly(it) }
+                                showJoinDialog = false
+                            }
+                        ) {
+                            Text("Join call only")
+                        }
+                    }
+                )
+            }
         }
     }
 }

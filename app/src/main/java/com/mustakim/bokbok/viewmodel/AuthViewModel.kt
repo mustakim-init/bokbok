@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.google.firebase.auth.FirebaseUser
 import com.mustakim.bokbok.data.model.User
+import com.mustakim.bokbok.data.repository.PresenceRepository
+
 
 sealed class AuthEvent {
     object NavigateToUsernameSetup : AuthEvent()
@@ -290,6 +292,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
+        // Mark user offline in RTDB
+        PresenceRepository().setUserOffline()
         repository.signOut()
         _uiState.value = _uiState.value.copy(
             isLoggedIn = false,

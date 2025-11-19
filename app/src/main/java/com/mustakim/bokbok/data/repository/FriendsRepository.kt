@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.google.firebase.database.*
 
 class FriendsRepository(
     private val userRepository: UserRepository
@@ -18,6 +19,9 @@ class FriendsRepository(
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private val friendshipsCollection = firestore.collection("friendships")
+
+    private val rtdb: FirebaseDatabase = FirebaseDatabase.getInstance()
+    private val userStatusRef: DatabaseReference = rtdb.getReference("userStatus")
 
     private fun getFriendshipId(userId1: String, userId2: String): String {
         val sortedIds = listOf(userId1, userId2).sorted()
@@ -131,6 +135,58 @@ class FriendsRepository(
             return@callbackFlow
         }
 
+        // Base info from Firestore: friendship + User profile (no live status here)
+        var baseFriends: List<FriendWithUser> = emptyList()
+
+        // Live status from RTDB
+        val roomById = mutableMapOf<String, String?>()
+        val onlineById = mutableMapOf<String, Boolean>()
+
+
+        fun emitCombined() {
+            if (baseFriends.isEmpty()) {
+                trySend(emptyList())
+                return
+            }
+
+            val combined = baseFriends.map { base ->
+                val uid = base.user.uid
+                val roomId = roomById[uid]
+                val online = onlineById[uid] == true
+
+                base.copy(
+                    isOnline = online,
+                    currentRoomId = roomId
+                )
+            }
+            trySend(combined)
+        }
+
+        // ✅ RTDB listener: /userStatus
+        val statusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                roomById.clear()
+                onlineById.clear()
+
+                for (child in snapshot.children) {
+                    val uid = child.key ?: continue
+                    val roomId = child.child("currentRoomId").getValue(String::class.java)
+                    val online = child.child("online").getValue(Boolean::class.java) ?: false
+
+                    roomById[uid] = roomId
+                    onlineById[uid] = online
+                }
+                emitCombined()
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                // Do not close the flow on transient RTDB errors; just log via exception
+                close(error.toException())
+            }
+        }
+        userStatusRef.addValueEventListener(statusListener)
+
+        // ✅ Firestore listener: friendships + user profiles
         val listener: ListenerRegistration = friendshipsCollection
             .where(
                 com.google.firebase.firestore.Filter.or(
@@ -147,26 +203,28 @@ class FriendsRepository(
 
                 val friendships = snapshot?.toObjects(Friendship::class.java) ?: emptyList()
 
-                // FIXED: Use CoroutineScope
                 CoroutineScope(Dispatchers.IO).launch {
-                    val friendsWithUsers = friendships.mapNotNull { friendship ->
+                    val newBase = friendships.mapNotNull { friendship ->
                         val friendId = friendship.getOtherUserId(currentUserId)
                         val user = userRepository.getUserProfile(friendId).getOrNull()
-
                         user?.let {
                             FriendWithUser(
                                 friendship = friendship,
                                 user = it,
-                                isOnline = false
+                                isOnline = false,       // status comes from RTDB
+                                currentRoomId = null    // filled from RTDB
                             )
                         }
                     }
-
-                    trySend(friendsWithUsers)
+                    baseFriends = newBase
+                    emitCombined()
                 }
             }
 
-        awaitClose { listener.remove() }
+        awaitClose {
+            listener.remove()
+            userStatusRef.removeEventListener(statusListener)
+        }
     }
 
     fun observeIncomingFriendRequests(): Flow<List<FriendRequest>> = callbackFlow {

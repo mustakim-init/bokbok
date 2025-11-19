@@ -14,6 +14,8 @@ import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.data.model.PermissionsList
 import com.mustakim.bokbok.data.repository.AuthRepository
 import kotlinx.coroutines.delay
+import com.mustakim.bokbok.data.repository.PresenceRepository
+
 
 @Composable
 fun SplashScreen(
@@ -22,12 +24,16 @@ fun SplashScreen(
 ) {
     val context = LocalContext.current
     val authRepository = remember { AuthRepository(context) }
+    val presenceRepository = remember { PresenceRepository() }
 
     LaunchedEffect(Unit) {
         delay(700) // Show splash for 1.5 seconds
 
         // Check if user is logged in
         if (authRepository.isUserLoggedIn()) {
+            // Mark user as online in RTDB with onDisconnect handler
+            presenceRepository.setUserOnline()
+
             // Check if ALL required permissions are already granted
             val requiredPermissions = PermissionsList.getRequiredPermissions()
             val allRequiredGranted = requiredPermissions.all { permission ->

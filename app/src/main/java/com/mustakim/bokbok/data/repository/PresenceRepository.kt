@@ -9,23 +9,64 @@ class PresenceRepository {
 
     private val db = FirebaseDatabase.getInstance()
     private val presenceRoot = db.getReference("presence")
+
+    // ✅ NEW: per-user status node
+    private val userStatusRoot = db.getReference("userStatus")
     private val auth = FirebaseAuth.getInstance()
 
     private fun uid(): String =
         auth.currentUser?.uid ?: error("Not logged in")
 
+    fun setUserOnline() {
+        val ref = userStatusRoot.child(uid())
+
+        // Mark as online and not currently in a room
+        ref.child("online").setValue(true)
+        ref.child("currentRoomId").setValue(null)
+
+        // If the app disconnects unexpectedly, mark offline + no room
+        ref.onDisconnect().setValue(
+            mapOf(
+                "online" to false,
+                "currentRoomId" to null
+            )
+        )
+    }
+
+    fun setUserOffline() {
+        val ref = userStatusRoot.child(uid())
+        // Cancel the previous onDisconnect and explicitly mark offline
+        ref.onDisconnect().cancel()
+        ref.setValue(
+            mapOf(
+                "online" to false,
+                "currentRoomId" to null
+            )
+        )
+    }
+
     // Session join: only RTDB
     fun joinCall(roomId: String) {
+        // Per-room presence
         val ref = presenceRoot.child(roomId).child(uid())
         ref.setValue(true)
         ref.onDisconnect().removeValue()
+
+        // Per-user status: just set currentRoomId, online already handled by setUserOnline()
+        val statusRef = userStatusRoot.child(uid())
+        statusRef.child("currentRoomId").setValue(roomId)
     }
 
     fun leaveCall(roomId: String) {
+        // Per-room presence
         val ref = presenceRoot.child(roomId).child(uid())
         // This also cancels the onDisconnect handler
         ref.onDisconnect().cancel()
         ref.removeValue()
+
+        // Per-user status: clear currentRoomId, keep online = true
+        val statusRef = userStatusRoot.child(uid())
+        statusRef.child("currentRoomId").setValue(null)
     }
 
     fun observeRoomPresence(

@@ -95,10 +95,15 @@ fun FriendStatusCard(
     onClick: () -> Unit
 ) {
     val badgeText = remember(friend.status, friend.currentRoomCategory) {
-        if (friend.status == UserStatus.IN_ROOM && friend.currentRoomCategory != null) {
-            "Join\n${friend.currentRoomCategory.displayName}"
-        } else {
-            "Idle"
+        when {
+            friend.status == UserStatus.IN_ROOM && friend.currentRoomCategory != null ->
+                "Join\n${friend.currentRoomCategory.displayName}"
+            friend.status == UserStatus.IN_ROOM ->
+                "In room"
+            friend.status == UserStatus.ONLINE ->
+                "Online"
+            else ->
+                "Idle"
         }
     }
 

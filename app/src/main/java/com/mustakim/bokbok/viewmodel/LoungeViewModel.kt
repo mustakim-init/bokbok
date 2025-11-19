@@ -1,26 +1,30 @@
 package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
+import android.net.Uri
+import android.util.Base64
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mustakim.bokbok.BuildConfig
+import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.model.FriendStatus
+import com.mustakim.bokbok.data.model.FriendWithUser
 import com.mustakim.bokbok.data.model.RoomCategory
+import com.mustakim.bokbok.data.model.UserStatus
 import com.mustakim.bokbok.data.model.VoiceRoom
+import com.mustakim.bokbok.data.repository.FriendsRepository
+import com.mustakim.bokbok.data.repository.PresenceRepository
 import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.utils.SampleDataHelper
-import kotlinx.coroutines.delay
+import com.mustakim.bokbok.data.repository.UserRepository
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import android.net.Uri
-import androidx.compose.runtime.Stable
-import android.util.Base64
-import com.mustakim.bokbok.data.api.ImgBBApi
-import com.mustakim.bokbok.BuildConfig
-import com.mustakim.bokbok.data.repository.PresenceRepository
-import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+
 
 data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
@@ -40,6 +44,10 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
 
     private val presenceRepository = PresenceRepository()
 
+    // ✅ NEW: real friends + status
+    private val friendsRepository = FriendsRepository(
+        UserRepository(getApplication<Application>().applicationContext)
+    )
 
     // ImgBB
     private val imgbbApi = ImgBBApi.create()
@@ -47,7 +55,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _uiState = MutableStateFlow(
         LoungeUiState(
-            friends = SampleDataHelper.getSampleFriends(),
+            friends = emptyList(),
             myRooms = emptyList(),
             publicRooms = emptyList(),      // start empty, will be filled from Firestore
             totalActiveRooms = 0,
@@ -170,22 +178,8 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     fun refreshAllData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, error = null) }
-
             try {
-                // Simulate refresh for friends + myRooms (still dummy)
                 delay(1500)
-
-                val friends = SampleDataHelper.getSampleFriends()
-
-                _uiState.update {
-                    it.copy(
-                        friends = friends,
-                        totalOnlineUsers = friends.size,
-                        isRefreshing = false
-                    )
-                }
-
-                // Load real rooms from Firestore
                 loadMyRoomsFromFirestore()
                 loadPublicRoomsFromFirestore()
             } catch (e: Exception) {
@@ -195,7 +189,9 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
                         error = "Failed to refresh: ${e.message}"
                     )
                 }
+                return@launch
             }
+            _uiState.update { it.copy(isRefreshing = false) }
         }
     }
 
@@ -279,10 +275,63 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun FriendWithUser.toFriendStatus(
+        currentRooms: List<VoiceRoom>
+    ): FriendStatus {
+        val effectiveRoomId = currentRoomId
+
+        // Try to match this room to one we know about (myRooms + publicRooms)
+        val room = effectiveRoomId?.let { id ->
+            currentRooms.firstOrNull { it.id == id }
+        }
+
+        val status = when {
+            effectiveRoomId != null -> UserStatus.IN_ROOM
+            isOnline -> UserStatus.ONLINE
+            else -> UserStatus.IDLE
+        }
+
+        return FriendStatus(
+            userId = user.uid,
+            username = user.username,
+            displayName = if (user.displayName.isNotBlank()) user.displayName else user.username,
+            profileImageUrl = user.profileImageUrl,
+            status = status,
+            currentRoomId = effectiveRoomId,
+            currentRoomCategory = room?.category
+        )
+    }
+
+
+    private fun observeFriends() {
+        viewModelScope.launch {
+            friendsRepository.observeFriends().collect { friendsWithUsers ->
+                // Combine public + my rooms so we can resolve categories
+                val currentRooms = uiState.value.publicRooms + uiState.value.myRooms
+
+                val mapped = friendsWithUsers.map { it.toFriendStatus(currentRooms) }
+
+                val totalOnline = mapped.count {
+                    it.status == UserStatus.IN_ROOM || it.status == UserStatus.ONLINE
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        friends = mapped,
+                        totalOnlineUsers = totalOnline
+                    )
+                }
+            }
+        }
+    }
+
     init {
         // Replace dummy public rooms with real ones as soon as possible
         loadPublicRoomsFromFirestore()
         loadMyRoomsFromFirestore()
+
+        // ✅ Friends: live Firestore → Lounge friends strip
+        observeFriends()
     }
 
     /**

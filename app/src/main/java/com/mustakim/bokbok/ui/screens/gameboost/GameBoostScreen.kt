@@ -38,7 +38,7 @@ fun GameBoostScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "🎮 Game Boost Screen",
+                    text = "🎮 Game Boost Features\n          Coming Soon",
                     style = MaterialTheme.typography.headlineMedium
                 )
             }

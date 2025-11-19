@@ -1,5 +1,6 @@
 package com.mustakim.bokbok.ui.screens.common
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -22,7 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -30,9 +33,11 @@ import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.MinimizedRoomBar
 import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
+import com.mustakim.bokbok.viewmodel.AuthViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 import kotlinx.coroutines.launch
+
 
 @Composable
 fun MainScaffold(
@@ -45,11 +50,15 @@ fun MainScaffold(
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
 
     val voiceRoomViewModel: VoiceRoomViewModel = viewModel()
+    val authViewModel: AuthViewModel = viewModel()
+
 
     val roomState by remember {
         derivedStateOf {
@@ -66,6 +75,24 @@ fun MainScaffold(
     val showBars = currentRoom == null || isMinimized
 
 
+    fun handleLogout() {
+        // 1) Sign out (Firebase + presence)
+        authViewModel.signOut()
+
+        // 2) Clear cached user in UserViewModel
+        userViewModel.setCurrentUser(null)
+
+        // 3) Navigate to Login and clear the main graph from back stack
+        navController.navigate(NavRoutes.Login.route) {
+            // Pop everything in the main app flow (Lounge + others)
+            popUpTo(NavRoutes.Lounge.route) {
+                inclusive = true
+            }
+            launchSingleTop = true
+            restoreState = false
+        }
+    }
+
     val onMenuClick: () -> Unit = remember(scope, drawerState) {
         {
             scope.launch { drawerState.open() }
@@ -78,7 +105,14 @@ fun MainScaffold(
             scope.launch {
                 drawerState.close()
                 when (route) {
-                    "logout" -> { /* Handle logout */ }
+                    "about" -> {
+                        val githubUrl = "https://github.com/mustakim-init/bokbok.git"
+                        val intent = Intent(Intent.ACTION_VIEW, githubUrl.toUri())
+                        context.startActivity(intent)
+                    }
+                    "logout" -> {
+                        handleLogout()
+                    }
                     else -> navController.navigate(route) {
                         popUpTo(NavRoutes.Lounge.route) {
                             saveState = true

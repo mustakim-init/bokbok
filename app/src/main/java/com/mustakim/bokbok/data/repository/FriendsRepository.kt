@@ -180,8 +180,12 @@ class FriendsRepository(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                // Do not close the flow on transient RTDB errors; just log via exception
-                close(error.toException())
+                // On permission / network errors, do NOT crash the app.
+                // Option 1: send empty list and just stop listening.
+                trySend(emptyList())
+
+                // Optionally close the flow quietly so collectors stop:
+                close()
             }
         }
         userStatusRef.addValueEventListener(statusListener)

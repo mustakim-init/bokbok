@@ -34,6 +34,9 @@ class VoiceService : Service() {
         const val ACTION_DISCONNECT_FROM = "bokbok.voice.DISCONNECT_FROM"
 
 
+        // 🔊 NEW: toggle between A2DP (music) and SCO (call) mode
+        const val ACTION_SET_A2DP_MODE = "bokbok.voice.SET_A2DP_MODE"
+        const val EXTRA_A2DP_ON = "a2dpOn"
 
         fun start(context: Context, roomId: String, selfId: String) {
             val i = Intent(context, VoiceService::class.java).apply {
@@ -70,6 +73,14 @@ class VoiceService : Service() {
             val i = Intent(context, VoiceService::class.java).apply {
                 action = ACTION_CONNECT_TO
                 putStringArrayListExtra(EXTRA_REMOTE_IDS, ArrayList(ids))
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
+
+        fun setA2dpMode(context: Context, on: Boolean) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_A2DP_MODE
+                putExtra(EXTRA_A2DP_ON, on)
             }
             ContextCompat.startForegroundService(context, i)
         }
@@ -117,6 +128,10 @@ class VoiceService : Service() {
                 val on = intent.getBooleanExtra(EXTRA_SPEAKER_ON, true)
                 audioRouter?.setSpeakerEnabled(on)
             }
+            ACTION_SET_A2DP_MODE -> {
+                val on = intent.getBooleanExtra(EXTRA_A2DP_ON, false)
+                audioRouter?.setUseA2dpMode(on)
+            }
             // NEW: drop specific peers
             ACTION_DISCONNECT_FROM -> {
                 val ids = intent.getStringArrayListExtra(EXTRA_REMOTE_IDS) ?: arrayListOf()
@@ -135,7 +150,10 @@ class VoiceService : Service() {
         com.mustakim.bokbok.state.ConnectionStateManager.clear()
 
         audioRouter = audioRouter ?: AudioRouteController(applicationContext)
-        audioRouter?.start(defaultToSpeaker = true)
+        audioRouter?.start(
+            defaultToSpeaker = true,
+            ducking = true
+        )
 
         signaling = RealtimeSignaling(roomId, selfId)
         client = WebRTCClient(

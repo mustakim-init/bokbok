@@ -196,13 +196,18 @@ fun VoiceRoomScreen(
                     .fillMaxWidth()
                     .heightIn(min = 320.dp) // > sheetPeekHeight (140.dp)
             ) {
+                val isExpanded = bottomSheetState.currentValue == SheetValue.Expanded
+
                 VoiceControlsSheet(
                     isMuted = uiState.isMuted,
                     isSpeakerOn = uiState.isSpeakerOn,
+                    isA2dpModeOn = uiState.isA2dpModeOn,
+                    isExpanded = isExpanded,
                     onToggleMic = viewModel::toggleMic,
                     onToggleSpeaker = viewModel::toggleSpeaker,
                     onOpenChat = { /* TODO */ },
                     onOpenVoiceEffects = { /* TODO */ },
+                    onToggleAudioMode = viewModel::toggleA2dpMode,
                     onShareInvite = { /* TODO */ },
                     onLeaveRoom = {
                         // 1) Stop WebRTC + foreground service

@@ -19,7 +19,6 @@ import androidx.navigation.navArgument
 import com.mustakim.bokbok.data.model.PermissionsList
 import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.UserRepository
-import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
 import com.mustakim.bokbok.ui.screens.auth.LoginScreen
 import com.mustakim.bokbok.ui.screens.auth.SignupScreen
@@ -30,7 +29,6 @@ import com.mustakim.bokbok.ui.screens.lounge.LoungeScreen
 import com.mustakim.bokbok.ui.screens.notifications.NotificationsScreen
 import com.mustakim.bokbok.ui.screens.permissions.PermissionsScreen
 import com.mustakim.bokbok.ui.screens.profile.ProfileScreen
-import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
@@ -191,37 +189,10 @@ fun NavGraph(
             SettingsScreen(navController, themeViewModel)
         }
 
+
         // ============= VOICE ROOM =============
-        composable(
-            route = NavRoutes.Room.route,
-            arguments = listOf(
-                navArgument("roomId") {
-                    type = NavType.StringType
-                    nullable = false
-                }
-            ),
-            enterTransition = { NavigationAnimations.roomEnterTransition },
-            exitTransition = { null }, // Disable exit (use popExit)
-            popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-            popExitTransition = { NavigationAnimations.roomExitTransition }
-        ) { backStackEntry ->
-            val roomId = backStackEntry.arguments?.getString("roomId")
-                ?: return@composable
-
-
-            VoiceRoomScreen(
-                roomId = roomId,
-                onMinimize = { isMuted ->
-                    RoomStateManager.minimizeRoom(isMuted)
-                    navController.popBackStack()
-                },
-                onLeaveRoom = {
-                    // ViewModel handles presence + WebRTC; here just clear state and navigate back
-                    RoomStateManager.leaveRoom()
-                    navController.popBackStack()
-                }
-            )
-        }
+        // NOTE: VoiceRoomScreen is rendered via RoomStateManager in MainScaffold, not via navigation
+        // The NavRoutes.Room route has been removed to avoid duplicate rendering
 
         // ============= CHAT SCREEN (Future) =============
         composable(

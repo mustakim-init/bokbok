@@ -55,11 +55,6 @@ fun MainScaffold(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-
-    val voiceRoomViewModel: VoiceRoomViewModel = viewModel()
-    val authViewModel: AuthViewModel = viewModel()
-
-
     val roomState by remember {
         derivedStateOf {
             Triple(
@@ -71,6 +66,12 @@ fun MainScaffold(
     }
     val (currentRoom, isMinimized, isMuted) = roomState
 
+    // Scope ViewModel to the current room ID to prevent memory leaks
+    val voiceRoomViewModel: VoiceRoomViewModel = viewModel(
+        key = currentRoom?.let { "room_${it.id}" }
+    )
+    val authViewModel: AuthViewModel = viewModel()
+
     // Just compute it each recomposition, no remember
     val showBars = currentRoom == null || isMinimized
 
@@ -80,7 +81,7 @@ fun MainScaffold(
         authViewModel.signOut()
 
         // 2) Clear cached user in UserViewModel
-        userViewModel.setCurrentUser(null)
+        //userViewModel.setCurrentUser(null)
 
         // 3) Navigate to Login and clear the main graph from back stack
         navController.navigate(NavRoutes.Login.route) {

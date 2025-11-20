@@ -17,6 +17,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 
+@Suppress("DEPRECATION")
 class AudioRouteController(private val context: Context) {
 
     private val tag = "AudioRouteController"

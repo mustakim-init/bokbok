@@ -124,7 +124,7 @@ class FriendsRepository(
                 .get()
                 .await()
                 .toObject(Friendship::class.java)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }

@@ -42,6 +42,15 @@ class AuthRepository(private val context: Context) {
     fun isUserLoggedIn(): Boolean = auth.currentUser != null
 
     fun supportsCredentialManager(): Boolean {
+        // Force legacy flow for problematic manufacturers (Xiaomi/MIUI)
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val problematicManufacturers = listOf("xiaomi", "redmi", "poco")
+        
+        if (problematicManufacturers.any { manufacturer.contains(it) }) {
+            android.util.Log.d("AuthRepository", "Using legacy Google Sign-In for $manufacturer device")
+            return false // Force legacy flow for Xiaomi devices
+        }
+        
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
     }
 
@@ -129,7 +138,15 @@ class AuthRepository(private val context: Context) {
             val isNewUser = existingUser == null
 
             Result.success(Triple(firebaseUser, existingUser, isNewUser))
+        } catch (e: ApiException) {
+            // Enhanced error logging for API exceptions
+            android.util.Log.e("AuthRepository", 
+                "Google Sign-In API Error: ${e.statusCode} | " +
+                "Device: ${Build.MANUFACTURER} ${Build.MODEL} | " +
+                "Android: ${Build.VERSION.SDK_INT}")
+            Result.failure(Exception("Google Sign-In failed (Error ${e.statusCode}): ${e.message}"))
         } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Google Sign-In Error", e)
             Result.failure(e)
         }
     }

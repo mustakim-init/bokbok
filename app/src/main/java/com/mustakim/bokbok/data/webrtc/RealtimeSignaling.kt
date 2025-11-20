@@ -4,6 +4,7 @@ import android.util.Log
 import com.google.firebase.database.*
 import org.webrtc.IceCandidate
 import java.util.Collections
+import java.util.LinkedHashMap
 
 class RealtimeSignaling(
     private val roomId: String,
@@ -20,8 +21,16 @@ class RealtimeSignaling(
 
     private var listener: ChildEventListener? = null
 
-    // Just in case the listener replays (network glitches), avoid double-processing
-    private val processedKeys = Collections.synchronizedSet(mutableSetOf<String>())
+    // LRU Cache to prevent memory leak (max 1000 items)
+    private val processedKeys = Collections.synchronizedSet(
+        Collections.newSetFromMap(
+            object : LinkedHashMap<String, Boolean>(1000, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                    return size > 1000
+                }
+            }
+        )
+    )
 
     override fun sendOffer(to: String?, sdp: String) {
         val data = mapOf(
@@ -29,7 +38,7 @@ class RealtimeSignaling(
             "to" to to, // nullable = broadcast, same as Firestore version
             "type" to "offer",
             "sdp" to sdp,
-            "timestamp" to System.currentTimeMillis()
+            "timestamp" to ServerValue.TIMESTAMP
         )
         Log.d(tag, "sendOffer to=$to, sdpLength=${sdp.length}")
         val node = signalsRef.push()
@@ -48,7 +57,7 @@ class RealtimeSignaling(
             "to" to to,
             "type" to "answer",
             "sdp" to sdp,
-            "timestamp" to System.currentTimeMillis()
+            "timestamp" to ServerValue.TIMESTAMP
         )
         Log.d(tag, "sendAnswer to=$to, sdpLength=${sdp.length}")
         val node = signalsRef.push()
@@ -69,7 +78,7 @@ class RealtimeSignaling(
             "sdpMid" to candidate.sdpMid,
             "sdpMLineIndex" to candidate.sdpMLineIndex,
             "candidate" to candidate.sdp,
-            "timestamp" to System.currentTimeMillis()
+            "timestamp" to ServerValue.TIMESTAMP
         )
         Log.d(
             tag,
@@ -142,6 +151,14 @@ class RealtimeSignaling(
         val signal = when (type) {
             "offer", "answer" -> {
                 val sdp = snapshot.child("sdp").getValue(String::class.java)
+                val timestamp = snapshot.child("timestamp").getValue(Long::class.java) ?: 0L
+                
+                // Ignore stale signals (> 60 seconds old)
+                if (System.currentTimeMillis() - timestamp > 60_000) {
+                    Log.d(tag, "Ignoring stale $type from=$from (age=${System.currentTimeMillis() - timestamp}ms)")
+                    return
+                }
+
                 Log.d(
                     tag,
                     "Received $type from=$from, to=$to, sdpLength=${sdp?.length ?: 0}"
@@ -159,6 +176,12 @@ class RealtimeSignaling(
                 val mLineIndexLong = snapshot.child("sdpMLineIndex").getValue(Long::class.java)
                 val sdpMLineIndex = mLineIndexLong?.toInt() ?: 0
                 val cand = snapshot.child("candidate").getValue(String::class.java) ?: return
+                val timestamp = snapshot.child("timestamp").getValue(Long::class.java) ?: 0L
+
+                // ICE candidates expire faster (30s)
+                if (System.currentTimeMillis() - timestamp > 30_000) {
+                    return
+                }
 
                 Log.d(
                     tag,
@@ -181,15 +204,7 @@ class RealtimeSignaling(
         }
 
         onSignal(signal)
-
-        // Optional: delete after handling to keep tree small
-        snapshot.ref.removeValue()
-            .addOnSuccessListener {
-                Log.d(tag, "Deleted handled signal key=$key")
-            }
-            .addOnFailureListener { e ->
-                Log.w(tag, "Failed to delete handled signal $key: ${e.message}")
-            }
+        // REMOVED: Immediate deletion. We rely on dispose() to clean up.
     }
 
     override fun dispose() {

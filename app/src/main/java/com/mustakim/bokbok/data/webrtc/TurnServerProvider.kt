@@ -1,14 +1,17 @@
+@file:Suppress("DEPRECATION")
+
 package com.mustakim.bokbok.data.webrtc
 
 import com.mustakim.bokbok.BuildConfig
 import org.webrtc.PeerConnection
 
+@Deprecated("Using TurnServerManager instead")
 enum class IceTier {
     STUN_ONLY,
     PRIMARY_TURN,
     FALLBACK_TURN
 }
-
+@Deprecated("Using TurnServerManager instead")
 object TurnServerProvider {
 
     fun buildIceServers(tier: IceTier): List<PeerConnection.IceServer> {

@@ -352,14 +352,14 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            val canJoin = presenceRepository.canJoin(room.id, room.maxParticipants)
-            if (!canJoin) {
+            // Soft check before navigation (race condition exists, but handled atomically in VoiceRoomViewModel)
+            val currentCount = presenceRepository.getOnlineCount(room.id)
+            if (currentCount >= room.maxParticipants) {
                 _uiState.update { it.copy(error = "Room is full") }
                 return@launch
             }
 
-            // Do NOT call presenceRepository.joinCall() here.
-            // Just navigate to VoiceRoomScreen; presence is joined in startCallEngine().
+            // Navigate to VoiceRoomScreen; actual atomic join happens there.
             // e.g. navController.navigate("voiceRoom/${room.id}")
         }
     }

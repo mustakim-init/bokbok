@@ -1,5 +1,6 @@
 package com.mustakim.bokbok.data.webrtc
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -231,10 +232,11 @@ class VoiceService : Service() {
         }
     }
 
+    @SuppressLint("WakelockTimeout")
     private fun acquireWakeLock() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "bokbok:voice_call_wl")
-        if (wakeLock?.isHeld != true) wakeLock?.acquire(60*60*1000L /*10 minutes*/)
+        if (wakeLock?.isHeld != true) wakeLock?.acquire()
     }
 
     private fun releaseWakeLock() {

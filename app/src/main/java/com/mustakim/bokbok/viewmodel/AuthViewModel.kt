@@ -32,6 +32,7 @@ data class AuthUiState(
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = AuthRepository(application.applicationContext)
+    private val presenceRepository = PresenceRepository()
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
@@ -81,6 +82,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             isLoggedIn = true,
                             isNewGoogleUser = false
                         )
+                        presenceRepository.setUserOnline()
                         _authEvents.value = AuthEvent.NavigateToPermissions
                     }
                 },
@@ -133,6 +135,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                                 isLoggedIn = true,
                                 isNewGoogleUser = false
                             )
+                            presenceRepository.setUserOnline()
                             _authEvents.value = AuthEvent.NavigateToPermissions
                         }
                     },
@@ -253,6 +256,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoggedIn = true,
                         successMessage = "Account created successfully!"
                     )
+                    presenceRepository.setUserOnline()
                     _authEvents.value = AuthEvent.NavigateToPermissions
                 },
                 onFailure = { error ->
@@ -278,6 +282,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         isLoggedIn = true,
                         successMessage = "Welcome back!"
                     )
+                    presenceRepository.setUserOnline()
                     _authEvents.value = AuthEvent.NavigateToPermissions
                 },
                 onFailure = { error ->

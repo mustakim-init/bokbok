@@ -58,6 +58,8 @@ import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 import com.mustakim.bokbok.state.RoomStateManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +101,18 @@ fun VoiceRoomScreen(
             permissionLauncher.launch(viewModel.getRequiredPermissions())
         }
     }
+    val view = LocalView.current
+
+    // 3) Handle errors (e.g. Room Full)
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { error ->
+
+            android.widget.Toast.makeText(view.context, error, android.widget.Toast.LENGTH_LONG).show()
+            if (error.contains("Room is full") || error.contains("Failed to load")) {
+                onLeaveRoom()
+            }
+        }
+    }
 
 
     val globalMuted by RoomStateManager.isMuted
@@ -132,7 +146,7 @@ fun VoiceRoomScreen(
         Brush.verticalGradient(colors = gradientColors)
     }
 
-    val view = LocalView.current
+
     DisposableEffect(colorScheme.primary, isDarkTheme) {
         val window = (view.context as? android.app.Activity)?.window
             ?: return@DisposableEffect onDispose {}
@@ -225,6 +239,10 @@ fun VoiceRoomScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(brush = gradientBrush)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null // No ripple effect
+                ) { /* Do nothing, just block click-through */ }
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {

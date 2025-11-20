@@ -62,6 +62,8 @@ class WebRTCClient(
     private val connectionRetryCounts = ConcurrentHashMap<String, Int>()
     private val connectedPeersCount = AtomicInteger(0)
 
+    private val currentSpeakingState = ConcurrentHashMap<String, Boolean>()
+
     // Audio Management
     private var audioManager: AudioManager? = null
     private var savedAudioMode: Int = AudioManager.MODE_NORMAL
@@ -616,21 +618,35 @@ class WebRTCClient(
     private val statsPollRunnable = object : Runnable {
         override fun run() {
             if (!statsPolling) return
+            // 1. Emit the LATEST known state immediately.
+            // This decouples the UI update from the async WebRTC stats gathering.
+            onSpeakingStateChanged?.invoke(currentSpeakingState.toMap())
             executeTask {
-                val speakingMap = mutableMapOf<String, Boolean>()
-                peerConnections.forEach { (id, pc) ->
+                // 2. Trigger stats gathering for all peers
+                peerConnections.forEach { (remoteId, pc) ->
                     pc.getStats { report ->
-                        val speaking = report.statsMap.values.any { 
-                            it.type == "inbound-rtp" && 
-                            (it.members["mediaType"] == "audio" || it.members["kind"] == "audio") &&
-                            ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.02
+                        // A. Check REMOTE Audio (inbound-rtp)
+                        val remoteSpeaking = report.statsMap.values.any {
+                            it.type == "inbound-rtp" &&
+                                    (it.members["mediaType"] == "audio" || it.members["kind"] == "audio") &&
+                                    ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.05 // Slightly higher threshold
                         }
-                        speakingMap[id] = speaking
+                        currentSpeakingState[remoteId] = remoteSpeaking
+                        // B. Check LOCAL Audio (media-source)
+                        // We check this on every PC report to ensure we catch it.
+                        val localSpeaking = report.statsMap.values.any {
+                            (it.type == "media-source" || it.type == "track") &&
+                                    it.members["kind"] == "audio" &&
+                                    it.members["trackIdentifier"] == localAudioTrack?.id() &&
+                                    ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.05
+                        }
+                        // Update self state
+                        currentSpeakingState[selfId] = localSpeaking
                     }
                 }
-                onSpeakingStateChanged?.invoke(speakingMap)
             }
-            statsHandler.postDelayed(this, 1000L)
+            // 3. Schedule next run (Faster polling: 200ms instead of 1000ms)
+            statsHandler.postDelayed(this, 200L)
         }
     }
 }

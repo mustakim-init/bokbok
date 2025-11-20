@@ -97,6 +97,37 @@ class PresenceRepository {
         }
     }
 
+    private fun startReconnectionMonitor(roomId: String) {
+        val connectedRef = db.getReference(".info/connected")
+        connectedRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val connected = snapshot.getValue(Boolean::class.java) ?: false
+                if (connected) {
+                    // We just reconnected!
+                    // Check if we are still listed in the room. If not, re-join.
+                    val userId = uid()
+                    val roomRef = presenceRoot.child(roomId)
+
+                    roomRef.child(userId).addListenerForSingleValueEvent(object : ValueEventListener {
+                        override fun onDataChange(snap: DataSnapshot) {
+                            if (!snap.exists()) {
+                                // We were removed (likely due to onDisconnect firing during a flicker).
+                                // Re-assert our presence!
+                                android.util.Log.d("PresenceRepo", "Reconnected and re-asserting presence in $roomId")
+                                roomRef.child(userId).setValue(true)
+
+                                // Re-arm the onDisconnect handler
+                                setupPresenceAfterJoin(roomId)
+                            }
+                        }
+                        override fun onCancelled(error: DatabaseError) {}
+                    })
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
     // Atomic join using Transaction
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun tryJoinRoom(roomId: String, maxParticipants: Int): Result<Boolean> {
@@ -136,10 +167,11 @@ class PresenceRepository {
         // Re-affirm presence with onDisconnect (Transaction doesn't set onDisconnect)
         val ref = presenceRoot.child(roomId).child(uid())
         ref.onDisconnect().removeValue()
-
         // Update user status
         val statusRef = userStatusRoot.child(uid())
         statusRef.child("currentRoomId").setValue(roomId)
+        // [ADD THIS LINE HERE]
+        startReconnectionMonitor(roomId)
     }
 
     // Deprecated: joinCall is now handled internally by tryJoinRoom

@@ -61,6 +61,21 @@ fun LoungeScreen(
     val currentUserId = currentUser?.uid
     var showCreateRoomDialog by remember { mutableStateOf(false) }
 
+    // [NEW STATE VARIABLES]
+    var showAlreadyInRoomDialog by remember { mutableStateOf(false) }
+    var pendingJoinAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+
+    // [NEW HELPER FUNCTION]
+    val handleJoinRequest: (() -> Unit) -> Unit = { action ->
+        if (RoomStateManager.currentRoom.value != null) {
+            pendingJoinAction = action
+            showAlreadyInRoomDialog = true
+        } else {
+            action()
+        }
+    }
+
     MainScaffold(
         navController = navController,
         title = "BokBok Lounge",
@@ -75,10 +90,10 @@ fun LoungeScreen(
             // My Rooms tap → join call session only
             onRoomClick = remember {
                 { room: VoiceRoom ->
-                    // 1) Mark user as currently in this room's call
-                    loungeViewModel.enterRoomFromMyRooms()
-                    // 2) Join as PERMANENT so leave does NOT drop membership
-                    RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
+                    handleJoinRequest {
+                        loungeViewModel.enterRoomFromMyRooms()
+                        RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
+                    }
                 }
             },
             onRefresh = remember(loungeViewModel) { { loungeViewModel.refreshAllData() } },
@@ -86,19 +101,53 @@ fun LoungeScreen(
             // Public Rooms: tap / "Join call only"
             onJoinCallOnly = remember {
                 { room: VoiceRoom ->
-                    loungeViewModel.joinRoomSessionOnly(room)
-                    RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
+                    handleJoinRequest {
+                        loungeViewModel.joinRoomSessionOnly(room)
+                        RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
+                    }
                 }
             },
             // Public Rooms: long‑press / "Join permanently"
             onJoinPermanently = remember(loungeViewModel) {
                 { room: VoiceRoom ->
-                    loungeViewModel.joinRoomPermanently(room)
-                    RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
+                    handleJoinRequest {
+                        loungeViewModel.joinRoomPermanently(room)
+                        RoomStateManager.joinRoom(room, JoinMode.PERMANENT)
+                    }
                 }
             },
             onDeleteRoom = remember(loungeViewModel) { { room: VoiceRoom -> loungeViewModel.deleteRoomAsHost(room) } },
             onLeaveRoom = remember(loungeViewModel) { { room: VoiceRoom -> loungeViewModel.leaveRoomPermanently(room) } }
+        )
+    }
+
+    if (showAlreadyInRoomDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showAlreadyInRoomDialog = false
+                pendingJoinAction = null
+            },
+            title = { Text("Leave current room?") },
+            text = { Text("You are already in a voice room. Joining this new room will disconnect you from the current one.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingJoinAction?.invoke()
+                        showAlreadyInRoomDialog = false
+                        pendingJoinAction = null
+                    }
+                ) {
+                    Text("Join New Room")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showAlreadyInRoomDialog = false
+                    pendingJoinAction = null
+                }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 

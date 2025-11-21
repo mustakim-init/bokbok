@@ -11,7 +11,7 @@ import com.google.firebase.messaging.RemoteMessage
 import com.mustakim.bokbok.MainActivity
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.receiver.NotificationReceiver
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -19,9 +19,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         android.util.Log.d("FCM", "Message received from: ${remoteMessage.from}")
         android.util.Log.d("FCM", "Notification: ${remoteMessage.notification}")
         android.util.Log.d("FCM", "Data payload: ${remoteMessage.data}")
-        
+
         val data = remoteMessage.data
-        
+
         // Check if it's a notification payload (system tray) or data payload (custom handling)
         // Prioritize data payload since we are sending data-only messages now
         val title = data["title"] ?: remoteMessage.notification?.title ?: "New Notification"
@@ -33,14 +33,20 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         sendNotification(title, body, roomId, notificationDocId, notificationId)
     }
 
-    private fun sendNotification(title: String, body: String, roomId: String?, notificationDocId: String?, notificationId: Int) {
+    private fun sendNotification(
+        title: String,
+        body: String,
+        roomId: String?,
+        notificationDocId: String?,
+        notificationId: Int
+    ) {
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             // If roomId is present, you can handle navigation in MainActivity
             if (roomId != null) putExtra("roomId", roomId)
             if (notificationDocId != null) putExtra("notificationDocId", notificationDocId)
         }
-        
+
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
@@ -56,14 +62,19 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         // Add Actions if it's an invite
         if (roomId != null) {
-            val acceptIntent = Intent(this, NotificationReceiver::class.java).apply {
-                action = "ACTION_ACCEPT_INVITE"
+            // ✅ FIX: Use Activity Intent for "Accept" to avoid Android 12+ trampoline restrictions
+            val acceptIntent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 putExtra("roomId", roomId)
-                putExtra("notificationId", notificationId)
+                putExtra("navigate_to_room", true)
+                putExtra("action_accept", true) // Signal to delete notification
                 if (notificationDocId != null) putExtra("notificationDocId", notificationDocId)
             }
-            val acceptPendingIntent = PendingIntent.getBroadcast(
-                this, 1, acceptIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val acceptPendingIntent = PendingIntent.getActivity(
+                this,
+                1,
+                acceptIntent,
+                PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
             )
 
             val rejectIntent = Intent(this, NotificationReceiver::class.java).apply {
@@ -72,7 +83,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 if (notificationDocId != null) putExtra("notificationDocId", notificationDocId)
             }
             val rejectPendingIntent = PendingIntent.getBroadcast(
-                this, 2, rejectIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                this,
+                2,
+                rejectIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
             notificationBuilder.addAction(0, "Accept", acceptPendingIntent)
@@ -97,7 +111,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         super.onNewToken(token)
         // Save token to Firestore
         val repo = com.mustakim.bokbok.data.repository.UserRepository(applicationContext)
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
             repo.updateFcmToken(token)
         }
     }

@@ -18,6 +18,7 @@ import com.mustakim.bokbok.ui.theme.BokBokTheme
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import android.content.Intent
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     // Use a MutableState to track the latest intent for navigation
@@ -57,6 +58,8 @@ class MainActivity : ComponentActivity() {
                     // Handle Notification Navigation
                     val context = androidx.compose.ui.platform.LocalContext.current
                     val roomRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.RoomRepository() }
+                    val notificationRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
+                    val userRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.UserRepository(context) }
                     
                     // Observe the intent state
                     val currentIntent by _intentState
@@ -65,6 +68,19 @@ class MainActivity : ComponentActivity() {
                         val intent = currentIntent
                         if (intent?.getBooleanExtra("navigate_to_room", false) == true) {
                             val roomId = intent.getStringExtra("roomId")
+                            val notificationDocId = intent.getStringExtra("notificationDocId")
+                            val isAcceptAction = intent.getBooleanExtra("action_accept", false)
+
+                            // ✅ FIX: Delete notification if this was an "Accept" action
+                            if (isAcceptAction && notificationDocId != null) {
+                                launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    val userId = userRepository.getCurrentUserId()
+                                    if (userId != null) {
+                                        notificationRepository.deleteNotification(userId, notificationDocId)
+                                    }
+                                }
+                            }
+
                             if (roomId != null) {
                                 val result = roomRepository.getRoom(roomId)
                                 result.onSuccess { room ->

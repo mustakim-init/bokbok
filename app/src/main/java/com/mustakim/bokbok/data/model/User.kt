@@ -14,7 +14,8 @@ data class User(
     val createdAt: Long = System.currentTimeMillis(),
     val lastSeen: Long = System.currentTimeMillis(),
     // NEW: which room call this user is currently in (null if not in any)
-    val currentRoomId: String? = null
+    val currentRoomId: String? = null,
+    val fcmToken: String? = null
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "uid" to uid,
@@ -26,7 +27,8 @@ data class User(
         "phoneNumber" to phoneNumber,
         "createdAt" to createdAt,
         "lastSeen" to lastSeen,
-        "currentRoomId" to currentRoomId
+        "currentRoomId" to currentRoomId,
+        "fcmToken" to fcmToken
     )
 
     companion object {
@@ -40,7 +42,8 @@ data class User(
             phoneNumber = map["phoneNumber"] as? String ?: "",
             createdAt = map["createdAt"] as? Long ?: 0L,
             lastSeen = map["lastSeen"] as? Long ?: 0L,
-            currentRoomId = map["currentRoomId"] as? String
+            currentRoomId = map["currentRoomId"] as? String,
+            fcmToken = map["fcmToken"] as? String
         )
     }
 }

@@ -22,6 +22,7 @@ sealed class NavRoutes(val route: String) {
     object Profile : NavRoutes("profile")
     object Settings : NavRoutes("settings")
     object Notifications : NavRoutes("notifications")
+    object BatteryOptimization : NavRoutes("battery_optimization")
 
     // ============= VOICE ROOM =============
     object Room : NavRoutes("room/{roomId}") {

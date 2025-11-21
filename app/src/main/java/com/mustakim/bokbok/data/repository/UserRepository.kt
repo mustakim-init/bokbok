@@ -103,4 +103,31 @@ class UserRepository(private val context: Context) {
         }
     }
 
+    suspend fun searchUsers(query: String): Result<List<User>> {
+        return try {
+            // Simple prefix search on username
+            val snapshot = usersCollection
+                .whereGreaterThanOrEqualTo("username", query)
+                .whereLessThan("username", query + "\uf8ff")
+                .get()
+                .await()
+            val users = snapshot.documents.mapNotNull { doc ->
+                User.fromMap(doc.data ?: emptyMap())
+            }
+            Result.success(users)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateFcmToken(token: String) {
+        val userId = getCurrentUserId() ?: return
+        try {
+            usersCollection.document(userId)
+                .update("fcmToken", token)
+                .await()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 }

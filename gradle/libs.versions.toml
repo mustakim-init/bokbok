@@ -97,6 +97,7 @@ firebase-storage = { group = "com.google.firebase", name = "firebase-storage-ktx
 # Firebase (Auth + Firestore only)
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth", version.ref = "firebaseAuth" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore", version.ref = "firebaseFirestore" }
+firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging-ktx" }
 
 # Modern Google Sign-In (NOT deprecated)
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
@@ -159,7 +160,8 @@ firebase = [
     "firebase-database",
     "firebase-auth",
     "firebase-storage",
-    "firebase-firestore"
+    "firebase-firestore",
+    "firebase-messaging"
 ]
 
 testing = [

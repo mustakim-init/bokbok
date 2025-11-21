@@ -124,6 +124,22 @@ class RoomRepository {
     }
 
     /**
+     * Add multiple users to the room by their IDs.
+     */
+    suspend fun addUsersToRoom(roomId: String, userIds: List<String>): Result<Unit> {
+        return try {
+            if (userIds.isEmpty()) return Result.success(Unit)
+
+            roomsCollection.document(roomId)
+                .update("participants", FieldValue.arrayUnion(*userIds.toTypedArray()))
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Join a room by adding the current user uid to participants.
      */
     suspend fun joinRoom(roomId: String): Result<Unit> {

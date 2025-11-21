@@ -23,6 +23,7 @@ import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
 import com.mustakim.bokbok.ui.screens.auth.LoginScreen
 import com.mustakim.bokbok.ui.screens.auth.SignupScreen
 import com.mustakim.bokbok.ui.screens.auth.SplashScreen
+import com.mustakim.bokbok.ui.screens.batteryoptimization.BatteryOptimizationScreen
 import com.mustakim.bokbok.ui.screens.chats.ChatsScreen
 import com.mustakim.bokbok.ui.screens.gameboost.GameBoostScreen
 import com.mustakim.bokbok.ui.screens.lounge.LoungeScreen
@@ -188,6 +189,11 @@ fun NavGraph(
         composable(NavRoutes.Settings.route) {
             SettingsScreen(navController, themeViewModel)
         }
+
+        composable(NavRoutes.BatteryOptimization.route) {
+            BatteryOptimizationScreen(navController)
+        }
+
 
 
         // ============= VOICE ROOM =============

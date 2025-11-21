@@ -81,8 +81,14 @@ fun SettingsScreen(
                     items = listOf(
                         "Push Notifications",
                         "Notification Sounds",
-                        "Vibration"
-                    )
+                        "Vibration",
+                        "Battery Optimization" // Add link to battery settings
+                    ),
+                    onItemClick = { index ->
+                        if (index == 3) { // Battery Optimization clicked
+                            navController.navigate("battery_optimization")
+                        }
+                    }
                 )
             }
 
@@ -210,7 +216,8 @@ fun ThemeChip(
 @Composable
 fun SettingsSection(
     title: String,
-    items: List<String>
+    items: List<String>,
+    onItemClick: ((Int) -> Unit)? = null
 ) {
     Column {
         Text(
@@ -232,7 +239,7 @@ fun SettingsSection(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { /* TODO: Handle click */ }
+                            .clickable { onItemClick?.invoke(index) }
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically

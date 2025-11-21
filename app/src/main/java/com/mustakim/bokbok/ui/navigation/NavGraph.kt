@@ -8,7 +8,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
@@ -158,7 +162,24 @@ fun NavGraph(
 
         // ============= MAIN APP FLOW =============
         composable(NavRoutes.Lounge.route) {
-            LoungeScreen(navController, userViewModel)
+            // Track notification count for badge
+            val notificationRepo = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
+            var notificationCount by remember { mutableStateOf(0) }
+            
+            LaunchedEffect(Unit) {
+                val userId = userRepository.getCurrentUserId()
+                if (userId != null) {
+                    notificationRepo.observeNotifications(userId).collect { notifications ->
+                        notificationCount = notifications.count { !it.isRead }
+                    }
+                }
+            }
+            
+            LoungeScreen(
+                navController = navController,
+                userViewModel = userViewModel,
+                notificationCount = notificationCount
+            )
         }
 
         composable(NavRoutes.Chats.route) {

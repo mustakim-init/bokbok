@@ -54,6 +54,7 @@ import com.mustakim.bokbok.state.JoinMode
 fun LoungeScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
+    notificationCount: Int = 0,
     loungeViewModel: LoungeViewModel = viewModel()
 ) {
     val uiState by loungeViewModel.uiState.collectAsState()
@@ -79,7 +80,7 @@ fun LoungeScreen(
     MainScaffold(
         navController = navController,
         title = "BokBok Lounge",
-        notificationCount = 0,
+        notificationCount = notificationCount,
         userViewModel = userViewModel
     ) { paddingValues ->
         LoungeContent(

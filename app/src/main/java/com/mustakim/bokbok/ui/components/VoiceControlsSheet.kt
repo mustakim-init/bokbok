@@ -2,15 +2,21 @@ package com.mustakim.bokbok.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.CallEnd
@@ -29,16 +35,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 
 @Composable
 fun VoiceControlsSheet(
     isMuted: Boolean,
     isSpeakerOn: Boolean,
     isA2dpModeOn: Boolean,
-    isExpanded: Boolean,
+    expansionFraction: Float,
+    screenHeight: Dp,
     onToggleMic: () -> Unit,
     onToggleSpeaker: () -> Unit,
     onOpenChat: () -> Unit,
@@ -47,113 +58,202 @@ fun VoiceControlsSheet(
     onShareInvite: () -> Unit,
     onLeaveRoom: () -> Unit
 ) {
-    Column(
+    val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
+    // 1. Interpolate Padding & Dimensions
+    val horizontalPadding = lerp(16.dp, 0.dp, expansionFraction)
+
+    // Floating gap at bottom: 24dp (floating) -> 0dp (docked)
+    // We reduce this slightly so it doesn't look like it's flying too high
+    val bottomGap = lerp(24.dp, 0.dp, expansionFraction)
+
+    // Corner Radius: 32dp (Pill) -> 0dp (Full Sheet at bottom) / 24dp (Sheet at top)
+    val topCornerRadius = lerp(32.dp, 24.dp, expansionFraction)
+    val bottomCornerRadius = lerp(32.dp, 0.dp, expansionFraction)
+
+    // 2. Height Calculation
+    // Collapsed: Just enough to show the row (approx 110dp)
+    // Expanded: Full screen height
+    val collapsedHeight = 110.dp
+    val targetHeight = screenHeight - bottomGap // Subtract gap so it doesn't push off screen
+    val currentHeight = lerp(collapsedHeight, targetHeight, expansionFraction)
+
+    // 3. Content Padding (Top)
+    // When expanded, we need to push content down to avoid status bar
+    val topContentPadding = lerp(0.dp, statusBarHeight, expansionFraction)
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(bottom = bottomGap) // This creates the "float" effect
+            .height(currentHeight) // Use simple height lerp
     ) {
-        // MAIN ROW – stays always visible, like Discord's collapsed bar
-        Row(
+        // --- BACKGROUND CARD ---
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .padding(horizontal = horizontalPadding)
+                .shadow(
+                    elevation = if (expansionFraction < 0.95f) 8.dp else 0.dp,
+                    shape = RoundedCornerShape(
+                        topStart = topCornerRadius,
+                        topEnd = topCornerRadius,
+                        bottomStart = bottomCornerRadius,
+                        bottomEnd = bottomCornerRadius
+                    ),
+                    clip = false
+                )
+                .clip(
+                    RoundedCornerShape(
+                        topStart = topCornerRadius,
+                        topEnd = topCornerRadius,
+                        bottomStart = bottomCornerRadius,
+                        bottomEnd = bottomCornerRadius
+                    )
+                )
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        )
+
+        // --- CONTENT ---
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = horizontalPadding)
+                .padding(top = topContentPadding) // Protect status bar
         ) {
-            // Mic toggle
-            ControlButton(
-                icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                label = if (isMuted) "Unmute" else "Mute",
-                isActive = !isMuted,
-                onClick = onToggleMic
-            )
-
-            // Chat
-            ControlButton(
-                icon = Icons.AutoMirrored.Filled.Chat,
-                label = "Chat",
-                onClick = onOpenChat
-            )
-
-            // Effects (reserved for future DSP UI)
-            ControlButton(
-                icon = Icons.Default.MusicNote,
-                label = "Effects",
-                onClick = onOpenVoiceEffects
-            )
-
-            // Share/Invite
-            ControlButton(
-                icon = Icons.Default.Share,
-                label = "Invite",
-                onClick = onShareInvite
-            )
-
-            // Leave room
-            ControlButton(
-                icon = Icons.Default.CallEnd,
-                label = "Leave",
-                isDestructive = true,
-                onClick = onLeaveRoom
-            )
-        }
-
-        // ADVANCED SECTION – only when the sheet is pulled up / expanded
-        if (isExpanded) {
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(
-                modifier = Modifier
-                    .padding(horizontal = 20.dp),
-                thickness = DividerDefaults.Thickness, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Column(
+            // 4. DRAG HANDLE ("The Stick")
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(top = 12.dp, bottom = 4.dp), // Spacing for handle
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "In-call settings",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                )
+                Surface(
+                    modifier = Modifier
+                        .width(32.dp)
+                        .height(4.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                ) {}
+            }
 
-                // Row for audio routing mode
-                Row(
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+            // MAIN CONTROL ROW
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.Center, // Center the items
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // We use weights to ensure equal distribution and prevent "shrinking"
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ControlButton(
+                        icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        label = if (isMuted) "Unmute" else "Mute",
+                        isActive = !isMuted,
+                        onClick = onToggleMic
+                    )
+                }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ControlButton(
+                        icon = Icons.AutoMirrored.Filled.Chat,
+                        label = "Chat",
+                        onClick = onOpenChat
+                    )
+                }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ControlButton(
+                        icon = Icons.Default.MusicNote,
+                        label = "Effects",
+                        onClick = onOpenVoiceEffects
+                    )
+                }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ControlButton(
+                        icon = Icons.Default.Share,
+                        label = "Invite",
+                        onClick = onShareInvite
+                    )
+                }
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    ControlButton(
+                        icon = Icons.Default.CallEnd,
+                        label = "Leave",
+                        isDestructive = true,
+                        onClick = onLeaveRoom
+                    )
+                }
+            }
+
+            // EXPANDED SETTINGS (Fade in)
+            // We fade this in slightly later (starts at 10% expansion)
+            val contentAlpha = (expansionFraction - 0.1f).coerceIn(0f, 1f)
+
+            if (expansionFraction > 0.01f) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f) // Fill remaining space
+                        .graphicsLayer { alpha = contentAlpha }
+                        .padding(top = 8.dp)
                 ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        thickness = DividerDefaults.Thickness,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Column(
-                        modifier = Modifier.weight(1f),      // 🔑 text gets remaining width
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "Bluetooth audio mode",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "In-call settings",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                         )
-                        Text(
-                            text = if (isA2dpModeOn)
-                                "Music profile (A2DP, better quality, phone mic)"
-                            else
-                                "Call profile (SCO, headset mic, more reliable)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
 
-                    AudioModeToggle(
-                        isA2dpModeOn = isA2dpModeOn,
-                        onToggle = onToggleAudioMode
-                    )
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Bluetooth audio mode",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isA2dpModeOn)
+                                        "Music profile (A2DP)"
+                                    else
+                                        "Call profile (SCO)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            AudioModeToggle(
+                                isA2dpModeOn = isA2dpModeOn,
+                                onToggle = onToggleAudioMode
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+// --- Helpers ---
 
 @Composable
 private fun ControlButton(
@@ -163,10 +263,11 @@ private fun ControlButton(
     isDestructive: Boolean = false,
     onClick: () -> Unit
 ) {
+    // Fixed width container for the button content itself
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.width(64.dp)
+        modifier = Modifier.width(60.dp) // Slight constraint to keep it tidy
     ) {
         IconButton(
             onClick = onClick,
@@ -192,7 +293,6 @@ private fun ControlButton(
                 modifier = Modifier.size(24.dp)
             )
         }
-
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,

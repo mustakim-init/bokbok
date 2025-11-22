@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,7 +67,6 @@ import com.mustakim.bokbok.ui.components.ParticipantCard
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceRoomScreen(
@@ -74,91 +76,55 @@ fun VoiceRoomScreen(
     viewModel: VoiceRoomViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-
     val friends by viewModel.friends.collectAsState()
-
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val granted = permissions.all { it.value }
-
-        if (granted) {
-            // Only start engine once room is loaded
-            uiState.room?.let { room ->
-                viewModel.startCallEngine(room.id)
-            }
+        if (permissions.all { it.value }) {
+            uiState.room?.let { viewModel.startCallEngine(it.id) }
         } else {
             viewModel.onPermissionDenied()
         }
     }
 
-    // 1) Load room metadata and start RTDB presence listener
-    LaunchedEffect(roomId) {
-        viewModel.loadRoom(roomId)
-    }
+    LaunchedEffect(roomId) { viewModel.loadRoom(roomId) }
 
-    // 2) When room is loaded, then deal with permissions + start engine
     LaunchedEffect(uiState.room) {
         val room = uiState.room ?: return@LaunchedEffect
-
         if (viewModel.hasRequiredCallPermissions()) {
             viewModel.startCallEngine(room.id)
         } else {
             permissionLauncher.launch(viewModel.getRequiredPermissions())
         }
     }
-    val view = LocalView.current
 
-    // 3) Handle errors (e.g. Room Full)
+    val view = LocalView.current
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
-
             android.widget.Toast.makeText(view.context, error, android.widget.Toast.LENGTH_LONG).show()
-            if (error.contains("Room is full") || error.contains("Failed to load")) {
-                onLeaveRoom()
-            }
+            if (error.contains("Room is full") || error.contains("Failed to load")) onLeaveRoom()
         }
     }
 
-
     val globalMuted by RoomStateManager.isMuted
-
-    // When minimized bar toggles mute, sync back into ViewModel
-    LaunchedEffect(globalMuted) {
-        viewModel.setMutedFromGlobal(globalMuted)
-    }
+    LaunchedEffect(globalMuted) { viewModel.setMutedFromGlobal(globalMuted) }
 
     var showAddUserDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
-
-
     val colorScheme = MaterialTheme.colorScheme
     val isDarkTheme = isSystemInDarkTheme()
 
-    val gradientColors = remember(isDarkTheme, colorScheme.primary, colorScheme.secondary) {
-        if (isDarkTheme) {
-            listOf(
-                colorScheme.primaryContainer,
-                colorScheme.secondaryContainer,
-                colorScheme.tertiaryContainer
-            )
+    val gradientBrush = remember(isDarkTheme, colorScheme.primary) {
+        val colors = if (isDarkTheme) {
+            listOf(colorScheme.primaryContainer, colorScheme.secondaryContainer, colorScheme.tertiaryContainer)
         } else {
-            listOf(
-                colorScheme.primary,
-                colorScheme.secondary,
-                colorScheme.tertiary
-            )
+            listOf(colorScheme.primary, colorScheme.secondary, colorScheme.tertiary)
         }
+        Brush.verticalGradient(colors = colors)
     }
-
-    val gradientBrush = remember(gradientColors) {
-        Brush.verticalGradient(colors = gradientColors)
-    }
-
 
     DisposableEffect(colorScheme.primary, isDarkTheme) {
-        val window = (view.context as? android.app.Activity)?.window
-            ?: return@DisposableEffect onDispose {}
+        val window = (view.context as? android.app.Activity)?.window ?: return@DisposableEffect onDispose {}
         val insetsController = WindowCompat.getInsetsController(window, view)
         val isLightPrimary = colorScheme.primary.luminance() > 0.5f
         insetsController.isAppearanceLightStatusBars = isLightPrimary
@@ -169,115 +135,120 @@ fun VoiceRoomScreen(
         }
     }
 
-    val roomName = remember(uiState.room?.name) {
-        uiState.room?.name ?: "Voice Room"
-    }
+    val roomName = remember(uiState.room?.name) { uiState.room?.name ?: "Voice Room" }
+    val onMinimizeCallback: () -> Unit = remember(uiState.isMuted) { { onMinimize(uiState.isMuted) } }
 
-    val onMinimizeCallback: () -> Unit = remember(uiState.isMuted) {
-        {
-            // Pass only the muted state to the parent
-            onMinimize(uiState.isMuted)
-        }
-    }
-
-    // ✅ BottomSheetScaffold state with partial expansion
     val bottomSheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
-        skipHiddenState = true // Prevent hiding the sheet
+        skipHiddenState = true
     )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
+    val density = LocalDensity.current
 
-    val scaffoldState = rememberBottomSheetScaffoldState(
-        bottomSheetState = bottomSheetState
-    )
+    // We ensure peek height is enough for the "floating pill" + gap
+    val peekHeightDp = 130.dp
 
-    // ✅ BottomSheetScaffold allows background interaction
-    BottomSheetScaffold(
-        scaffoldState = scaffoldState,
-        sheetPeekHeight = 140.dp, // Collapsed height
-        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        sheetContainerColor = MaterialTheme.colorScheme.surface,
-        sheetContentColor = MaterialTheme.colorScheme.onSurface,
-        sheetTonalElevation = 8.dp,
-        sheetShadowElevation = 16.dp,
-        sheetDragHandle = {
-            // Custom drag handle
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .width(40.dp)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                    )
-            )
-        },
-        sheetContent = {
-            // Give the sheet more height than the peek, so it can actually expand
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 320.dp) // > sheetPeekHeight (140.dp)
-            ) {
-                val isExpanded = bottomSheetState.currentValue == SheetValue.Expanded
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val layoutHeight = maxHeight
+        val layoutHeightPx = with(density) { maxHeight.toPx() }
+        val peekHeightPx = with(density) { peekHeightDp.toPx() }
 
-                VoiceControlsSheet(
-                    isMuted = uiState.isMuted,
-                    isSpeakerOn = uiState.isSpeakerOn,
-                    isA2dpModeOn = uiState.isA2dpModeOn,
-                    isExpanded = isExpanded,
-                    onToggleMic = viewModel::toggleMic,
-                    onToggleSpeaker = viewModel::toggleSpeaker,
-                    onOpenChat = { /* TODO */ },
-                    onOpenVoiceEffects = { /* TODO */ },
-                    onToggleAudioMode = viewModel::toggleA2dpMode,
-                    onShareInvite = { /* TODO */ },
-                    onLeaveRoom = {
-                        // 1) Stop WebRTC + foreground service
-                        viewModel.leaveRoom()
-
-                        // 2) Run the parent logic: clear Firestore membership + RoomStateManager
-                        onLeaveRoom()
-                    }
-                )
+        val currentOffset by remember(bottomSheetState) {
+            derivedStateOf {
+                try {
+                    bottomSheetState.requireOffset()
+                } catch (_: Exception) {
+                    if (bottomSheetState.currentValue == SheetValue.Expanded) 0f
+                    else layoutHeightPx - peekHeightPx
+                }
             }
         }
-    ) { paddingValues ->
-        // Main content - can be interacted with even when sheet is open
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(brush = gradientBrush)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null // No ripple effect
-                ) { /* Do nothing, just block click-through */ }
-                .statusBarsPadding()
-                .navigationBarsPadding()
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                VoiceRoomTopBar(
-                    roomName = roomName,
-                    isSpeakerOn = uiState.isSpeakerOn,
-                    onMinimize = onMinimizeCallback,
-                    onToggleSpeaker = viewModel::toggleSpeaker,
-                    onInviteFriends = { showAddUserDialog = true }
-                )
 
-                Spacer(modifier = Modifier.height(32.dp))
+        val expansionFraction by remember(currentOffset) {
+            derivedStateOf {
+                val maxOffset = layoutHeightPx - peekHeightPx
+                val minOffset = 0f
+                val fraction = (maxOffset - currentOffset) / (maxOffset - minOffset)
+                fraction.coerceIn(0f, 1f)
+            }
+        }
 
-                // Participants grid
-                DynamicParticipantGrid(
-                    participants = uiState.participants,
+        BottomSheetScaffold(
+            scaffoldState = scaffoldState,
+            sheetPeekHeight = peekHeightDp,
+            sheetShape = RoundedCornerShape(0.dp), // We handle shape inside VoiceControlsSheet
+            sheetContainerColor = Color.Transparent, // Essential for floating effect
+            sheetContentColor = MaterialTheme.colorScheme.onSurface,
+            // ADD THESE TWO LINES to remove the square shadow:
+            sheetShadowElevation = 0.dp,
+            sheetTonalElevation = 0.dp,
+            sheetDragHandle = null, // We added our own custom stick inside
+            sheetContent = {
+                // Wrapper to give the sheet a max height constraint
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 24.dp)
-                        .padding(paddingValues) // Respects bottom sheet position
-                )
+                        .height(layoutHeight)
+                ) {
+                    VoiceControlsSheet(
+                        isMuted = uiState.isMuted,
+                        isSpeakerOn = uiState.isSpeakerOn,
+                        isA2dpModeOn = uiState.isA2dpModeOn,
+                        expansionFraction = expansionFraction,
+                        screenHeight = layoutHeight,
+                        onToggleMic = viewModel::toggleMic,
+                        onToggleSpeaker = viewModel::toggleSpeaker,
+                        onOpenChat = { /* TODO */ },
+                        onOpenVoiceEffects = { /* TODO */ },
+                        onToggleAudioMode = viewModel::toggleA2dpMode,
+                        onShareInvite = { /* TODO */ },
+                        onLeaveRoom = {
+                            viewModel.leaveRoom()
+                            onLeaveRoom()
+                        }
+                    )
+                }
+            }
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(brush = gradientBrush)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { }
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+
+                ) {
+                    VoiceRoomTopBar(
+                        roomName = roomName,
+                        isSpeakerOn = uiState.isSpeakerOn,
+                        onMinimize = onMinimizeCallback,
+                        onToggleSpeaker = viewModel::toggleSpeaker,
+                        onInviteFriends = { showAddUserDialog = true }
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    DynamicParticipantGrid(
+                        participants = uiState.participants,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(horizontal = 24.dp)
+                            .padding(bottom = 140.dp) // Ensure grid isn't hidden by floating dock
+                    )
+                }
             }
         }
     }
+
     if (showAddUserDialog) {
         AddParticipantsDialog(
             friends = friends,
@@ -290,6 +261,7 @@ fun VoiceRoomScreen(
     }
 }
 
+// ... (Rest of the components: VoiceRoomTopBar, DynamicParticipantGrid, etc. remain unchanged)
 @Composable
 private fun VoiceRoomTopBar(
     roomName: String,
@@ -312,17 +284,9 @@ private fun VoiceRoomTopBar(
     ) {
         IconButton(
             onClick = onMinimize,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.3f))
+            modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Minimize",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
+            Icon(Icons.Default.KeyboardArrowDown, "Minimize", tint = Color.White, modifier = Modifier.size(24.dp))
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -346,34 +310,18 @@ private fun VoiceRoomTopBar(
 
         IconButton(
             onClick = onToggleSpeaker,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.3f))
+            modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {
-            Icon(
-                imageVector = speakerIcon,
-                contentDescription = if (isSpeakerOn) "Mute speaker" else "Unmute speaker",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp)
-            )
+            Icon(speakerIcon, if (isSpeakerOn) "Mute" else "Unmute", tint = Color.White, modifier = Modifier.size(22.dp))
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
         IconButton(
             onClick = onInviteFriends,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.3f))
+            modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {
-            Icon(
-                imageVector = Icons.Default.PersonAdd,
-                contentDescription = "Invite friends",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp)
-            )
+            Icon(Icons.Default.PersonAdd, "Invite", tint = Color.White, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -384,13 +332,8 @@ private fun DynamicParticipantGrid(
     modifier: Modifier = Modifier
 ) {
     val stableParticipants = remember(participants) { participants }
-    val participantCount = stableParticipants.size
-
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
-    ) {
-        when (participantCount) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        when (stableParticipants.size) {
             0 -> EmptyRoomState()
             1 -> SingleParticipantLayout(stableParticipants[0])
             2 -> TwoParticipantLayout(stableParticipants)
@@ -403,146 +346,57 @@ private fun DynamicParticipantGrid(
 
 @Composable
 private fun EmptyRoomState() {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "🎤",
-            style = MaterialTheme.typography.displayLarge,
-            color = Color.White
-        )
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("🎤", style = MaterialTheme.typography.displayLarge, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Waiting for others to join...",
-            style = MaterialTheme.typography.titleMedium,
-            color = Color.White.copy(alpha = 0.8f)
-        )
+        Text("Waiting for others to join...", style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.8f))
     }
 }
 
 @Composable
 private fun SingleParticipantLayout(participant: VoiceRoomParticipant) {
-    ParticipantCard(
-        participant = participant,
-        modifier = Modifier
-            .fillMaxWidth(0.7f)
-            .aspectRatio(0.8f)
-    )
+    ParticipantCard(participant = participant, modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(0.8f))
 }
 
 @Composable
 private fun TwoParticipantLayout(participants: List<VoiceRoomParticipant>) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-    ) {
-        participants.forEach { participant ->
-            ParticipantCard(
-                participant = participant,
-                modifier = Modifier
-                    .weight(1f)
-                    .aspectRatio(0.8f)
-            )
-        }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+        participants.forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
     }
 }
 
 @Composable
 private fun ThreeParticipantLayout(participants: List<VoiceRoomParticipant>) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
-    ) {
-        ParticipantCard(
-            participant = participants[0],
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .aspectRatio(1f)
-                .align(Alignment.CenterHorizontally)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-        ) {
-            participants.drop(1).forEach { participant ->
-                ParticipantCard(
-                    participant = participant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(0.8f)
-                )
-            }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
+        ParticipantCard(participant = participants[0], modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(1f).align(Alignment.CenterHorizontally))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+            participants.drop(1).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
         }
     }
 }
 
 @Composable
 private fun FourParticipantLayout(participants: List<VoiceRoomParticipant>) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-        ) {
-            participants.take(2).forEach { participant ->
-                ParticipantCard(
-                    participant = participant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(0.8f)
-                )
-            }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+            participants.take(2).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-        ) {
-            participants.drop(2).take(2).forEach { participant ->
-                ParticipantCard(
-                    participant = participant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(0.8f)
-                )
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
+            participants.drop(2).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
         }
     }
 }
 
 @Composable
 private fun FiveOrMoreParticipantLayout(participants: List<VoiceRoomParticipant>) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
-        ) {
-            participants.take(2).forEach { participant ->
-                ParticipantCard(
-                    participant = participant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(0.8f)
-                )
-            }
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+            participants.take(3).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.75f)) }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
-        ) {
-            participants.drop(2).take(3).forEach { participant ->
-                ParticipantCard(
-                    participant = participant,
-                    modifier = Modifier
-                        .weight(1f)
-                        .aspectRatio(0.8f)
-                )
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
+            val remaining = participants.drop(3).take(3)
+            remaining.forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.75f)) }
+            repeat((3 - remaining.size).coerceAtLeast(0)) { Spacer(modifier = Modifier.weight(1f)) }
         }
     }
 }
@@ -553,10 +407,9 @@ private fun AddParticipantsDialog(
     onDismiss: () -> Unit,
     onConfirm: (List<String>) -> Unit
 ) {
-    var selectedTab by remember { androidx.compose.runtime.mutableIntStateOf(0) } // 0 = Friends, 1 = ID
+    var selectedTab by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var manualUserId by remember { androidx.compose.runtime.mutableStateOf("") }
     val selectedFriendIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    // Search query for friends
     var searchQuery by remember { androidx.compose.runtime.mutableStateOf("") }
 
     val filteredFriends = remember(friends, searchQuery) {
@@ -576,7 +429,6 @@ private fun AddParticipantsDialog(
                 .heightIn(max = 600.dp)
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
-                // Header
                 Icon(
                     imageVector = Icons.Default.PersonAdd,
                     contentDescription = null,
@@ -593,7 +445,6 @@ private fun AddParticipantsDialog(
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
-                // Tabs
                 androidx.compose.material3.PrimaryTabRow(
                     selectedTabIndex = selectedTab,
                     containerColor = Color.Transparent,
@@ -611,12 +462,9 @@ private fun AddParticipantsDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                // Content
                 Box(modifier = Modifier.weight(1f, fill = false)) {
                     if (selectedTab == 0) {
-                        // --- FRIENDS LIST ---
                         Column {
-                            // Search Bar
                             androidx.compose.material3.OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
@@ -642,10 +490,7 @@ private fun AddParticipantsDialog(
                                             headlineContent = { Text(friend.user.displayName.ifBlank { friend.user.username }) },
                                             supportingContent = { Text("@${friend.user.username}") },
                                             leadingContent = {
-                                                // Use Modifier.clip directly
-                                                val imageModifier = Modifier
-                                                    .size(40.dp)
-                                                    .clip(CircleShape)
+                                                val imageModifier = Modifier.size(40.dp).clip(CircleShape)
                                                 if (friend.user.profileImageUrl.isNotBlank()) {
                                                     coil.compose.AsyncImage(
                                                         model = friend.user.profileImageUrl,
@@ -686,7 +531,6 @@ private fun AddParticipantsDialog(
                             }
                         }
                     } else {
-                        // --- MANUAL ID ---
                         Column(verticalArrangement = Arrangement.Center) {
                             Text(
                                 text = "Enter the User ID to add them to this room.",
@@ -706,7 +550,6 @@ private fun AddParticipantsDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
-                // Actions
                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                     androidx.compose.material3.TextButton(onClick = onDismiss) {
                         Text("Cancel")

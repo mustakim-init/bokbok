@@ -113,7 +113,7 @@ fun BottomNavigationBar(
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = MaterialTheme.colorScheme.primary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.onPrimaryContainer, // Remove the pill indicator background
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer, // Remove the pill indicator background
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )

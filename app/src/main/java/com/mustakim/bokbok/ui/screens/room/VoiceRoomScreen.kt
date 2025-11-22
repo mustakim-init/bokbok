@@ -106,7 +106,15 @@ fun VoiceRoomScreen(
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
             android.widget.Toast.makeText(view.context, error, android.widget.Toast.LENGTH_LONG).show()
-            if (error.contains("Room is full") || error.contains("Failed to load")) onLeaveRoom()
+            if (error.contains("Room is full") ||
+                error.contains("Failed to load") ||
+                error.contains("removed from the room")) {
+                onLeaveRoom()
+
+                // Clear error to prevent re-trigger
+                // Note: ViewModel should handle this, but as a safety measure
+                kotlinx.coroutines.delay(500)
+            }
         }
     }
 

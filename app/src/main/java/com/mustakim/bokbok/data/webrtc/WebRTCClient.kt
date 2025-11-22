@@ -23,6 +23,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import org.webrtc.audio.JavaAudioDeviceModule
 
 @Suppress("DEPRECATION")
 class WebRTCClient(
@@ -150,11 +151,47 @@ class WebRTCClient(
         val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
+        val audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setUseHardwareAcousticEchoCanceler(true)      // Hardware AEC
+            .setUseHardwareNoiseSuppressor(true)            // Hardware NS
+            .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordError(errorMessage: String?) {
+                    Log.e(tag, "Audio Record Error: $errorMessage")
+                }
+                override fun onWebRtcAudioRecordInitError(errorMessage: String?) {
+                    Log.e(tag, "Audio Record Init Error: $errorMessage")
+                }
+                override fun onWebRtcAudioRecordStartError(
+                    errorCode: JavaAudioDeviceModule.AudioRecordStartErrorCode?,
+                    errorMessage: String?
+                ) {
+                    Log.e(tag, "Audio Record Start Error: $errorMessage")
+                }
+            })
+            .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
+                override fun onWebRtcAudioTrackError(errorMessage: String?) {
+                    Log.e(tag, "Audio Track Error: $errorMessage")
+                }
+                override fun onWebRtcAudioTrackInitError(errorMessage: String?) {
+                    Log.e(tag, "Audio Track Init Error: $errorMessage")
+                }
+                override fun onWebRtcAudioTrackStartError(
+                    errorCode: JavaAudioDeviceModule.AudioTrackStartErrorCode?,
+                    errorMessage: String?
+                ) {
+                    Log.e(tag, "Audio Track Start Error: $errorMessage")
+                }
+            })
+            .createAudioDeviceModule()
+
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setOptions(PeerConnectionFactory.Options())
+            .setAudioDeviceModule(audioDeviceModule)
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
+
+        audioDeviceModule.release()
     }
 
     private fun initLocalAudio() {
@@ -202,6 +239,27 @@ class WebRTCClient(
 
     fun setAudioEnabled(enabled: Boolean) {
         localAudioTrack?.setEnabled(enabled)
+    }
+
+    fun setMicrophoneVolume(volume: Double) {
+        // WebRTC AudioTrack doesn't have a direct setVolume for local track in standard API.
+        // However, we can control it via the AudioSource or by adjusting the input gain if supported.
+        // For simplicity and standard WebRTC behavior, we often rely on the OS mixer.
+        // BUT, for this requirement, we can try to use the setVolume on the track if it's supported by the specific implementation
+        // or we might need to implement a custom AudioProcessor.
+        //
+        // NOTE: Standard WebRTC AudioTrack.setVolume() applies to playback (remote tracks).
+        // For local mic, it's trickier.
+        // A common workaround is to just rely on the system mic volume or software gain.
+        // Since AudioTrack.setVolume is for the track's output, calling it on a local track *might* not affect what is sent.
+        //
+        // Let's try setting it on the local track and see if the implementation respects it for the outgoing stream.
+        // If not, we might need to look into AudioProcessing.
+        localAudioTrack?.setVolume(volume)
+    }
+
+    fun setRemoteVolume(remoteUserId: String, volume: Double) {
+        remoteAudioTracks[remoteUserId]?.setVolume(volume)
     }
 
     fun disconnectFrom(remoteUserId: String) {

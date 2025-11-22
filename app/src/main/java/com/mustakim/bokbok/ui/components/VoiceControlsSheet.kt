@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -29,6 +30,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +50,8 @@ fun VoiceControlsSheet(
     isMuted: Boolean,
     isSpeakerOn: Boolean,
     isA2dpModeOn: Boolean,
+    micVolume: Float,
+    outputVolume: Float,
     expansionFraction: Float,
     screenHeight: Dp,
     onToggleMic: () -> Unit,
@@ -56,7 +60,9 @@ fun VoiceControlsSheet(
     onOpenVoiceEffects: () -> Unit,
     onToggleAudioMode: () -> Unit,
     onShareInvite: () -> Unit,
-    onLeaveRoom: () -> Unit
+    onLeaveRoom: () -> Unit,
+    onMicVolumeChange: (Float) -> Unit,
+    onOutputVolumeChange: (Float) -> Unit
 ) {
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
@@ -209,12 +215,28 @@ fun VoiceControlsSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         Text(
                             text = "In-call settings",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+
+                        // Output Volume
+                        VolumeControlRow(
+                            icon = Icons.AutoMirrored.Filled.VolumeUp,
+                            label = "Output Volume",
+                            value = outputVolume,
+                            onValueChange = onOutputVolumeChange
+                        )
+
+                        // Input Volume
+                        VolumeControlRow(
+                            icon = Icons.Default.Mic,
+                            label = "Input Volume",
+                            value = micVolume,
+                            onValueChange = onMicVolumeChange
                         )
 
                         Row(
@@ -348,7 +370,62 @@ private fun ModeChip(
                 MaterialTheme.colorScheme.onPrimary
             else
                 MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun VolumeControlRow(
+    icon: ImageVector,
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Text(
+                text = "${(value * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

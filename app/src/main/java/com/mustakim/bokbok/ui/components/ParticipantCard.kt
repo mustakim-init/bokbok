@@ -2,6 +2,7 @@ package com.mustakim.bokbok.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,17 +25,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.VoiceRoomParticipant
+import androidx.compose.foundation.ExperimentalFoundationApi
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ParticipantCard(
     participant: VoiceRoomParticipant,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
@@ -47,7 +52,7 @@ fun ParticipantCard(
                     )
                 )
             )
-            // ✅ FIX: Green border when speaking (NO animation)
+            // Green border when speaking (NO animation)
             .border(
                 width = if (participant.isSpeaking && !participant.isMuted) 3.dp else 1.dp,
                 color = if (participant.isSpeaking && !participant.isMuted)
@@ -55,7 +60,15 @@ fun ParticipantCard(
                 else
                     Color.White.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(24.dp)
-            ),
+            )
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = {
+                        onLongClick?.invoke()
+                    },
+                    onTap = { /* Handle tap if needed */ }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         Column(

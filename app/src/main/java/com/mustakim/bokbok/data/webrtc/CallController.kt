@@ -73,4 +73,16 @@ object CallController {
         }
         androidx.core.content.ContextCompat.startForegroundService(ctx, intent)
     }
+
+    fun setMicVolume(volume: Double) {
+        appContext?.let { ctx ->
+            VoiceService.setMicVolume(ctx, volume)
+        }
+    }
+
+    fun setRemoteVolume(userId: String, volume: Double) {
+        appContext?.let { ctx ->
+            VoiceService.setRemoteVolume(ctx, userId, volume)
+        }
+    }
 }

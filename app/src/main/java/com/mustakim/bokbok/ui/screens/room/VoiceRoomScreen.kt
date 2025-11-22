@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,8 +65,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.ParticipantCard
+import com.mustakim.bokbok.ui.components.ParticipantOptionsSheet
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,7 +113,10 @@ fun VoiceRoomScreen(
     val globalMuted by RoomStateManager.isMuted
     LaunchedEffect(globalMuted) { viewModel.setMutedFromGlobal(globalMuted) }
 
-    var showAddUserDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showAddUserDialog by remember { mutableStateOf(false) }
+
+    var selectedParticipant by remember { mutableStateOf<VoiceRoomParticipant?>(null) }
+
     val colorScheme = MaterialTheme.colorScheme
     val isDarkTheme = isSystemInDarkTheme()
 
@@ -194,6 +200,10 @@ fun VoiceRoomScreen(
                         isMuted = uiState.isMuted,
                         isSpeakerOn = uiState.isSpeakerOn,
                         isA2dpModeOn = uiState.isA2dpModeOn,
+                        micVolume = uiState.micVolume,
+                        outputVolume = uiState.outputVolume,
+                        onMicVolumeChange = viewModel::setMicVolume,
+                        onOutputVolumeChange = viewModel::setOutputVolume,
                         expansionFraction = expansionFraction,
                         screenHeight = layoutHeight,
                         onToggleMic = viewModel::toggleMic,
@@ -238,6 +248,7 @@ fun VoiceRoomScreen(
 
                     DynamicParticipantGrid(
                         participants = uiState.participants,
+                        onParticipantLongClick = { selectedParticipant = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
@@ -257,6 +268,21 @@ fun VoiceRoomScreen(
                 viewModel.inviteUsers(userIds)
                 showAddUserDialog = false
             }
+        )
+    }
+    if (selectedParticipant != null) {
+        ParticipantOptionsSheet(
+            participant = selectedParticipant!!,
+            isAmHost = uiState.room?.hostId == viewModel.currentUserId,
+            volume = uiState.participantVolumes[selectedParticipant!!.id] ?: 1f,
+            onVolumeChange = { vol ->
+                viewModel.setParticipantVolume(selectedParticipant!!.id, vol)
+            },
+            onKick = {
+                viewModel.kickParticipant(selectedParticipant!!.id)
+                selectedParticipant = null
+            },
+            onDismiss = { selectedParticipant = null }
         )
     }
 }
@@ -329,17 +355,18 @@ private fun VoiceRoomTopBar(
 @Composable
 private fun DynamicParticipantGrid(
     participants: List<VoiceRoomParticipant>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onParticipantLongClick: (VoiceRoomParticipant) -> Unit // Add param
 ) {
     val stableParticipants = remember(participants) { participants }
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when (stableParticipants.size) {
             0 -> EmptyRoomState()
-            1 -> SingleParticipantLayout(stableParticipants[0])
-            2 -> TwoParticipantLayout(stableParticipants)
-            3 -> ThreeParticipantLayout(stableParticipants)
-            4 -> FourParticipantLayout(stableParticipants)
-            else -> FiveOrMoreParticipantLayout(stableParticipants)
+            1 -> SingleParticipantLayout(stableParticipants[0], onParticipantLongClick)
+            2 -> TwoParticipantLayout(stableParticipants, onParticipantLongClick)
+            3 -> ThreeParticipantLayout(stableParticipants, onParticipantLongClick)
+            4 -> FourParticipantLayout(stableParticipants, onParticipantLongClick)
+            else -> FiveOrMoreParticipantLayout(stableParticipants, onParticipantLongClick)
         }
     }
 }
@@ -354,48 +381,104 @@ private fun EmptyRoomState() {
 }
 
 @Composable
-private fun SingleParticipantLayout(participant: VoiceRoomParticipant) {
-    ParticipantCard(participant = participant, modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(0.8f))
+private fun SingleParticipantLayout(
+    participant: VoiceRoomParticipant,
+    onLongClick: (VoiceRoomParticipant) -> Unit
+) {
+    ParticipantCard(
+        participant = participant,
+        modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(0.8f),
+        onLongClick = { onLongClick(participant) }
+    )
 }
 
 @Composable
-private fun TwoParticipantLayout(participants: List<VoiceRoomParticipant>) {
+private fun TwoParticipantLayout(
+    participants: List<VoiceRoomParticipant>,
+    onLongClick: (VoiceRoomParticipant) -> Unit
+) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
-        participants.forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
+        participants.forEach { p ->
+            ParticipantCard(
+                participant = p,
+                modifier = Modifier.weight(1f).aspectRatio(0.8f),
+                onLongClick = { onLongClick(p) }
+            )
+        }
     }
 }
 
 @Composable
-private fun ThreeParticipantLayout(participants: List<VoiceRoomParticipant>) {
+private fun ThreeParticipantLayout(
+    participants: List<VoiceRoomParticipant>,
+    onLongClick: (VoiceRoomParticipant) -> Unit
+) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
-        ParticipantCard(participant = participants[0], modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(1f).align(Alignment.CenterHorizontally))
+        ParticipantCard(
+            participant = participants[0],
+            modifier = Modifier.fillMaxWidth(0.7f).aspectRatio(1f).align(Alignment.CenterHorizontally),
+            onLongClick = { onLongClick(participants[0]) }
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
-            participants.drop(1).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
+            participants.drop(1).forEach { p ->
+                ParticipantCard(
+                    participant = p,
+                    modifier = Modifier.weight(1f).aspectRatio(0.8f),
+                    onLongClick = { onLongClick(p) }
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun FourParticipantLayout(participants: List<VoiceRoomParticipant>) {
+private fun FourParticipantLayout(
+    participants: List<VoiceRoomParticipant>,
+    onLongClick: (VoiceRoomParticipant) -> Unit
+) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
-            participants.take(2).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
+            participants.take(2).forEach { p ->
+                ParticipantCard(
+                    participant = p,
+                    modifier = Modifier.weight(1f).aspectRatio(0.8f),
+                    onLongClick = { onLongClick(p) }
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)) {
-            participants.drop(2).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.8f)) }
+            participants.drop(2).forEach { p ->
+                ParticipantCard(
+                    participant = p,
+                    modifier = Modifier.weight(1f).aspectRatio(0.8f),
+                    onLongClick = { onLongClick(p) }
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun FiveOrMoreParticipantLayout(participants: List<VoiceRoomParticipant>) {
+private fun FiveOrMoreParticipantLayout(participants: List<VoiceRoomParticipant>, onLongClick: (VoiceRoomParticipant) -> Unit) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
-            participants.take(3).forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.75f)) }
+            participants.take(3).forEach { p ->
+                ParticipantCard(
+                    participant = p,
+                    modifier = Modifier.weight(1f).aspectRatio(0.75f),
+                    onLongClick = { onLongClick(p) }
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
             val remaining = participants.drop(3).take(3)
-            remaining.forEach { p -> ParticipantCard(participant = p, modifier = Modifier.weight(1f).aspectRatio(0.75f)) }
+            remaining.forEach { p ->
+                ParticipantCard(
+                    participant = p,
+                    modifier = Modifier.weight(1f).aspectRatio(0.75f),
+                    onLongClick = { onLongClick(p) }
+                )
+            }
             repeat((3 - remaining.size).coerceAtLeast(0)) { Spacer(modifier = Modifier.weight(1f)) }
         }
     }
@@ -408,9 +491,9 @@ private fun AddParticipantsDialog(
     onConfirm: (List<String>) -> Unit
 ) {
     var selectedTab by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    var manualUserId by remember { androidx.compose.runtime.mutableStateOf("") }
+    var manualUserId by remember { mutableStateOf("") }
     val selectedFriendIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    var searchQuery by remember { androidx.compose.runtime.mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
 
     val filteredFriends = remember(friends, searchQuery) {
         if (searchQuery.isBlank()) friends

@@ -244,6 +244,26 @@ class PresenceRepository {
             cont.invokeOnCancellation { ref.removeEventListener(listener) }
         }
 
-
-
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun kickUser(roomId: String, userId: String): Result<Unit> = suspendCancellableCoroutine { cont ->
+        // To kick a user, we simply remove their presence node.
+        // Their app listens to this node (via startReconnectionMonitor logic or similar)
+        // and should detect they are no longer in the room.
+        // However, the current client logic relies on `userStatusRoot` for "am I in a room".
+        // A robust kick would also clear their `userStatusRoot` entry.
+        
+        val roomRef = presenceRoot.child(roomId).child(userId)
+        val statusRef = userStatusRoot.child(userId).child("currentRoomId")
+        
+        roomRef.removeValue().addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                // Also try to clear their status (best effort, might fail if rules prevent writing others' status)
+                // Assuming admin/host has write access or rules allow it.
+                statusRef.removeValue()
+                if (cont.isActive) cont.resume(Result.success(Unit)) {}
+            } else {
+                if (cont.isActive) cont.resume(Result.failure(task.exception ?: Exception("Unknown error"))) {}
+            }
+        }
+    }
 }

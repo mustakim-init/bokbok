@@ -85,6 +85,28 @@ class VoiceService : Service() {
             }
             ContextCompat.startForegroundService(context, i)
         }
+
+        const val ACTION_SET_MIC_VOLUME = "bokbok.voice.SET_MIC_VOLUME"
+        const val ACTION_SET_REMOTE_VOLUME = "bokbok.voice.SET_REMOTE_VOLUME"
+        const val EXTRA_VOLUME = "volume"
+        const val EXTRA_REMOTE_ID = "remoteId"
+
+        fun setMicVolume(context: Context, volume: Double) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_MIC_VOLUME
+                putExtra(EXTRA_VOLUME, volume)
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
+
+        fun setRemoteVolume(context: Context, userId: String, volume: Double) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_REMOTE_VOLUME
+                putExtra(EXTRA_REMOTE_ID, userId)
+                putExtra(EXTRA_VOLUME, volume)
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
     }
 
     private val tag = "VoiceService"
@@ -137,6 +159,17 @@ class VoiceService : Service() {
             ACTION_DISCONNECT_FROM -> {
                 val ids = intent.getStringArrayListExtra(EXTRA_REMOTE_IDS) ?: arrayListOf()
                 ids.forEach { id -> client?.disconnectFrom(id) }
+            }
+            ACTION_SET_MIC_VOLUME -> {
+                val volume = intent.getDoubleExtra(EXTRA_VOLUME, 1.0)
+                client?.setMicrophoneVolume(volume)
+            }
+            ACTION_SET_REMOTE_VOLUME -> {
+                val userId = intent.getStringExtra(EXTRA_REMOTE_ID)
+                val volume = intent.getDoubleExtra(EXTRA_VOLUME, 1.0)
+                if (userId != null) {
+                    client?.setRemoteVolume(userId, volume)
+                }
             }
         }
         return START_STICKY

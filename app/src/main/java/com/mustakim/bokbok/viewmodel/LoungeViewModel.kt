@@ -3,6 +3,9 @@ package com.mustakim.bokbok.viewmodel
 import android.app.Application
 import android.net.Uri
 import android.util.Base64
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -65,7 +68,42 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     val uiState: StateFlow<LoungeUiState> = _uiState.asStateFlow()
+    
+    // Track if initial data has been loaded
+    private var hasLoadedInitialData = false
+    
+    // Track if we should show skeleton (only on first ever load)
+    // Use mutableStateOf so Compose can observe changes
+    var shouldShowSkeleton by mutableStateOf(true)
+        private set
+    
+    // Track if minimum skeleton time has elapsed
+    var minSkeletonTimeElapsed by mutableStateOf(false)
+        private set
+    
+    fun hideSkeleton() {
+        android.util.Log.d("LoungeViewModel", "hideSkeleton() called, shouldShowSkeleton: $shouldShowSkeleton -> false")
+        shouldShowSkeleton = false
+    }
+    
+    fun markMinTimeElapsed() {
+        android.util.Log.d("LoungeViewModel", "markMinTimeElapsed() called, minSkeletonTimeElapsed: $minSkeletonTimeElapsed -> true")
+        minSkeletonTimeElapsed = true
+    }
 
+    init {
+        // Only start the lightweight friend observer
+        // Actual data loading happens when screen appears
+        observeFriends()
+        
+        // Lifecycle logging to verify proper scoping
+        android.util.Log.d("LoungeViewModel", "✅ Created: ${System.identityHashCode(this)}")
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        android.util.Log.d("LoungeViewModel", "❌ Destroyed: ${System.identityHashCode(this)}")
+    }
 
     private suspend fun uploadRoomImage(imageUri: Uri): String? {
         return try {
@@ -325,13 +363,21 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    init {
-        // Replace dummy public rooms with real ones as soon as possible
-        loadPublicRoomsFromFirestore()
-        loadMyRoomsFromFirestore()
-
-        // ✅ Friends: live Firestore → Lounge friends strip
-        observeFriends()
+    /**
+     * Load initial data when screen becomes visible.
+     * Called from LoungeScreen's LaunchedEffect.
+     * Only runs once - subsequent navigations use cached data.
+     */
+    fun loadInitialData() {
+        // Don't reload if we've already loaded
+        if (hasLoadedInitialData) return
+        
+        hasLoadedInitialData = true
+        viewModelScope.launch {
+            // Load rooms in parallel for faster startup
+            launch { loadPublicRoomsFromFirestore() }
+            launch { loadMyRoomsFromFirestore() }
+        }
     }
 
     /**

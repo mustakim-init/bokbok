@@ -9,12 +9,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -35,6 +35,8 @@ import com.mustakim.bokbok.ui.screens.notifications.NotificationsScreen
 import com.mustakim.bokbok.ui.screens.permissions.PermissionsScreen
 import com.mustakim.bokbok.ui.screens.profile.ProfileScreen
 import com.mustakim.bokbok.ui.screens.settings.SettingsScreen
+import com.mustakim.bokbok.viewmodel.LoungeViewModel
+import com.mustakim.bokbok.viewmodel.NotificationViewModel
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 
@@ -162,23 +164,25 @@ fun NavGraph(
 
         // ============= MAIN APP FLOW =============
         composable(NavRoutes.Lounge.route) {
-            // Track notification count for badge
-            val notificationRepo = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
-            var notificationCount by remember { mutableStateOf(0) }
+            // ✅ Scope ViewModels to navigation entry (survives navigation)
+            val loungeViewModel = viewModel<LoungeViewModel>()
+            val notificationViewModel = viewModel<NotificationViewModel>()
             
+            // Start observing notifications once
             LaunchedEffect(Unit) {
                 val userId = userRepository.getCurrentUserId()
                 if (userId != null) {
-                    notificationRepo.observeNotifications(userId).collect { notifications ->
-                        notificationCount = notifications.count { !it.isRead }
-                    }
+                    notificationViewModel.observeNotifications(userId)
                 }
             }
+            
+            val notificationCount by notificationViewModel.unreadCount.collectAsState()
             
             LoungeScreen(
                 navController = navController,
                 userViewModel = userViewModel,
-                notificationCount = notificationCount
+                notificationCount = notificationCount,
+                loungeViewModel = loungeViewModel
             )
         }
 

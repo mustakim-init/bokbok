@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.data.model.FriendStatus
 import com.mustakim.bokbok.data.model.VoiceRoom
@@ -63,13 +62,14 @@ import com.mustakim.bokbok.viewmodel.LoungeUiState
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoungeScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
     notificationCount: Int = 0,
-    loungeViewModel: LoungeViewModel = viewModel()
+    loungeViewModel: LoungeViewModel // Must be passed from NavGraph for proper scoping
 ) {
     val uiState by loungeViewModel.uiState.collectAsState()
     val currentUser by userViewModel.currentUser.collectAsState()
@@ -80,37 +80,58 @@ fun LoungeScreen(
     var showAlreadyInRoomDialog by remember { mutableStateOf(false) }
     var pendingJoinAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    // [NEW HELPER FUNCTION]
-    val handleJoinRequest: (() -> Unit) -> Unit = { action ->
-        if (RoomStateManager.currentRoom.value != null) {
-            pendingJoinAction = action
-            showAlreadyInRoomDialog = true
-        } else {
-            action()
+    // [NEW HELPER FUNCTION] - Memoized to prevent recreation
+    val handleJoinRequest = remember {
+        { action: () -> Unit ->
+            if (RoomStateManager.currentRoom.value != null) {
+                pendingJoinAction = action
+                showAlreadyInRoomDialog = true
+            } else {
+                action()
+            }
         }
     }
+
+    // Load data and manage skeleton
+    LaunchedEffect(Unit) {
+        android.util.Log.d("LoungeScreen", "LaunchedEffect started, shouldShowSkeleton=${loungeViewModel.shouldShowSkeleton}")
+        
+        // Start minimum display timer
+        if (loungeViewModel.shouldShowSkeleton) {
+            launch {
+                android.util.Log.d("LoungeScreen", "Starting 2s timer")
+                delay(2000)
+                loungeViewModel.markMinTimeElapsed()
+                android.util.Log.d("LoungeScreen", "2s timer completed, minTimeElapsed=true")
+            }
+        }
+        
+        // Load data (runs once in ViewModel)
+        loungeViewModel.loadInitialData()
+        
+        // Watch for data to arrive and hide skeleton
+        if (loungeViewModel.shouldShowSkeleton) {
+            launch {
+                loungeViewModel.uiState.collect { state ->
+                    android.util.Log.d("LoungeScreen", "State update: publicRooms=${state.publicRooms.size}, myRooms=${state.myRooms.size}")
+                    
+                    if (state.publicRooms.isNotEmpty() || state.myRooms.isNotEmpty()) {
+                        android.util.Log.d("LoungeScreen", "Data loaded! Hiding skeleton")
+                        loungeViewModel.hideSkeleton()
+                    }
+                }
+            }
+        }
+    }
+
     MainScaffold(
         navController = navController,
         title = "BokBok Lounge",
         notificationCount = notificationCount,
         userViewModel = userViewModel
     ) { paddingValues ->
-        // Only show skeleton on true initial load (when data is empty and loading)
-        val isInitialLoad = uiState.isLoading && uiState.publicRooms.isEmpty() && uiState.myRooms.isEmpty() && uiState.friends.isEmpty()
-        
-        // Track if minimum time has elapsed
-        var minTimeElapsed by remember { mutableStateOf(false) }
-        
-        // Only start timer if we're in initial load
-        LaunchedEffect(isInitialLoad) {
-            if (isInitialLoad) {
-                minTimeElapsed = false
-                delay(2000)
-                minTimeElapsed = true
-            }
-        }
-
-        val showSkeleton = isInitialLoad && !minTimeElapsed
+        // Show skeleton only on first load until data arrives and min time passes
+        val showSkeleton = loungeViewModel.shouldShowSkeleton || !loungeViewModel.minSkeletonTimeElapsed
 
         // Skeleton with fade-out animation
         AnimatedVisibility(

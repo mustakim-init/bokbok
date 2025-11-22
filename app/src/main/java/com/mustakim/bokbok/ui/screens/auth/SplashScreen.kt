@@ -27,7 +27,7 @@ fun SplashScreen(
     val presenceRepository = remember { PresenceRepository() }
 
     LaunchedEffect(Unit) {
-        delay(700) // Show splash for 1.5 seconds
+        delay(100)
 
         // Check if user is logged in
         if (authRepository.isUserLoggedIn()) {

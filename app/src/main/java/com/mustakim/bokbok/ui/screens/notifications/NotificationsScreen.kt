@@ -230,6 +230,9 @@ fun NotificationsScreen(
                                                     loungeViewModel.joinRoomSessionOnly(room)
                                                     RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
 
+                                                    // Navigate back so the VoiceRoomScreen overlay is visible
+                                                    navController.navigateUp()
+
                                                     // Delete notification after accepting
                                                     userRepo.getCurrentUserId()?.let { uid ->
                                                         repo.deleteNotification(uid, notification.id)
@@ -424,7 +427,7 @@ fun ExpressiveNotificationCard(
                     ) {
                         Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Join Room")
+                        Text("Accept")
                     }
                 }
             }

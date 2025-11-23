@@ -219,7 +219,7 @@ fun VoiceRoomScreen(
                         onOpenChat = { /* TODO */ },
                         onOpenVoiceEffects = { /* TODO */ },
                         onToggleAudioMode = viewModel::toggleA2dpMode,
-                        onShareInvite = { /* TODO */ },
+                        onMoreClick = { /* TODO */ },
                         onLeaveRoom = {
                             viewModel.leaveRoom()
                             onLeaveRoom()

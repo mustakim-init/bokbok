@@ -1,10 +1,18 @@
 package com.mustakim.bokbok.ui.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -23,17 +31,18 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,7 +68,7 @@ fun VoiceControlsSheet(
     onOpenChat: () -> Unit,
     onOpenVoiceEffects: () -> Unit,
     onToggleAudioMode: () -> Unit,
-    onShareInvite: () -> Unit,
+    onMoreClick: () -> Unit,
     onLeaveRoom: () -> Unit,
     onMicVolumeChange: (Float) -> Unit,
     onOutputVolumeChange: (Float) -> Unit
@@ -148,47 +157,46 @@ fun VoiceControlsSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.Center, // Center the items
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // We use weights to ensure equal distribution and prevent "shrinking"
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ControlButton(
-                        icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                        label = if (isMuted) "Unmute" else "Mute",
-                        isActive = !isMuted,
-                        onClick = onToggleMic
-                    )
-                }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ControlButton(
-                        icon = Icons.AutoMirrored.Filled.Chat,
-                        label = "Chat",
-                        onClick = onOpenChat
-                    )
-                }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ControlButton(
-                        icon = Icons.Default.MusicNote,
-                        label = "Effects",
-                        onClick = onOpenVoiceEffects
-                    )
-                }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ControlButton(
-                        icon = Icons.Default.Share,
-                        label = "Invite",
-                        onClick = onShareInvite
-                    )
-                }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    ControlButton(
-                        icon = Icons.Default.CallEnd,
-                        label = "Leave",
-                        isDestructive = true,
-                        onClick = onLeaveRoom
-                    )
-                }
+                // Mute Button (Persistent State)
+                VoiceControlButton(
+                    icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                    label = if (isMuted) "Unmute" else "Mute",
+                    isExpanded = isMuted,
+                    isActive = !isMuted,
+                    onClick = onToggleMic
+                )
+
+                // Chat Button (Momentary)
+                VoiceControlButton(
+                    icon = Icons.AutoMirrored.Filled.Chat,
+                    label = "Chat",
+                    onClick = onOpenChat
+                )
+
+                // Effects Button (Momentary)
+                VoiceControlButton(
+                    icon = Icons.Default.MusicNote,
+                    label = "Effects",
+                    onClick = onOpenVoiceEffects
+                )
+
+                // More Button (Momentary)
+                VoiceControlButton(
+                    icon = Icons.Default.MoreHoriz,
+                    label = "More",
+                    onClick = onMoreClick
+                )
+
+                // Leave Button (Momentary)
+                VoiceControlButton(
+                    icon = Icons.Default.CallEnd,
+                    label = "Leave",
+                    isDestructive = true,
+                    onClick = onLeaveRoom
+                )
             }
 
             // EXPANDED SETTINGS (Fade in)
@@ -278,24 +286,46 @@ fun VoiceControlsSheet(
 // --- Helpers ---
 
 @Composable
-private fun ControlButton(
+private fun RowScope.VoiceControlButton(
     icon: ImageVector,
     label: String,
+    isExpanded: Boolean = false,
     isActive: Boolean = false,
     isDestructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    // Fixed width container for the button content itself
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val targetExpanded = isExpanded || isPressed
+
+    val weight by animateFloatAsState(
+        targetValue = if (targetExpanded) 1.5f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "weight"
+    )
+
+    val cornerRadiusPercent by animateIntAsState(
+        targetValue = if (targetExpanded) 20 else 50,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "cornerRadius"
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.width(60.dp) // Slight constraint to keep it tidy
+        modifier = Modifier.weight(weight)
     ) {
-        IconButton(
-            onClick = onClick,
+        Box(
             modifier = Modifier
-                .size(56.dp)
-                .clip(CircleShape)
+                .height(56.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(cornerRadiusPercent))
                 .background(
                     when {
                         isDestructive -> MaterialTheme.colorScheme.error
@@ -303,6 +333,12 @@ private fun ControlButton(
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     }
                 )
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = androidx.compose.material3.ripple(),
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
@@ -315,12 +351,14 @@ private fun ControlButton(
                 modifier = Modifier.size(24.dp)
             )
         }
+        
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
-            maxLines = 1
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }
@@ -360,7 +398,7 @@ private fun ModeChip(
             MaterialTheme.colorScheme.primary
         else
             MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = if (selected) 2.dp else 0.dp
+            tonalElevation = if (selected) 2.dp else 0.dp
     ) {
         Text(
             text = label,

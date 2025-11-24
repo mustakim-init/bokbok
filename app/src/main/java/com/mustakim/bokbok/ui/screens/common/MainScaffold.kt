@@ -37,6 +37,7 @@ import com.mustakim.bokbok.viewmodel.AuthViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.LaunchedEffect
 
 
 @Composable
@@ -70,6 +71,13 @@ fun MainScaffold(
     val voiceRoomViewModel: VoiceRoomViewModel = viewModel(
         key = currentRoom?.let { "room_${it.id}" }
     )
+
+    LaunchedEffect(isMuted) {
+        if (currentRoom != null) {
+            voiceRoomViewModel.setMutedFromGlobal(isMuted)
+        }
+    }
+
     val authViewModel: AuthViewModel = viewModel()
 
     // Just compute it each recomposition, no remember

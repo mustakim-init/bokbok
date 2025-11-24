@@ -275,7 +275,7 @@ class VoiceService : Service() {
         // 🛑 CHANGED: Use SCREEN_DIM_WAKE_LOCK to keep screen on (dimmed)
         // This prevents the device from sleeping at all.
         wakeLock = pm.newWakeLock(
-            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            PowerManager.PARTIAL_WAKE_LOCK,
             "bokbok:voice_call_wl"
         )
 

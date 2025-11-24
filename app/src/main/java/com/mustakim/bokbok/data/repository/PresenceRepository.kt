@@ -266,4 +266,64 @@ class PresenceRepository {
             }
         }
     }
+
+    /**
+     * Broadcast a join event to RTDB for other participants to see.
+     * Events are stored with timestamp and auto-expire.
+     */
+    fun broadcastJoinEvent(roomId: String, userId: String, userName: String) {
+        val eventsRef = db.getReference("rooms").child(roomId).child("events").child("joins")
+        val timestamp = System.currentTimeMillis()
+
+        val eventData = mapOf(
+            "userId" to userId,
+            "userName" to userName,
+            "timestamp" to timestamp
+        )
+
+        // Write the event
+        eventsRef.child(timestamp.toString()).setValue(eventData)
+
+        // Auto-cleanup: Remove events older than 10 seconds
+        eventsRef.orderByChild("timestamp")
+            .endBefore((timestamp - 10000).toDouble())
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    snapshot.children.forEach { it.ref.removeValue() }
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
+    /**
+     * Observe join events in a room.
+     * Returns a ChildEventListener that must be removed when done.
+     */
+    fun observeJoinEvents(
+        roomId: String,
+        onEvent: (userId: String, userName: String) -> Unit
+    ): ChildEventListener {
+        val eventsRef = db.getReference("rooms").child(roomId).child("events").child("joins")
+
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                val userId = snapshot.child("userId").getValue(String::class.java) ?: return
+                val userName = snapshot.child("userName").getValue(String::class.java) ?: return
+                onEvent(userId, userName)
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onChildRemoved(snapshot: DataSnapshot) {}
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onCancelled(error: DatabaseError) {}
+        }
+
+        eventsRef.addChildEventListener(listener)
+        return listener
+    }
+    /**
+     * Remove a join events listener.
+     */
+    fun removeJoinEventsListener(roomId: String, listener: ChildEventListener) {
+        db.getReference("rooms").child(roomId).child("events").child("joins")
+            .removeEventListener(listener)
+    }
 }

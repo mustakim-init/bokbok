@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
+import org.webrtc.AudioTrackSink
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -24,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import org.webrtc.audio.JavaAudioDeviceModule
+import java.nio.ByteBuffer
 
 @Suppress("DEPRECATION")
 class WebRTCClient(
@@ -49,6 +51,12 @@ class WebRTCClient(
     private var audioSource: AudioSource? = null
     private var localAudioTrack: AudioTrack? = null
     private val eglBase: EglBase = EglBase.create()
+    private var localAudioSink: AudioTrackSink? = null
+    private var audioDeviceModule: JavaAudioDeviceModule? = null // 🎤 CHANGED: Keep reference
+
+    // 🎤 CHANGED: Two PCs for loopback
+    private var warmupPC1: PeerConnection? = null
+    private var warmupPC2: PeerConnection? = null
 
     // Maps
     private val peerConnections = ConcurrentHashMap<String, PeerConnection>()
@@ -64,6 +72,9 @@ class WebRTCClient(
     private val connectedPeersCount = AtomicInteger(0)
 
     private val currentSpeakingState = ConcurrentHashMap<String, Boolean>()
+
+    // 🎤 NEW: Store local audio level separately
+    @Volatile private var localAudioRms: Double = 0.0
 
     // Audio Management
     private var audioManager: AudioManager? = null
@@ -140,20 +151,17 @@ class WebRTCClient(
 
     private fun initPeerConnectionFactory() {
         if (peerConnectionFactory != null) return
-
         val options = PeerConnectionFactory.InitializationOptions.builder(appContext)
             .setEnableInternalTracer(true)
             .setFieldTrials("WebRTC-Audio-NetworkAdaptation/Enabled/")
             .createInitializationOptions()
-
         PeerConnectionFactory.initialize(options)
-
         val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
-
-        val audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
-            .setUseHardwareAcousticEchoCanceler(true)      // Hardware AEC
-            .setUseHardwareNoiseSuppressor(true)            // Hardware NS
+        // 🎤 CHANGED: Assign to class property
+        audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setUseHardwareAcousticEchoCanceler(true)
+            .setUseHardwareNoiseSuppressor(true)
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
                 override fun onWebRtcAudioRecordError(errorMessage: String?) {
                     Log.e(tag, "Audio Record Error: $errorMessage")
@@ -183,48 +191,178 @@ class WebRTCClient(
                 }
             })
             .createAudioDeviceModule()
-
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setOptions(PeerConnectionFactory.Options())
             .setAudioDeviceModule(audioDeviceModule)
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
-
-        audioDeviceModule.release()
+        // 🎤 REMOVED: audioDeviceModule.release() - We keep it alive now!
     }
 
     private fun initLocalAudio() {
         val factory = peerConnectionFactory ?: return
-        audioSource = factory.createAudioSource(audioConstraints)
-        localAudioTrack = factory.createAudioTrack("ARDAMSa0", audioSource).apply {
-            setEnabled(true)
+
+        val sourceConstraints = MediaConstraints()
+        audioSource = factory.createAudioSource(sourceConstraints)
+
+        localAudioTrack = factory.createAudioTrack("ARDAMSa0", audioSource)
+        // 🎤 REMOVED: Don't attach sink here. It doesn't work for local tracks.
+        // localAudioSink = ...
+
+        localAudioTrack?.setEnabled(true)
+
+        Log.d(tag, "Local Audio initialized. Starting Twin-PC warmup...")
+        startWarmupConnection()
+    }
+
+    private fun startWarmupConnection() {
+        val factory = peerConnectionFactory ?: return
+        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
+            sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
+        // Observer for PC1 (Sender) - Unchanged
+        val observer1 = object : PeerConnection.Observer {
+            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+            override fun onConnectionChange(p0: PeerConnection.PeerConnectionState?) {}
+            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceCandidate(candidate: IceCandidate?) {
+                candidate?.let { warmupPC2?.addIceCandidate(it) }
+            }
+            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
+            override fun onAddStream(p0: MediaStream?) {}
+            override fun onRemoveStream(p0: MediaStream?) {}
+            override fun onDataChannel(p0: org.webrtc.DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
+            override fun onIceConnectionReceivingChange(p0: Boolean) {}
+        }
+        // Observer for PC2 (Receiver) - 🎤 UPDATED
+        val observer2 = object : PeerConnection.Observer {
+            override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+            override fun onConnectionChange(p0: PeerConnection.PeerConnectionState?) {}
+            override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+            override fun onIceCandidate(candidate: IceCandidate?) {
+                candidate?.let { warmupPC1?.addIceCandidate(it) }
+            }
+            override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
+            override fun onAddStream(p0: MediaStream?) {}
+            override fun onRemoveStream(p0: MediaStream?) {}
+            override fun onDataChannel(p0: org.webrtc.DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+
+            // 🎤 NEW: Attach Sink to the INCOMING track
+            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+                receiver?.track()?.let { track ->
+                    if (track is AudioTrack) {
+                        // 1. Keep enabled so data flows
+                        track.setEnabled(true)
+                        // 2. Mute volume so no echo
+                        track.setVolume(0.0)
+
+                        Log.d(tag, "Warmup receiver track found. Attaching Sink...")
+
+                        // 3. Attach Sink HERE
+                        localAudioSink = object : AudioTrackSink {
+                            private var lastLogTime = 0L
+                            override fun onData(data: ByteBuffer, bitsPerSample: Int, sampleRate: Int, channels: Int, frames: Int, timestamp: Long) {
+                                if (bitsPerSample == 16) {
+                                    val buffer = data.duplicate()
+                                    var sum = 0.0
+                                    var count = 0
+                                    while (buffer.remaining() >= 2) {
+                                        val byte1 = buffer.get().toInt()
+                                        val byte2 = buffer.get().toInt()
+                                        val sample = ((byte2 shl 8) or (byte1 and 0xFF)).toShort()
+                                        sum += sample * sample
+                                        count++
+                                    }
+                                    if (count > 0) {
+                                        val rms = Math.sqrt(sum / count)
+                                        localAudioRms = rms
+
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastLogTime > 1000) {
+                                            Log.d(tag, "🎤 Loopback RMS: $rms")
+                                            lastLogTime = now
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        track.addSink(localAudioSink)
+                    }
+                }
+            }
+
+            override fun onIceConnectionReceivingChange(p0: Boolean) {}
+        }
+        warmupPC1 = factory.createPeerConnection(rtcConfig, observer1)
+        warmupPC2 = factory.createPeerConnection(rtcConfig, observer2)
+        localAudioTrack?.let {
+            warmupPC1?.addTrack(it, listOf("ARDAMS_WARMUP"))
+        }
+        val constraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+        }
+        warmupPC1?.createOffer(object : SimpleSdpObserver() {
+            override fun onCreateSuccess(sessionDescription: SessionDescription?) {
+                sessionDescription?.let { offer ->
+                    warmupPC1?.setLocalDescription(SimpleSdpObserver(), offer)
+                    warmupPC2?.setRemoteDescription(SimpleSdpObserver(), offer)
+
+                    warmupPC2?.createAnswer(object : SimpleSdpObserver() {
+                        override fun onCreateSuccess(sessionDescription: SessionDescription?) {
+                            sessionDescription?.let { answer ->
+                                warmupPC2?.setLocalDescription(SimpleSdpObserver(), answer)
+                                warmupPC1?.setRemoteDescription(SimpleSdpObserver(), answer)
+                                Log.d(tag, "Warmup connection established (Twin-PC).")
+                            }
+                        }
+                    }, constraints)
+                }
+            }
+        }, constraints)
     }
 
     fun disconnect() {
         Log.d(tag, "disconnect() called")
         isShuttingDown.set(true)
-        
+
         executeTask {
             stopStatsPolling()
             signalingBackend.dispose()
-            
+
+            // Close warmup PCs
+            try {
+                warmupPC1?.dispose()
+                warmupPC1 = null
+                warmupPC2?.dispose()
+                warmupPC2 = null
+            } catch (e: Exception) { Log.w(tag, "Warmup close error: ${e.message}") }
             peerConnections.values.forEach { pc ->
                 try { pc.close() } catch (e: Exception) { Log.w(tag, "Error closing PC: ${e.message}") }
             }
             peerConnections.clear()
             stableConnections.clear()
             remoteAudioTracks.clear()
-            
+
             try {
+                localAudioSink?.let { localAudioTrack?.removeSink(it) }
+                localAudioSink = null
                 localAudioTrack?.dispose()
                 audioSource?.dispose()
                 peerConnectionFactory?.dispose()
+
+                audioDeviceModule?.release()
+                audioDeviceModule = null
+
             } catch (e: Exception) {
                 Log.w(tag, "Error disposing resources: ${e.message}")
             }
-            
+
             // Restore audio settings
             audioManager?.let { am ->
                 am.mode = savedAudioMode
@@ -232,7 +370,7 @@ class WebRTCClient(
                 am.isSpeakerphoneOn = savedIsSpeakerphoneOn
             }
         }
-        
+
         executor.shutdown()
         scheduler.shutdown()
     }
@@ -676,34 +814,44 @@ class WebRTCClient(
     private val statsPollRunnable = object : Runnable {
         override fun run() {
             if (!statsPolling) return
+
+            // 🎤 NEW: Update self state from the volatile variable
+            // Threshold lowered to 50.0 for better sensitivity
+            val isSpeaking = localAudioRms > 50.0
+            currentSpeakingState[selfId] = isSpeaking
+
             // 1. Emit the LATEST known state immediately.
-            // This decouples the UI update from the async WebRTC stats gathering.
             onSpeakingStateChanged?.invoke(currentSpeakingState.toMap())
+
             executeTask {
                 // 2. Trigger stats gathering for all peers
                 peerConnections.forEach { (remoteId, pc) ->
                     pc.getStats { report ->
-                        // A. Check REMOTE Audio (inbound-rtp)
+                        // A. Check REMOTE Audio
                         val remoteSpeaking = report.statsMap.values.any {
                             it.type == "inbound-rtp" &&
                                     (it.members["mediaType"] == "audio" || it.members["kind"] == "audio") &&
-                                    ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.05 // Slightly higher threshold
+                                    ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.05
                         }
                         currentSpeakingState[remoteId] = remoteSpeaking
-                        // B. Check LOCAL Audio (media-source)
-                        // We check this on every PC report to ensure we catch it.
-                        val localSpeaking = report.statsMap.values.any {
+
+                        // B. Fallback: Check LOCAL Audio from stats (only if Sink is broken)
+                        // We merge the result: Sink OR Stats
+                        val localStatsSpeaking = report.statsMap.values.any {
                             (it.type == "media-source" || it.type == "track") &&
                                     it.members["kind"] == "audio" &&
                                     it.members["trackIdentifier"] == localAudioTrack?.id() &&
                                     ((it.members["audioLevel"] as? Double) ?: 0.0) > 0.05
                         }
-                        // Update self state
-                        currentSpeakingState[selfId] = localSpeaking
+
+                        // If stats say we are speaking, update it (OR logic)
+                        if (localStatsSpeaking) {
+                            currentSpeakingState[selfId] = true
+                        }
                     }
                 }
             }
-            // 3. Schedule next run (Faster polling: 200ms instead of 1000ms)
+            // 3. Schedule next run
             statsHandler.postDelayed(this, 200L)
         }
     }

@@ -19,6 +19,11 @@ import com.mustakim.bokbok.viewmodel.ThemeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import android.content.Intent
 import kotlinx.coroutines.launch
+import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 class MainActivity : ComponentActivity() {
     // Use a MutableState to track the latest intent for navigation
@@ -37,10 +42,36 @@ class MainActivity : ComponentActivity() {
         // Initialize with starting intent
         _intentState.value = intent
 
+        // Request battery optimization exemption to prevent background kills
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = "package:$packageName".toUri()
+                }
+                startActivity(intent)
+            }
+        }
+
         setContent {
             // ✅ Hoist both ViewModels
             val themeViewModel: ThemeViewModel = viewModel()
             val userViewModel: UserViewModel = viewModel()
+
+            // ✅ FIX: Monitor App Lifecycle to set Online Status
+            val lifecycleOwner = LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_START) {
+                        // App came to foreground -> Set Online
+                        userViewModel.setOnline()
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                }
+            }
 
             val selectedTheme by themeViewModel.selectedTheme.collectAsState()
             val darkTheme = isSystemInDarkTheme()

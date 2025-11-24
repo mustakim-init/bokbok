@@ -68,7 +68,15 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
     fun setCurrentUser(user: User?) {
         _currentUser.value = user
     }
-    
+
+    fun setOnline() {
+        try {
+            presenceRepository.setUserOnline()
+        } catch (e: Exception) {
+            android.util.Log.e("UserViewModel", "Error setting online", e)
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         // ✅ FIX: Set user offline when ViewModel is cleared

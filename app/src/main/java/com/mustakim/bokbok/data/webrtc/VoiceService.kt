@@ -15,6 +15,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.R
+import android.net.wifi.WifiManager
 
 class VoiceService : Service() {
 
@@ -114,6 +115,8 @@ class VoiceService : Service() {
     private val notificationId = 101
 
     private var wakeLock: PowerManager.WakeLock? = null
+
+    private var wifiLock: WifiManager.WifiLock? = null
     private var client: WebRTCClient? = null
     private var signaling: SignalingBackend? = null
     private var currentRoomId: String? = null
@@ -265,16 +268,44 @@ class VoiceService : Service() {
         }
     }
 
+    @Suppress("DEPRECATION")
     @SuppressLint("WakelockTimeout")
     private fun acquireWakeLock() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "bokbok:voice_call_wl")
+        // 🛑 CHANGED: Use SCREEN_DIM_WAKE_LOCK to keep screen on (dimmed)
+        // This prevents the device from sleeping at all.
+        wakeLock = pm.newWakeLock(
+            PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+            "bokbok:voice_call_wl"
+        )
+
         if (wakeLock?.isHeld != true) wakeLock?.acquire()
+
+        // Acquire WiFi Lock to prevent network drop on sleep
+        try {
+            val wm = applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager
+            wm?.let {
+                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = it.createWifiLock(mode, "bokbok:voice_wifi_lock")
+                wifiLock?.setReferenceCounted(false)
+                wifiLock?.acquire()
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to acquire WifiLock", e)
+        }
     }
 
     private fun releaseWakeLock() {
         if (wakeLock?.isHeld == true) wakeLock?.release()
         wakeLock = null
+
+        if (wifiLock?.isHeld == true) wifiLock?.release()
+        wifiLock = null
     }
 
     override fun onDestroy() {

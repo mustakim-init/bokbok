@@ -17,17 +17,16 @@ class RoomRepository {
 
     /**
      * Load active rooms from Firestore.
-     * For now we DO NOT filter by isPublic to avoid any index issues.
-     * Later we can add .whereEqualTo("isPublic", true) once indexes are set up.
+     * Filtered by isPublic = true to hide private rooms.
      */
     suspend fun getActiveRooms(): Result<List<VoiceRoom>> {
         return try {
             val snapshot = roomsCollection
+                .whereEqualTo("isPublic", true) // ✅ Added filter
                 .orderBy("createdAt", Query.Direction.DESCENDING)
                 .limit(20)
                 .get()
                 .await()
-
             val rooms = snapshot.documents.mapNotNull { doc ->
                 doc.data?.let { VoiceRoom.fromMap(it) }
             }
@@ -193,6 +192,54 @@ class RoomRepository {
             }
 
             roomsCollection.document(roomId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    /**
+     * Update specific fields of a room.
+     */
+    suspend fun updateRoom(roomId: String, updates: Map<String, Any>): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not authenticated"))
+
+            // Verify host (optional but good practice, though Firestore rules should enforce this too)
+            val doc = roomsCollection.document(roomId).get().await()
+            val room = doc.data?.let { VoiceRoom.fromMap(it) }
+                ?: return Result.failure(Exception("Room not found"))
+
+            if (room.hostId != currentUser.uid) {
+                return Result.failure(Exception("Only host can update room settings"))
+            }
+
+            roomsCollection.document(roomId).update(updates).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Remove a user from the room (kick from permanent members list).
+     */
+    suspend fun removeUserFromRoom(roomId: String, userId: String): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not authenticated"))
+
+            val doc = roomsCollection.document(roomId).get().await()
+            val room = doc.data?.let { VoiceRoom.fromMap(it) }
+                ?: return Result.failure(Exception("Room not found"))
+
+            if (room.hostId != currentUser.uid) {
+                return Result.failure(Exception("Only host can remove members"))
+            }
+
+            roomsCollection.document(roomId)
+                .update("participants", FieldValue.arrayRemove(userId))
+                .await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

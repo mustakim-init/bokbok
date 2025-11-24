@@ -80,7 +80,6 @@ fun VoiceRoomScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val friends by viewModel.friends.collectAsState()
-
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -90,9 +89,7 @@ fun VoiceRoomScreen(
             viewModel.onPermissionDenied()
         }
     }
-
     LaunchedEffect(roomId) { viewModel.loadRoom(roomId) }
-
     LaunchedEffect(uiState.room) {
         val room = uiState.room ?: return@LaunchedEffect
         if (viewModel.hasRequiredCallPermissions()) {
@@ -101,7 +98,6 @@ fun VoiceRoomScreen(
             permissionLauncher.launch(viewModel.getRequiredPermissions())
         }
     }
-
     val view = LocalView.current
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
@@ -110,24 +106,20 @@ fun VoiceRoomScreen(
                 error.contains("Failed to load") ||
                 error.contains("removed from the room")) {
                 onLeaveRoom()
-
                 // Clear error to prevent re-trigger
                 // Note: ViewModel should handle this, but as a safety measure
                 kotlinx.coroutines.delay(500)
             }
         }
     }
-
     val globalMuted by RoomStateManager.isMuted
     LaunchedEffect(globalMuted) { viewModel.setMutedFromGlobal(globalMuted) }
-
     var showAddUserDialog by remember { mutableStateOf(false) }
-
+    var showAddMemberDialog by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
     var selectedParticipant by remember { mutableStateOf<VoiceRoomParticipant?>(null) }
-
     val colorScheme = MaterialTheme.colorScheme
     val isDarkTheme = isSystemInDarkTheme()
-
     val gradientBrush = remember(isDarkTheme, colorScheme.primary) {
         val colors = if (isDarkTheme) {
             listOf(colorScheme.primaryContainer, colorScheme.secondaryContainer, colorScheme.tertiaryContainer)
@@ -136,7 +128,6 @@ fun VoiceRoomScreen(
         }
         Brush.verticalGradient(colors = colors)
     }
-
     DisposableEffect(colorScheme.primary, isDarkTheme) {
         val window = (view.context as? android.app.Activity)?.window ?: return@DisposableEffect onDispose {}
         val insetsController = WindowCompat.getInsetsController(window, view)
@@ -148,25 +139,20 @@ fun VoiceRoomScreen(
             insetsController.isAppearanceLightNavigationBars = !isDarkTheme
         }
     }
-
     val roomName = remember(uiState.room?.name) { uiState.room?.name ?: "Voice Room" }
     val onMinimizeCallback: () -> Unit = remember(uiState.isMuted) { { onMinimize(uiState.isMuted) } }
-
     val bottomSheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
     val density = LocalDensity.current
-
     // We ensure peek height is enough for the "floating pill" + gap
     val peekHeightDp = 130.dp
-
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val layoutHeight = maxHeight
         val layoutHeightPx = with(density) { maxHeight.toPx() }
         val peekHeightPx = with(density) { peekHeightDp.toPx() }
-
         val currentOffset by remember(bottomSheetState) {
             derivedStateOf {
                 try {
@@ -177,7 +163,6 @@ fun VoiceRoomScreen(
                 }
             }
         }
-
         val expansionFraction by remember(currentOffset) {
             derivedStateOf {
                 val maxOffset = layoutHeightPx - peekHeightPx
@@ -186,7 +171,6 @@ fun VoiceRoomScreen(
                 fraction.coerceIn(0f, 1f)
             }
         }
-
         BottomSheetScaffold(
             scaffoldState = scaffoldState,
             sheetPeekHeight = peekHeightDp,
@@ -219,7 +203,7 @@ fun VoiceRoomScreen(
                         onOpenChat = { /* TODO */ },
                         onOpenVoiceEffects = { /* TODO */ },
                         onToggleAudioMode = viewModel::toggleA2dpMode,
-                        onMoreClick = { /* TODO */ },
+                        onMoreClick = { showSettingsSheet = true },
                         onLeaveRoom = {
                             viewModel.leaveRoom()
                             onLeaveRoom()
@@ -242,7 +226,6 @@ fun VoiceRoomScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-
                 ) {
                     VoiceRoomTopBar(
                         roomName = roomName,
@@ -251,9 +234,7 @@ fun VoiceRoomScreen(
                         onToggleSpeaker = viewModel::toggleSpeaker,
                         onInviteFriends = { showAddUserDialog = true }
                     )
-
                     Spacer(modifier = Modifier.height(32.dp))
-
                     DynamicParticipantGrid(
                         participants = uiState.participants,
                         onParticipantLongClick = { selectedParticipant = it },
@@ -267,7 +248,6 @@ fun VoiceRoomScreen(
             }
         }
     }
-
     if (showAddUserDialog) {
         AddParticipantsDialog(
             friends = friends,
@@ -276,6 +256,38 @@ fun VoiceRoomScreen(
                 viewModel.inviteUsers(userIds)
                 showAddUserDialog = false
             }
+        )
+    }
+
+    if (showAddMemberDialog) {
+        AddParticipantsDialog(
+            friends = friends,
+            onDismiss = { showAddMemberDialog = false },
+            onConfirm = { userIds ->
+                viewModel.addMembers(userIds)
+                showAddMemberDialog = false
+            }
+        )
+    }
+    
+    if (showSettingsSheet && uiState.room != null) {
+        com.mustakim.bokbok.ui.components.RoomSettingsSheet(
+            room = uiState.room!!,
+            isHost = uiState.room!!.hostId == viewModel.currentUserId,
+            participants = uiState.participants,
+            members = uiState.members,
+            onDismiss = { showSettingsSheet = false },
+            onUpdateSettings = { updates ->
+                viewModel.updateRoomSettings(updates)
+                showSettingsSheet = false
+            },
+            onRemoveMember = { userId ->
+                viewModel.removeMember(userId)
+            },
+            onKickParticipant = { userId ->
+                viewModel.kickParticipant(userId)
+            },
+            onAddMember = { showAddMemberDialog = true }
         )
     }
     if (selectedParticipant != null) {

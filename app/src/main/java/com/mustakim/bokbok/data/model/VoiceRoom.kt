@@ -18,7 +18,8 @@ data class VoiceRoom(
     val createdAt: Long = System.currentTimeMillis(),
     val category: RoomCategory = RoomCategory.CASUAL,
     // NEW: how many are currently in the call (RTDB presence)
-    val currentOnline: Int = 0
+    val currentOnline: Int = 0,
+    val allowJoinNotifications: Boolean = true
 ) {
     val participantCount: Int get() = participants.size
     val isFull: Boolean get() = participants.size >= maxParticipants
@@ -35,7 +36,8 @@ data class VoiceRoom(
         "maxParticipants" to maxParticipants,
         "isPublic" to isPublic,
         "createdAt" to createdAt,
-        "category" to category.name
+        "category" to category.name,
+        "allowJoinNotifications" to allowJoinNotifications
     )
 
     companion object {
@@ -51,7 +53,8 @@ data class VoiceRoom(
             maxParticipants = (map["maxParticipants"] as? Long)?.toInt() ?: 10,
             isPublic = map["isPublic"] as? Boolean ?: true,
             createdAt = map["createdAt"] as? Long ?: 0L,
-            category = RoomCategory.valueOf(map["category"] as? String ?: "CASUAL")
+            category = RoomCategory.valueOf(map["category"] as? String ?: "CASUAL"),
+            allowJoinNotifications = map["allowJoinNotifications"] as? Boolean ?: true
         )
     }
 }

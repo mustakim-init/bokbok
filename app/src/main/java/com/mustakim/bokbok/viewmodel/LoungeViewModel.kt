@@ -138,25 +138,13 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
                     error = null
                 )
             }
-
             val result = repository.getActiveRooms()
             result.fold(
                 onSuccess = { rooms ->
                     viewModelScope.launch {
-                        // Fetch presence counts in parallel
-                        val enriched = rooms.map { room ->
-                            async {
-                                val online = try {
-                                    presenceRepository.getOnlineCount(room.id)
-                                } catch (_: Exception) {
-                                    0
-                                }
-                                room.copy(currentOnline = online)
-                            }
-                        }.map { it.await() }
-
+                        // 🎤 CHANGED: Use helper function
+                        val enriched = enrichWithOnlineCounts(rooms)
                         val totalOnline = enriched.sumOf { it.currentOnline }
-
                         _uiState.update {
                             it.copy(
                                 publicRooms = enriched,
@@ -187,13 +175,15 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadMyRoomsFromFirestore() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-
             val result = repository.getMyRooms()
             result.fold(
                 onSuccess = { rooms ->
+                    // 🎤 CHANGED: Fetch online counts
+                    val enriched = enrichWithOnlineCounts(rooms)
+
                     _uiState.update {
                         it.copy(
-                            myRooms = rooms,
+                            myRooms = enriched,
                             isLoading = false
                         )
                     }
@@ -210,6 +200,18 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private suspend fun enrichWithOnlineCounts(rooms: List<VoiceRoom>): List<VoiceRoom> {
+        return rooms.map { room ->
+            viewModelScope.async {
+                val online = try {
+                    presenceRepository.getOnlineCount(room.id)
+                } catch (_: Exception) {
+                    0
+                }
+                room.copy(currentOnline = online)
+            }
+        }.map { it.await() }
+    }
 
 
     // ✅ Pull-to-refresh function

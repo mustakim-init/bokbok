@@ -274,17 +274,17 @@ class PresenceRepository {
     fun broadcastJoinEvent(roomId: String, userId: String, userName: String) {
         val eventsRef = db.getReference("rooms").child(roomId).child("events").child("joins")
         val timestamp = System.currentTimeMillis()
-
         val eventData = mapOf(
             "userId" to userId,
             "userName" to userName,
             "timestamp" to timestamp
         )
-
         // Write the event
-        eventsRef.child(timestamp.toString()).setValue(eventData)
-
-        // Auto-cleanup: Remove events older than 10 seconds
+        val newEventRef = eventsRef.child(timestamp.toString())
+        newEventRef.setValue(eventData)
+        // 🎤 NEW: Remove this event automatically if we disconnect/crash
+        newEventRef.onDisconnect().removeValue()
+        // Auto-cleanup: Remove events older than 10 seconds (Keep this for general hygiene)
         eventsRef.orderByChild("timestamp")
             .endBefore((timestamp - 10000).toDouble())
             .addListenerForSingleValueEvent(object : ValueEventListener {
@@ -300,22 +300,25 @@ class PresenceRepository {
      */
     fun observeJoinEvents(
         roomId: String,
+        startTime: Long, // 🎤 NEW: Pass start time to filter old events
         onEvent: (userId: String, userName: String) -> Unit
     ): ChildEventListener {
         val eventsRef = db.getReference("rooms").child(roomId).child("events").child("joins")
-
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 val userId = snapshot.child("userId").getValue(String::class.java) ?: return
                 val userName = snapshot.child("userName").getValue(String::class.java) ?: return
-                onEvent(userId, userName)
+                val timestamp = snapshot.child("timestamp").getValue(Long::class.java) ?: 0L
+                // 🎤 NEW: Only trigger if event happened AFTER we started listening
+                if (timestamp > startTime) {
+                    onEvent(userId, userName)
+                }
             }
             override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
             override fun onChildRemoved(snapshot: DataSnapshot) {}
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
             override fun onCancelled(error: DatabaseError) {}
         }
-
         eventsRef.addChildEventListener(listener)
         return listener
     }

@@ -123,6 +123,8 @@ class VoiceService : Service() {
     private var currentSelfId: String? = null
     private var audioRouter: AudioRouteController? = null
 
+    private val remoteVolumes = mutableMapOf<String, Double>()
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -171,6 +173,8 @@ class VoiceService : Service() {
                 val userId = intent.getStringExtra(EXTRA_REMOTE_ID)
                 val volume = intent.getDoubleExtra(EXTRA_VOLUME, 1.0)
                 if (userId != null) {
+                    // 🎤 NEW: Cache the volume
+                    remoteVolumes[userId] = volume
                     client?.setRemoteVolume(userId, volume)
                 }
             }
@@ -184,14 +188,14 @@ class VoiceService : Service() {
         currentRoomId = roomId
         currentSelfId = selfId
 
+        // Clear volume cache on new call
+        remoteVolumes.clear()
         com.mustakim.bokbok.state.ConnectionStateManager.clear()
-
         audioRouter = audioRouter ?: AudioRouteController(applicationContext)
         audioRouter?.start(
             defaultToSpeaker = true,
             ducking = true
         )
-
         signaling = RealtimeSignaling(roomId, selfId)
         client = WebRTCClient(
             context = applicationContext,
@@ -210,9 +214,18 @@ class VoiceService : Service() {
                     com.mustakim.bokbok.state.ConnectionStateManager.markDisconnected(remoteId)
                 }
             }
+
+            // 🎤 NEW: Listen for new tracks and re-apply volume
+            webrtc.onRemoteAudioTrackAdded = { remoteId ->
+                val cachedVolume = remoteVolumes[remoteId]
+                if (cachedVolume != null) {
+                    Log.d(tag, "Restoring volume for $remoteId: $cachedVolume")
+                    webrtc.setRemoteVolume(remoteId, cachedVolume)
+                }
+            }
+
             webrtc.connect()
         }
-
         Log.d(tag, "VoiceService started call room=$roomId self=$selfId (RTDB signaling)")
     }
 

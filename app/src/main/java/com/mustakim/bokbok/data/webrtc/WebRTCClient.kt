@@ -101,6 +101,8 @@ class WebRTCClient(
         optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
         optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
         optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
+        // [OPTIMIZATION] Disable keyboard detection (saves CPU)
+        optional.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
     }
 
     fun connect() {
@@ -642,8 +644,12 @@ class WebRTCClient(
             pc.createOffer(object : SimpleSdpObserver() {
                 override fun onCreateSuccess(sessionDescription: SessionDescription?) {
                     sessionDescription?.let {
-                        pc.setLocalDescription(SimpleSdpObserver(), it)
-                        signalingBackend.sendOffer(remoteId, it.description)
+                        // [NEW] Optimize SDP
+                        val optimizedSdp = optimizeSdp(it.description)
+                        val optimizedDesc = SessionDescription(it.type, optimizedSdp)
+
+                        pc.setLocalDescription(SimpleSdpObserver(), optimizedDesc)
+                        signalingBackend.sendOffer(remoteId, optimizedDesc.description)
                     }
                 }
             }, constraints)
@@ -687,9 +693,13 @@ class WebRTCClient(
         pc.createOffer(object : SimpleSdpObserver() {
             override fun onCreateSuccess(sessionDescription: SessionDescription?) {
                 sessionDescription?.let {
-                    pc.setLocalDescription(SimpleSdpObserver(), it)
-                    signalingBackend.sendOffer(remoteId, it.description)
-                    Log.d(tag, "Offer sent to $remoteId")
+                    // [NEW] Optimize SDP
+                    val optimizedSdp = optimizeSdp(it.description)
+                    val optimizedDesc = SessionDescription(it.type, optimizedSdp)
+
+                    pc.setLocalDescription(SimpleSdpObserver(), optimizedDesc)
+                    signalingBackend.sendOffer(remoteId, optimizedDesc.description)
+                    Log.d(tag, "Offer sent to $remoteId (Optimized: 32kbps + DTX + 20ms)")
                 }
             }
             
@@ -729,8 +739,12 @@ class WebRTCClient(
                 pc.createAnswer(object : SimpleSdpObserver() {
                     override fun onCreateSuccess(sessionDescription: SessionDescription?) {
                         sessionDescription?.let {
-                            pc.setLocalDescription(SimpleSdpObserver(), it)
-                            signalingBackend.sendAnswer(from, it.description)
+                            // [NEW] Optimize SDP
+                            val optimizedSdp = optimizeSdp(it.description)
+                            val optimizedDesc = SessionDescription(it.type, optimizedSdp)
+
+                            pc.setLocalDescription(SimpleSdpObserver(), optimizedDesc)
+                            signalingBackend.sendAnswer(from, optimizedDesc.description)
                         }
                     }
                 }, audioConstraints)
@@ -797,6 +811,58 @@ class WebRTCClient(
             }
         }
         handler.postDelayed(runnable, 5000)
+    }
+
+    private fun optimizeSdp(sdp: String): String {
+        val lines = sdp.split("\r\n").toMutableList()
+        val rtpMapRegex = Regex("^a=rtpmap:(\\d+) opus/48000/2")
+        var opusPayloadType: String? = null
+
+        // 1. Find Opus Payload Type
+        for (line in lines) {
+            val match = rtpMapRegex.find(line)
+            if (match != null) {
+                opusPayloadType = match.groupValues[1]
+                break
+            }
+        }
+
+        if (opusPayloadType == null) return sdp
+
+        // 2. Find or Create fmtp line
+        val fmtpRegex = Regex("^a=fmtp:$opusPayloadType (.*)")
+        var fmtpIndex = -1
+
+        for (i in lines.indices) {
+            if (fmtpRegex.matches(lines[i])) {
+                fmtpIndex = i
+                break
+            }
+        }
+
+        // 3. Inject Parameters
+        // maxaveragebitrate=32000 -> Good quality, low data
+        // usedtx=1 -> Silence suppression (Battery Saver)
+        // stereo=0 -> Mono audio (Data Saver)
+        val params = ";maxaveragebitrate=32000;usedtx=1;stereo=0"
+
+        if (fmtpIndex != -1) {
+            // Append to existing line
+            val currentLine = lines[fmtpIndex]
+            if (!currentLine.contains("maxaveragebitrate")) {
+                lines[fmtpIndex] = currentLine + params
+            }
+        } else {
+            // Insert new line after rtpmap
+            // minptime=20 -> 20ms packets (Standard VoIP).
+            // More efficient than 10ms (less header overhead, less CPU interrupts).
+            val rtpMapIndex = lines.indexOfFirst { it.startsWith("a=rtpmap:$opusPayloadType") }
+            if (rtpMapIndex != -1) {
+                lines.add(rtpMapIndex + 1, "a=fmtp:$opusPayloadType minptime=20;useinbandfec=1$params")
+            }
+        }
+
+        return lines.joinToString("\r\n")
     }
 
     // Stats

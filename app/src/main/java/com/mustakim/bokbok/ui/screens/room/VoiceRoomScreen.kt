@@ -84,18 +84,25 @@ fun VoiceRoomScreen(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.all { it.value }) {
-            uiState.room?.let { viewModel.startCallEngine(it.id) }
+            // Permission granted, NOW load the room
+            viewModel.loadRoom(roomId)
         } else {
             viewModel.onPermissionDenied()
         }
     }
-    LaunchedEffect(roomId) { viewModel.loadRoom(roomId) }
-    LaunchedEffect(uiState.room) {
-        val room = uiState.room ?: return@LaunchedEffect
+    // Check permission first, THEN initiate the room
+    LaunchedEffect(roomId) {
         if (viewModel.hasRequiredCallPermissions()) {
-            viewModel.startCallEngine(room.id)
+            viewModel.loadRoom(roomId)
         } else {
             permissionLauncher.launch(viewModel.getRequiredPermissions())
+        }
+    }
+    LaunchedEffect(uiState.room) {
+        val room = uiState.room ?: return@LaunchedEffect
+        // We should have permissions by now, but safe to check
+        if (viewModel.hasRequiredCallPermissions()) {
+            viewModel.startCallEngine(room.id)
         }
     }
     val view = LocalView.current

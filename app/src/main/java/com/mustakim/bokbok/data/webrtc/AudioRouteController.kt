@@ -335,14 +335,19 @@ class AudioRouteController(private val context: Context) {
                     }
                 } else {
                     // SCO: headset profile, headset mic
+                    // Fix: Apple AirPods and some other devices might appear as A2DP or BLE
+                    // initially. We should accept them and let setCommunicationDevice handle the switch.
                     val btDevice = devices.firstOrNull {
-                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
                     }
+
                     if (btDevice != null) {
                         am.setCommunicationDevice(btDevice)
-                        Log.d(tag, "✅ Routed to Bluetooth SCO (headset mic)")
+                        Log.d(tag, "✅ Routed to Bluetooth (SCO/A2DP/BLE) - type: ${btDevice.type}")
                     } else {
-                        Log.w(tag, "No Bluetooth SCO device found")
+                        Log.w(tag, "No Bluetooth device found for SCO")
                         routeToSpeakerOnly()
                     }
                 }
@@ -519,9 +524,15 @@ class AudioRouteController(private val context: Context) {
                 Log.d(tag, "Bluetooth disabled")
                 return false
             }
-            val profileState =
-                adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET)
-            profileState == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+
+            // Check both HEADSET (SCO) and A2DP (Media) profiles
+            val headsetProfile = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET)
+            val a2dpProfile = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP)
+
+            val isConnected = headsetProfile == android.bluetooth.BluetoothProfile.STATE_CONNECTED ||
+                    a2dpProfile == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+
+            isConnected
         } catch (e: SecurityException) {
             Log.w(tag, "SecurityException checking Bluetooth: ${e.message}")
             false

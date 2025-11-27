@@ -59,6 +59,7 @@ fun VoiceControlsSheet(
     isMuted: Boolean,
     isSpeakerOn: Boolean,
     isA2dpModeOn: Boolean,
+    isHighQuality: Boolean,
     micVolume: Float,
     outputVolume: Float,
     expansionFraction: Float,
@@ -68,6 +69,7 @@ fun VoiceControlsSheet(
     onOpenChat: () -> Unit,
     onOpenVoiceEffects: () -> Unit,
     onToggleAudioMode: () -> Unit,
+    onToggleQuality: () -> Unit,
     onMoreClick: () -> Unit,
     onLeaveRoom: () -> Unit,
     onMicVolumeChange: (Float) -> Unit,
@@ -276,6 +278,35 @@ fun VoiceControlsSheet(
                                 onToggle = onToggleAudioMode
                             )
                         }
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Audio Quality",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isHighQuality)
+                                        "High (64kbps Stereo)"
+                                    else
+                                        "Low (32kbps Mono)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            QualityModeToggle(
+                                isHighQuality = isHighQuality,
+                                onToggle = onToggleQuality
+                            )
+                        }
                     }
                 }
             }
@@ -359,6 +390,28 @@ private fun RowScope.VoiceControlButton(
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun QualityModeToggle(
+    isHighQuality: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ModeChip(
+            label = "Low",
+            selected = !isHighQuality,
+            onClick = { if (isHighQuality) onToggle() }
+        )
+        ModeChip(
+            label = "High",
+            selected = isHighQuality,
+            onClick = { if (!isHighQuality) onToggle() }
         )
     }
 }

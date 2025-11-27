@@ -42,6 +42,18 @@ class VoiceService : Service() {
         const val ACTION_SET_A2DP_MODE = "bokbok.voice.SET_A2DP_MODE"
         const val EXTRA_A2DP_ON = "a2dpOn"
 
+        const val ACTION_SET_QUALITY_MODE = "bokbok.voice.SET_QUALITY_MODE"
+        const val EXTRA_HIGH_QUALITY = "highQuality"
+
+
+        fun setQualityMode(context: Context, highQuality: Boolean) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_QUALITY_MODE
+                putExtra(EXTRA_HIGH_QUALITY, highQuality)
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
+
         fun start(context: Context, roomId: String, selfId: String) {
             val i = Intent(context, VoiceService::class.java).apply {
                 action = ACTION_START
@@ -184,6 +196,10 @@ class VoiceService : Service() {
                     remoteVolumes[userId] = volume
                     client?.setRemoteVolume(userId, volume)
                 }
+            }
+            ACTION_SET_QUALITY_MODE -> {
+                val highQuality = intent.getBooleanExtra(EXTRA_HIGH_QUALITY, true)
+                client?.setHighQuality(highQuality)
             }
         }
         return START_STICKY

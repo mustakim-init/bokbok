@@ -93,18 +93,38 @@ class WebRTCClient(
     private val statsHandler = Handler(Looper.getMainLooper())
     private var statsPolling = false
 
-    private val audioConstraints = MediaConstraints().apply {
-        mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
-        optional.add(MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"))
-        optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-        optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-        optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-        optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
-        optional.add(MediaConstraints.KeyValuePair("googAudioMirroring", "false"))
-        optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
-        // [OPTIMIZATION] Disable keyboard detection (saves CPU)
-        optional.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
-    }
+    private var isHighQuality: Boolean = true
+
+    private val audioConstraints: MediaConstraints
+        get() {
+            val constraints = MediaConstraints()
+            // Always offer to receive audio
+            constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+            constraints.optional.add(MediaConstraints.KeyValuePair("DtlsSrtpKeyAgreement", "true"))
+
+            // 🛑 FIX: Only disable processing if A2DP is requested AND a headset is connected.
+            // If on Speakerphone, we MUST have AEC enabled.
+            val effectiveA2dpMode = isA2dpMode && isHeadsetConnected()
+
+            if (effectiveA2dpMode) {
+                // 🎵 A2DP MODE: DISABLE ALL PROCESSING for high quality
+                constraints.optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "false"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
+            } else {
+                // 📞 CALL MODE: ENABLE PROCESSING for clear voice
+                constraints.optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googDAEchoCancellation", "true"))
+                constraints.optional.add(MediaConstraints.KeyValuePair("googTypingNoiseDetection", "false"))
+            }
+            return constraints
+        }
 
     fun connect() {
         Log.d(tag, "connect() called for selfId=$selfId roomId=$roomId")
@@ -154,8 +174,10 @@ class WebRTCClient(
         val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
-        // 🎤 CHANGED: Configure Audio Attributes based on mode
-        val audioAttributes = if (isA2dpMode) {
+        // 🛑 FIX: Fallback to Voice Communication if no headset is connected, even if A2DP is preferred.
+        val effectiveA2dpMode = isA2dpMode && isHeadsetConnected()
+
+        val audioAttributes = if (effectiveA2dpMode) {
             android.media.AudioAttributes.Builder()
                 .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -166,13 +188,13 @@ class WebRTCClient(
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         }
-        Log.d(tag, "Initializing ADM with A2DP Mode=$isA2dpMode (Usage=${audioAttributes.usage})")
+        Log.d(tag, "Initializing ADM with A2DP Pref=$isA2dpMode, Effective=$effectiveA2dpMode")
 
         // 🎤 CHANGED: Assign to class property
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
-            .setAudioAttributes(audioAttributes) // <--- Pass attributes here
-            .setUseHardwareAcousticEchoCanceler(true)
-            .setUseHardwareNoiseSuppressor(true)
+            .setAudioAttributes(audioAttributes)
+            .setUseHardwareAcousticEchoCanceler(!effectiveA2dpMode) // Enable AEC if NOT in effective A2DP mode
+            .setUseHardwareNoiseSuppressor(!effectiveA2dpMode)      // Enable NS if NOT in effective A2DP mode
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
                 override fun onWebRtcAudioRecordError(errorMessage: String?) {
                     Log.e(tag, "Audio Record Error: $errorMessage")
@@ -409,6 +431,29 @@ class WebRTCClient(
 
     fun setRemoteVolume(remoteUserId: String, volume: Double) {
         remoteAudioTracks[remoteUserId]?.setVolume(volume)
+    }
+
+    private fun isHeadsetConnected(): Boolean {
+        return try {
+            val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                devices.any {
+                    it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            it.type == android.media.AudioDeviceInfo.TYPE_USB_HEADSET
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                am.isWiredHeadsetOn || am.isBluetoothA2dpOn || am.isBluetoothScoOn
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "Error checking headset state: ${e.message}")
+            false // Fail safe: assume no headset -> Force AEC ON
+        }
     }
 
     fun disconnectFrom(remoteUserId: String) {
@@ -791,6 +836,17 @@ class WebRTCClient(
         pendingRemoteCandidates[remoteId]?.forEach { pc.addIceCandidate(it) }
         pendingRemoteCandidates.remove(remoteId)
     }
+
+    fun setHighQuality(enabled: Boolean) {
+        if (isHighQuality == enabled) return
+        isHighQuality = enabled
+        Log.d(tag, "Setting Quality Mode: ${if (enabled) "HIGH (64kbps Stereo)" else "LOW (32kbps Mono)"}")
+
+        // Trigger renegotiation to apply new SDP params
+        peerConnections.keys.forEach { remoteId ->
+            restartIceConnection(remoteId) // Re-uses existing logic to send new Offer
+        }
+    }
     
     private fun startMinimalHealthCheck() {
         val handler = Handler(Looper.getMainLooper())
@@ -850,10 +906,15 @@ class WebRTCClient(
         }
 
         // 3. Inject Parameters
-        // maxaveragebitrate=32000 -> Good quality, low data
-        // usedtx=1 -> Silence suppression (Battery Saver)
-        // stereo=0 -> Mono audio (Data Saver)
-        val params = ";maxaveragebitrate=32000;usedtx=1;stereo=0"
+        // REMOVED: usedtx=1 (Causes breaking up if VAD is too aggressive)
+        // REMOVED: cbr=0 (Variable bitrate can sometimes cause jitter on unstable nets)
+        val params = if (isHighQuality) {
+            // 🌟 HIGH QUALITY: 64kbps Stereo
+            ";maxaveragebitrate=64000;stereo=1;sprop-stereo=1"
+        } else {
+            // 📉 LOW QUALITY: 32kbps Mono, robust
+            ";maxaveragebitrate=32000;stereo=0"
+        }
 
         if (fmtpIndex != -1) {
             // Append to existing line
@@ -863,8 +924,8 @@ class WebRTCClient(
             }
         } else {
             // Insert new line after rtpmap
-            // minptime=20 -> 20ms packets (Standard VoIP).
-            // More efficient than 10ms (less header overhead, less CPU interrupts).
+            // minptime=20 -> Standard 20ms packets
+            // useinbandfec=1 -> Forward Error Correction (Helps with packet loss)
             val rtpMapIndex = lines.indexOfFirst { it.startsWith("a=rtpmap:$opusPayloadType") }
             if (rtpMapIndex != -1) {
                 lines.add(rtpMapIndex + 1, "a=fmtp:$opusPayloadType minptime=20;useinbandfec=1$params")

@@ -199,6 +199,7 @@ fun VoiceRoomScreen(
                         isMuted = uiState.isMuted,
                         isSpeakerOn = uiState.isSpeakerOn,
                         isA2dpModeOn = uiState.isA2dpModeOn,
+                        isHighQuality = uiState.isHighQuality,
                         micVolume = uiState.micVolume,
                         outputVolume = uiState.outputVolume,
                         onMicVolumeChange = viewModel::setMicVolume,
@@ -210,6 +211,7 @@ fun VoiceRoomScreen(
                         onOpenChat = { /* TODO */ },
                         onOpenVoiceEffects = { /* TODO */ },
                         onToggleAudioMode = viewModel::toggleA2dpMode,
+                        onToggleQuality = viewModel::toggleQualityMode,
                         onMoreClick = { showSettingsSheet = true },
                         onLeaveRoom = {
                             viewModel.leaveRoom()

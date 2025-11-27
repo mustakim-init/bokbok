@@ -275,8 +275,32 @@ class AudioRouteController(private val context: Context) {
     private fun applyAudioRouting() {
         val am = audioManager
         try {
+            val isBtConnected = isBluetoothAudioConnected()
+
+            // 1. Dynamic Mode Switching
+            // If A2DP is requested but NO Bluetooth is connected, fallback to Communication mode
+            // so the user retains standard "Call Volume" control on speaker/earpiece.
+            if (useA2dpMode) {
+                if (isBtConnected) {
+                    if (am.mode != AudioManager.MODE_NORMAL) {
+                        am.mode = AudioManager.MODE_NORMAL
+                        Log.d(tag, "Switched to MODE_NORMAL (A2DP active)")
+                    }
+                } else {
+                    if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                        am.mode = AudioManager.MODE_IN_COMMUNICATION
+                        Log.d(tag, "Fallback to MODE_IN_COMMUNICATION (A2DP on but no device)")
+                    }
+                }
+            } else {
+                if (am.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                    am.mode = AudioManager.MODE_IN_COMMUNICATION
+                }
+            }
+
+            // 2. Routing Logic
             when {
-                isBluetoothAudioConnected() -> {
+                isBtConnected -> {
                     Log.d(tag, "🎧 Routing to Bluetooth")
                     routeToBluetoothOnly()
                 }
@@ -300,22 +324,6 @@ class AudioRouteController(private val context: Context) {
                     }
                 }
             }
-
-            // Safety check: make sure mode is still correct
-            mainHandler.postDelayed({
-                try {
-                    val mode = am.mode
-                    if (!useA2dpMode &&
-                        mode != AudioManager.MODE_IN_COMMUNICATION &&
-                        mode != AudioManager.MODE_IN_CALL
-                    ) {
-                        Log.w(tag, "⚠️ Audio mode corrupted during routing, restoring IN_COMMUNICATION")
-                        am.mode = AudioManager.MODE_IN_COMMUNICATION
-                    }
-                } catch (e: Exception) {
-                    Log.e(tag, "Failed to restore audio mode after routing", e)
-                }
-            }, 300)
         } catch (e: Exception) {
             Log.e(tag, "❌ Audio routing failed", e)
         }

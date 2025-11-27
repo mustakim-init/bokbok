@@ -190,7 +190,7 @@ class FriendsRepository(
         }
         userStatusRef.addValueEventListener(statusListener)
 
-        // ✅ Firestore listener: friendships + user profiles
+        // ✅ Firestore listener: friendships + user profiles (OPTIMIZED)
         val listener: ListenerRegistration = friendshipsCollection
             .where(
                 com.google.firebase.firestore.Filter.or(
@@ -208,15 +208,23 @@ class FriendsRepository(
                 val friendships = snapshot?.toObjects(Friendship::class.java) ?: emptyList()
 
                 CoroutineScope(Dispatchers.IO).launch {
+                    // 1. Collect all friend IDs
+                    val friendIds = friendships.map { it.getOtherUserId(currentUserId) }
+
+                    // 2. Batch fetch profiles (uses cache internally)
+                    val profiles = userRepository.getUserProfiles(friendIds)
+                    val profilesMap = profiles.associateBy { it.uid }
+
+                    // 3. Map back to FriendWithUser
                     val newBase = friendships.mapNotNull { friendship ->
                         val friendId = friendship.getOtherUserId(currentUserId)
-                        val user = userRepository.getUserProfile(friendId).getOrNull()
+                        val user = profilesMap[friendId]
                         user?.let {
                             FriendWithUser(
                                 friendship = friendship,
                                 user = it,
-                                isOnline = false,       // status comes from RTDB
-                                currentRoomId = null    // filled from RTDB
+                                isOnline = false,
+                                currentRoomId = null
                             )
                         }
                     }

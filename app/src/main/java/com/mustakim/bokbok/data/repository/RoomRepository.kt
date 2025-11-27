@@ -14,6 +14,9 @@ class RoomRepository {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private val roomsCollection = firestore.collection("rooms")
+    // ✅ NEW: Simple in-memory cache
+    private val roomCache = java.util.concurrent.ConcurrentHashMap<String, Pair<VoiceRoom, Long>>()
+    private val CACHE_TTL = 2 * 60 * 1000L // 2 minutes
 
     /**
      * Load active rooms from Firestore.
@@ -109,13 +112,24 @@ class RoomRepository {
     }
 
     /**
-     * Load a single room by id.
+     * Load a single room by id (With Caching)
      */
     suspend fun getRoom(roomId: String): Result<VoiceRoom> {
+        // 1. Check cache
+        val cached = roomCache[roomId]
+        if (cached != null && (System.currentTimeMillis() - cached.second) < CACHE_TTL) {
+            return Result.success(cached.first)
+        }
+
+        // 2. Fetch from network
         return try {
             val doc = roomsCollection.document(roomId).get().await()
             val data = doc.data ?: return Result.failure(Exception("Room not found"))
             val room = VoiceRoom.fromMap(data)
+
+            // 3. Update cache
+            roomCache[roomId] = room to System.currentTimeMillis()
+
             Result.success(room)
         } catch (e: Exception) {
             Result.failure(e)
@@ -132,6 +146,9 @@ class RoomRepository {
             roomsCollection.document(roomId)
                 .update("participants", FieldValue.arrayUnion(*userIds.toTypedArray()))
                 .await()
+            // ✅ NEW: Invalidate cache
+            roomCache.remove(roomId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -150,6 +167,9 @@ class RoomRepository {
                 .update("participants", FieldValue.arrayUnion(currentUser.uid))
                 .await()
 
+            // ✅ NEW: Invalidate cache
+            roomCache.remove(roomId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -167,6 +187,9 @@ class RoomRepository {
             roomsCollection.document(roomId)
                 .update("participants", FieldValue.arrayRemove(currentUser.uid))
                 .await()
+
+            // ✅ NEW: Invalidate cache
+            roomCache.remove(roomId)
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -215,6 +238,10 @@ class RoomRepository {
             }
 
             roomsCollection.document(roomId).update(updates).await()
+
+            // ✅ Invalidate cache so next fetch gets fresh data
+            roomCache.remove(roomId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -240,6 +267,10 @@ class RoomRepository {
             roomsCollection.document(roomId)
                 .update("participants", FieldValue.arrayRemove(userId))
                 .await()
+
+            // ✅ NEW: Invalidate cache
+            roomCache.remove(roomId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

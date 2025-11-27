@@ -32,7 +32,8 @@ class WebRTCClient(
     context: Context,
     private val signalingBackend: SignalingBackend,
     private val selfId: String,
-    private val roomId: String
+    private val roomId: String,
+    private val isA2dpMode: Boolean = false
 ) {
     private val tag = "WebRTCClient"
     private val appContext: Context = context.applicationContext
@@ -138,17 +139,9 @@ class WebRTCClient(
     }
 
     private fun setupAudioManager() {
-        audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        audioManager?.let { am ->
-            savedAudioMode = am.mode
-            savedIsMicrophoneMute = am.isMicrophoneMute
-            savedIsSpeakerphoneOn = am.isSpeakerphoneOn
-
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
-            am.isSpeakerphoneOn = true
-            am.isMicrophoneMute = false
-            Log.d(tag, "AudioManager configured: MODE_IN_COMMUNICATION")
-        }
+        // 🎤 CHANGED: Defer audio mode management to AudioRouteController.
+        // WebRTCClient should not force MODE_IN_COMMUNICATION as it breaks A2DP mode.
+        Log.d(tag, "setupAudioManager: Delegating to AudioRouteController")
     }
 
     private fun initPeerConnectionFactory() {
@@ -160,8 +153,24 @@ class WebRTCClient(
         PeerConnectionFactory.initialize(options)
         val encoderFactory = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
+
+        // 🎤 CHANGED: Configure Audio Attributes based on mode
+        val audioAttributes = if (isA2dpMode) {
+            android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+        } else {
+            android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        }
+        Log.d(tag, "Initializing ADM with A2DP Mode=$isA2dpMode (Usage=${audioAttributes.usage})")
+
         // 🎤 CHANGED: Assign to class property
         audioDeviceModule = JavaAudioDeviceModule.builder(appContext)
+            .setAudioAttributes(audioAttributes) // <--- Pass attributes here
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {

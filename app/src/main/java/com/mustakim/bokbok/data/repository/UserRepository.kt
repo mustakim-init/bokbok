@@ -19,15 +19,32 @@ class UserRepository(private val context: Context) {
     private val firestore = FirebaseFirestore.getInstance()
     private val imgBBApi = ImgBBApi.create()
 
+    // ✅ NEW: Simple in-memory cache
+    private data class CachedUser(
+        val user: User,
+        val timestamp: Long
+    )
+    private val profileCache = java.util.concurrent.ConcurrentHashMap<String, CachedUser>()
+    private val CACHE_TTL = 5 * 60 * 1000L // 5 minutes
+
     private val usersCollection = firestore.collection("users")
 
     fun getCurrentUserId(): String? = auth.currentUser?.uid
 
     suspend fun getUserProfile(userId: String): Result<User> {
+        // 1. Check cache
+        val cached = profileCache[userId]
+        if (cached != null && (System.currentTimeMillis() - cached.timestamp) < CACHE_TTL) {
+            return Result.success(cached.user)
+        }
+
+        // 2. Fetch from network
         return try {
             val doc = usersCollection.document(userId).get().await()
             if (doc.exists()) {
                 val user = User.fromMap(doc.data ?: emptyMap())
+                // 3. Update cache
+                profileCache[userId] = CachedUser(user, System.currentTimeMillis())
                 Result.success(user)
             } else {
                 Result.failure(Exception("User not found"))
@@ -37,9 +54,48 @@ class UserRepository(private val context: Context) {
         }
     }
 
+    // ✅ NEW: Batch fetch method (Optimized)
+    suspend fun getUserProfiles(userIds: List<String>): List<User> {
+        val uniqueIds = userIds.distinct()
+        val resultList = mutableListOf<User>()
+        val idsToFetch = mutableListOf<String>()
+        val now = System.currentTimeMillis()
+
+        // 1. Get valid cached users
+        uniqueIds.forEach { id ->
+            val cached = profileCache[id]
+            if (cached != null && (now - cached.timestamp) < CACHE_TTL) {
+                resultList.add(cached.user)
+            } else {
+                idsToFetch.add(id)
+            }
+        }
+
+        // 2. Batch fetch missing users (Firestore limits 'in' queries to 10)
+        if (idsToFetch.isNotEmpty()) {
+            // Chunk into groups of 10
+            idsToFetch.chunked(10).forEach { chunk ->
+                try {
+                    val snapshot = usersCollection.whereIn("uid", chunk).get().await()
+                    snapshot.documents.forEach { doc ->
+                        val user = User.fromMap(doc.data ?: emptyMap())
+                        profileCache[user.uid] = CachedUser(user, now)
+                        resultList.add(user)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        return resultList
+    }
+
     suspend fun updateUserProfile(userId: String, updates: Map<String, Any>): Result<Unit> {
         return try {
             usersCollection.document(userId).update(updates).await()
+            // Invalidate cache on update
+            profileCache.remove(userId)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -82,6 +138,9 @@ class UserRepository(private val context: Context) {
                     .update("profileImageUrl", imageUrl)
                     .await()
 
+                // ✅ NEW: Invalidate cache
+                profileCache.remove(userId)
+
                 Result.success(imageUrl)
             } else {
                 Result.failure(Exception("Failed to upload image"))
@@ -97,6 +156,10 @@ class UserRepository(private val context: Context) {
             usersCollection.document(userId)
                 .update("profileImageUrl", "")
                 .await()
+
+            // ✅ NEW: Invalidate cache
+            profileCache.remove(userId)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

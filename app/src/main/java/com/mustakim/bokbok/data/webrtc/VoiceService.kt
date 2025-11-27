@@ -16,6 +16,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.R
 import android.net.wifi.WifiManager
+import com.google.firebase.database.ValueEventListener
+import com.mustakim.bokbok.data.repository.PresenceRepository
 
 class VoiceService : Service() {
 
@@ -125,6 +127,11 @@ class VoiceService : Service() {
 
     private val remoteVolumes = mutableMapOf<String, Double>()
 
+    // [NEW] Presence Management in Service
+    private val presenceRepository = PresenceRepository()
+    private var presenceListener: ValueEventListener? = null
+    private var previousParticipantIds = emptySet<String>()
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -194,6 +201,7 @@ class VoiceService : Service() {
         audioRouter = audioRouter ?: AudioRouteController(applicationContext)
         audioRouter?.start(
             defaultToSpeaker = true,
+            useA2dp = true,
             ducking = true
         )
         signaling = RealtimeSignaling(roomId, selfId)
@@ -201,7 +209,8 @@ class VoiceService : Service() {
             context = applicationContext,
             signalingBackend = signaling!!,
             selfId = selfId,
-            roomId = roomId
+            roomId = roomId,
+            isA2dpMode = audioRouter?.isA2dpModeEnabled() ?: true // <--- Pass the mode here
         ).also { webrtc ->
             webrtc.onSpeakingStateChanged = { speakingMap ->
                 val speakingIds = speakingMap.filterValues { it }.keys.toSet()
@@ -226,10 +235,17 @@ class VoiceService : Service() {
 
             webrtc.connect()
         }
+
+        // [NEW] Start monitoring presence for auto-connection
+        startPresenceObservation(roomId, selfId)
+
         Log.d(tag, "VoiceService started call room=$roomId self=$selfId (RTDB signaling)")
     }
 
     private fun stopCall() {
+        // [NEW] Stop monitoring presence
+        stopPresenceObservation()
+
         try {
             client?.disconnect()
         } catch (_: Exception) { }
@@ -242,6 +258,48 @@ class VoiceService : Service() {
         audioRouter = null
 
         Log.d(tag, "VoiceService stopped call")
+    }
+
+    // [NEW] Presence Logic
+    private fun startPresenceObservation(roomId: String, selfId: String) {
+        stopPresenceObservation() // Safety check
+        previousParticipantIds = emptySet()
+
+        presenceListener = presenceRepository.observeRoomPresence(
+            roomId = roomId,
+            onChange = { currentIds ->
+                // Calculate diff
+                val newIds = currentIds.filter { it != selfId && !previousParticipantIds.contains(it) }
+                val removedIds = previousParticipantIds.filter { it != selfId && !currentIds.contains(it) }
+
+                // Auto-Connect
+                if (newIds.isNotEmpty()) {
+                    Log.d(tag, "Presence: Found new peers: $newIds")
+                    newIds.forEach { id -> client?.createConnectionTo(id) }
+                }
+
+                // Auto-Disconnect
+                if (removedIds.isNotEmpty()) {
+                    Log.d(tag, "Presence: Peers removed: $removedIds")
+                    removedIds.forEach { id -> client?.disconnectFrom(id) }
+                }
+
+                previousParticipantIds = currentIds
+            },
+            onError = { e ->
+                Log.e(tag, "Presence observation failed: ${e.message}")
+            }
+        )
+    }
+
+    private fun stopPresenceObservation() {
+        presenceListener?.let {
+            currentRoomId?.let { roomId ->
+                presenceRepository.removePresenceListener(roomId, it)
+            }
+        }
+        presenceListener = null
+        previousParticipantIds = emptySet()
     }
 
     private fun startAsForeground() {

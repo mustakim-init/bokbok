@@ -139,10 +139,6 @@ class AudioRouteController(private val context: Context) {
 
     /**
      * Start audio routing for call.
-     * - Requests audio focus
-     * - Sets MODE_IN_COMMUNICATION (or NORMAL for A2DP mode)
-     * - Forces speaker as default route
-     * - Registers headset/Bluetooth/SCO receivers
      */
     fun start(
         defaultToSpeaker: Boolean = true,
@@ -172,13 +168,22 @@ class AudioRouteController(private val context: Context) {
             Log.w(tag, "Failed to set audio mode: ${e.message}")
         }
 
-        // Default route: speaker, system will route to headsets if present
-        forceSpeakerAsDefault()
+        // REMOVED: forceSpeakerAsDefault()
+        // We want to detect the best route immediately.
 
         // Initial routing based on connected devices
         synchronized(audioStateLock) {
             applyAudioRouting()
         }
+
+        // NEW: RETRY MECHANISM
+        // Bluetooth devices often take a moment to appear in availableCommunicationDevices
+        // after setting the audio mode. We retry routing after 1s to ensure we catch them.
+        mainHandler.postDelayed({
+            synchronized(audioStateLock) {
+                if (started) applyAudioRouting()
+            }
+        }, 1000)
 
         // Register receivers
         val audioFilter = IntentFilter().apply {
@@ -226,6 +231,8 @@ class AudioRouteController(private val context: Context) {
             requestAudioFocus()
         }
     }
+
+    fun isA2dpModeEnabled(): Boolean = useA2dpMode
 
     /**
      * Stop routing, unregister receivers, stop SCO, reset audio mode and abandon focus.
@@ -323,23 +330,18 @@ class AudioRouteController(private val context: Context) {
                 val devices = am.availableCommunicationDevices
                 if (useA2dp) {
                     // A2DP: music profile, phone mic
-                    val btDevice = devices.firstOrNull {
-                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
-                    }
-                    if (btDevice != null) {
-                        am.setCommunicationDevice(btDevice)
-                        Log.d(tag, "✅ Routed to Bluetooth A2DP (phone mic)")
-                    } else {
-                        Log.w(tag, "No Bluetooth A2DP device found")
-                        routeToSpeakerOnly()
-                    }
+                    // 🛑 FIX: A2DP devices do NOT appear in availableCommunicationDevices.
+                    // We must clear any forced communication device and let the system route STREAM_MUSIC to A2DP.
+                    am.clearCommunicationDevice()
+                    am.isSpeakerphoneOn = false
+                    Log.d(tag, "✅ Routed to Bluetooth A2DP (Cleared comm device, using system media routing)")
                 } else {
                     // SCO: headset profile, headset mic
                     // Fix: Apple AirPods and some other devices might appear as A2DP or BLE
                     // initially. We should accept them and let setCommunicationDevice handle the switch.
                     val btDevice = devices.firstOrNull {
                         it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || // Sometimes appears here if SCO is supported
                                 it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
                     }
 
@@ -354,9 +356,14 @@ class AudioRouteController(private val context: Context) {
             } else {
                 // Pre-Android 12
                 if (useA2dp) {
-                    // Let system auto-route media to A2DP; keep speaker flag true
-                    am.isSpeakerphoneOn = true
-                    Log.d(tag, "✅ A2DP auto-routing enabled (phone mic active)")
+                    // 🛑 FIX: isSpeakerphoneOn = true forces internal speaker. We want A2DP.
+                    am.isSpeakerphoneOn = false
+                    // Ensure SCO is off
+                    if (am.isBluetoothScoOn) {
+                        am.stopBluetoothSco()
+                        am.isBluetoothScoOn = false
+                    }
+                    Log.d(tag, "✅ A2DP auto-routing enabled (Speakerphone OFF, SCO OFF)")
                 } else {
                     // Explicit SCO for headset mic
                     synchronized(scoStateLock) {

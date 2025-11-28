@@ -153,7 +153,13 @@ class VoiceService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // 🛑 FIX: Check if service was restarted with null intent (system restart)
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START -> {
                 val roomId = intent.getStringExtra(EXTRA_ROOM_ID)
                 val selfId = intent.getStringExtra(EXTRA_SELF_ID)
@@ -202,7 +208,8 @@ class VoiceService : Service() {
                 client?.setHighQuality(highQuality)
             }
         }
-        return START_STICKY
+        // 🛑 FIX: Return START_NOT_STICKY to prevent auto-restart on crash/kill
+        return START_NOT_STICKY
     }
 
     private fun startCall(roomId: String, selfId: String) {

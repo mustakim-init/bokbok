@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
         // Initialize with starting intent
         _intentState.value = intent
 
-        // Request battery optimization exemption to prevent background kills
+        // Request battery optimization exemption to prevent background kills(Gonna remove it in the future)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
             val pm = getSystemService(android.os.PowerManager::class.java)
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {

@@ -309,26 +309,9 @@ class FriendsRepository(
     }
 
     suspend fun searchUsersByUsername(query: String): Result<List<User>> {
-        return try {
-            if (query.length < 2) {
-                return Result.success(emptyList())
-            }
-
-            val snapshot = firestore.collection("users")
-                .whereGreaterThanOrEqualTo("username", query.lowercase())
-                .whereLessThanOrEqualTo("username", query.lowercase() + '\uf8ff')
-                .limit(20)
-                .get()
-                .await()
-
-            val users = snapshot.toObjects(User::class.java)
-            val currentUserId = auth.currentUser?.uid
-            val filtered = users.filter { it.uid != currentUserId }
-
-            Result.success(filtered)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        val currentUserId = auth.currentUser?.uid
+        // Delegate to UserRepository
+        return userRepository.searchUsers(query.lowercase(), excludeUserId = currentUserId)
     }
 
     suspend fun getFriendshipStatus(targetUserId: String): FriendshipStatus? {

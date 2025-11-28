@@ -18,6 +18,8 @@ class RoomRepository {
     private val roomCache = java.util.concurrent.ConcurrentHashMap<String, Pair<VoiceRoom, Long>>()
     private val CACHE_TTL = 2 * 60 * 1000L // 2 minutes
 
+    private val imgBBApi = com.mustakim.bokbok.data.api.ImgBBApi.create()
+
     /**
      * Load active rooms from Firestore.
      * Filtered by isPublic = true to hide private rooms.
@@ -108,6 +110,28 @@ class RoomRepository {
             Result.success(room.id)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun uploadRoomImage(context: android.content.Context, imageUri: android.net.Uri): String? {
+        return try {
+            val bytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
+                ?: return null
+
+            val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
+
+            val response = imgBBApi.uploadImage(
+                apiKey = com.mustakim.bokbok.BuildConfig.IMGBB_API_KEY,
+                base64Image = base64
+            )
+
+            if (response.success && response.data != null) {
+                response.data.url
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 

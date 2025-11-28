@@ -166,18 +166,27 @@ class UserRepository(private val context: Context) {
         }
     }
 
-    suspend fun searchUsers(query: String): Result<List<User>> {
+    suspend fun searchUsers(query: String, excludeUserId: String? = null): Result<List<User>> {
         return try {
-            // Simple prefix search on username
             val snapshot = usersCollection
                 .whereGreaterThanOrEqualTo("username", query)
                 .whereLessThan("username", query + "\uf8ff")
+                .limit(20) // ✅ Added limit
                 .get()
                 .await()
+
             val users = snapshot.documents.mapNotNull { doc ->
                 User.fromMap(doc.data ?: emptyMap())
             }
-            Result.success(users)
+
+            // ✅ Filter out excluded user (e.g. self)
+            val filtered = if (excludeUserId != null) {
+                users.filter { it.uid != excludeUserId }
+            } else {
+                users
+            }
+
+            Result.success(filtered)
         } catch (e: Exception) {
             Result.failure(e)
         }

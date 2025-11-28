@@ -2,15 +2,12 @@ package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import android.util.Base64
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mustakim.bokbok.BuildConfig
-import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.model.FriendStatus
 import com.mustakim.bokbok.data.model.FriendWithUser
 import com.mustakim.bokbok.data.model.RoomCategory
@@ -21,12 +18,12 @@ import com.mustakim.bokbok.data.repository.PresenceRepository
 import com.mustakim.bokbok.data.repository.RoomRepository
 import com.mustakim.bokbok.data.repository.UserRepository
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 
 
 data class LoungeUiState(
@@ -52,9 +49,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         UserRepository(getApplication<Application>().applicationContext)
     )
 
-    // ImgBB
-    private val imgbbApi = ImgBBApi.create()
-    private val imgbbApiKey = BuildConfig.IMGBB_API_KEY
+
 
     private val _uiState = MutableStateFlow(
         LoungeUiState(
@@ -105,28 +100,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         android.util.Log.d("LoungeViewModel", "❌ Destroyed: ${System.identityHashCode(this)}")
     }
 
-    private suspend fun uploadRoomImage(imageUri: Uri): String? {
-        return try {
-            val context = getApplication<Application>()
-            val bytes = context.contentResolver.openInputStream(imageUri)?.use { it.readBytes() }
-                ?: return null
 
-            val base64 = Base64.encodeToString(bytes, Base64.DEFAULT)
-
-            val response = imgbbApi.uploadImage(
-                apiKey = imgbbApiKey,
-                base64Image = base64
-            )
-
-            if (response.success && response.data != null) {
-                response.data.url // the direct image URL
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
 
     // Load public rooms from Firestore instead of dummy data
     private fun loadPublicRoomsFromFirestore() {
@@ -254,7 +228,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 // 1) Upload image if provided
                 val uploadedImageUrl = if (imageUri != null) {
-                    uploadRoomImage(imageUri) ?: ""
+                    repository.uploadRoomImage(getApplication(), imageUri) ?: ""
                 } else {
                     ""
                 }

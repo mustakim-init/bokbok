@@ -144,6 +144,10 @@ class VoiceService : Service() {
     private var presenceListener: ValueEventListener? = null
     private var previousParticipantIds = emptySet<String>()
 
+    // [NEW] Handler for delayed disconnects
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val pendingDisconnects = mutableMapOf<String, Runnable>()
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -266,6 +270,9 @@ class VoiceService : Service() {
     }
 
     private fun stopCall() {
+        // [NEW] Clear all pending disconnects
+        pendingDisconnects.values.forEach { handler.removeCallbacks(it) }
+        pendingDisconnects.clear()
         // [NEW] Stop monitoring presence
         stopPresenceObservation()
 
@@ -295,16 +302,37 @@ class VoiceService : Service() {
                 val newIds = currentIds.filter { it != selfId && !previousParticipantIds.contains(it) }
                 val removedIds = previousParticipantIds.filter { it != selfId && !currentIds.contains(it) }
 
-                // Auto-Connect
+                // 1. Handle New/Re-joining Users
                 if (newIds.isNotEmpty()) {
                     Log.d(tag, "Presence: Found new peers: $newIds")
-                    newIds.forEach { id -> client?.createConnectionTo(id) }
+                    newIds.forEach { id ->
+                        // 🛑 FIX: Cancel pending disconnect if they rejoined quickly
+                        if (pendingDisconnects.containsKey(id)) {
+                            Log.d(tag, "Cancelled pending disconnect for $id (rejoined)")
+                            val runnable = pendingDisconnects.remove(id)
+                            handler.removeCallbacks(runnable!!)
+                        } else {
+                            // Only connect if not already connected/pending
+                            client?.createConnectionTo(id)
+                        }
+                    }
                 }
 
-                // Auto-Disconnect
+                // 2. Handle Removed Users (with Delay)
                 if (removedIds.isNotEmpty()) {
-                    Log.d(tag, "Presence: Peers removed: $removedIds")
-                    removedIds.forEach { id -> client?.disconnectFrom(id) }
+                    Log.d(tag, "Presence: Peers removed (scheduling disconnect): $removedIds")
+                    removedIds.forEach { id ->
+                        // 🛑 FIX: Schedule disconnect instead of immediate
+                        if (!pendingDisconnects.containsKey(id)) {
+                            val runnable = Runnable {
+                                pendingDisconnects.remove(id)
+                                Log.d(tag, "Executing disconnect for $id after delay")
+                                client?.disconnectFrom(id)
+                            }
+                            pendingDisconnects[id] = runnable
+                            handler.postDelayed(runnable, 2000) // 5 seconds delay
+                        }
+                    }
                 }
 
                 previousParticipantIds = currentIds
@@ -366,8 +394,7 @@ class VoiceService : Service() {
     @SuppressLint("WakelockTimeout")
     private fun acquireWakeLock() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
-        // 🛑 CHANGED: Use SCREEN_DIM_WAKE_LOCK to keep screen on (dimmed)
-        // This prevents the device from sleeping at all.
+        // We use PARTIAL_WAKE_LOCK to keep CPU running even if screen is off.
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "bokbok:voice_call_wl"

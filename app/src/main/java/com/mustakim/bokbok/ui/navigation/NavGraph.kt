@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -91,10 +90,13 @@ fun NavGraph(
     userViewModel: UserViewModel // ✅ Receive from parent
 ) {
     val context = LocalContext.current
+    val application = context.applicationContext as android.app.Application
 
     // ✅ Memoize repositories at NavGraph level
     val userRepository = remember(context) { UserRepository(context) }
     val friendsRepository = remember(userRepository) { FriendsRepository(userRepository) }
+    val notificationRepository = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
+    val chatRepository = remember { com.mustakim.bokbok.data.repository.ChatRepository() }
 
     // ✅ Memoize permission check logic
     val hasAllRequiredPermissions = remember(context) {
@@ -164,20 +166,20 @@ fun NavGraph(
 
         // ============= MAIN APP FLOW =============
         composable(NavRoutes.Lounge.route) {
-            // ✅ Scope ViewModels to navigation entry (survives navigation)
             val loungeViewModel = viewModel<LoungeViewModel>()
-            val notificationViewModel = viewModel<NotificationViewModel>()
-            
-            // Start observing notifications once
-            LaunchedEffect(Unit) {
-                val userId = userRepository.getCurrentUserId()
-                if (userId != null) {
-                    notificationViewModel.observeNotifications(userId)
-                }
-            }
-            
+
+            // Create NotificationViewModel with Factory
+            val notificationViewModel: NotificationViewModel = viewModel(
+                factory = NotificationViewModel.Factory(
+                    application,
+                    notificationRepository,
+                    friendsRepository,
+                    userRepository
+                )
+            )
+
             val notificationCount by notificationViewModel.unreadCount.collectAsState()
-            
+
             LoungeScreen(
                 navController = navController,
                 userViewModel = userViewModel,
@@ -204,7 +206,24 @@ fun NavGraph(
 
         // ============= SECONDARY SCREENS =============
         composable(NavRoutes.Notifications.route) {
-            NotificationsScreen(navController)
+            // Create NotificationViewModel with Factory (shared instance if scoped correctly, but here it's a new screen)
+            // Ideally we scope it to a navigation graph, but for now we recreate or get existing if scoped.
+            // Since we are in a different composable, `viewModel()` will create a new one unless we scope it.
+            // For notifications, a fresh VM is fine, or we can scope to the Activity.
+
+            val notificationViewModel: NotificationViewModel = viewModel(
+                factory = NotificationViewModel.Factory(
+                    application,
+                    notificationRepository,
+                    friendsRepository,
+                    userRepository
+                )
+            )
+
+            NotificationsScreen(
+                navController = navController,
+                viewModel = notificationViewModel
+            )
         }
 
         composable(NavRoutes.Profile.route) {
@@ -237,8 +256,19 @@ fun NavGraph(
         ) { backStackEntry ->
             val userId = backStackEntry.arguments?.getString("userId")
                 ?: return@composable
-            // TODO: Implement ChatScreen
-            // ChatScreen(userId = userId, navController = navController)
+            
+            val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = viewModel(
+                factory = com.mustakim.bokbok.viewmodel.ChatViewModel.Factory(
+                    chatRepository,
+                    userRepository,
+                    userId
+                )
+            )
+            
+            com.mustakim.bokbok.ui.screens.chat.ChatScreen(
+                navController = navController,
+                viewModel = chatViewModel
+            )
         }
     }
 }

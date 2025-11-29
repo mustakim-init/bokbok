@@ -1,6 +1,5 @@
 package com.mustakim.bokbok.ui.screens.notifications
 
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,10 +26,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -40,12 +42,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,14 +66,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
+import com.mustakim.bokbok.data.model.FriendRequest
 import com.mustakim.bokbok.data.model.Notification
 import com.mustakim.bokbok.data.model.NotificationType
-import com.mustakim.bokbok.data.repository.NotificationRepository
 import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.data.repository.UserRepository
 import com.mustakim.bokbok.state.JoinMode
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
+import com.mustakim.bokbok.viewmodel.NotificationFilter
+import com.mustakim.bokbok.viewmodel.NotificationUiItem
+import com.mustakim.bokbok.viewmodel.NotificationViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,7 +83,6 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.cos
 import kotlin.math.sin
-
 
 // --- Custom "Expressive" Shape (Scalloped/Star) ---
 class ExpressiveStarShape(private val points: Int = 12) : Shape {
@@ -108,66 +109,90 @@ class ExpressiveStarShape(private val points: Int = 12) : Shape {
 @Composable
 fun NotificationsScreen(
     navController: NavHostController,
-    loungeViewModel: LoungeViewModel = viewModel()
+    loungeViewModel: LoungeViewModel = viewModel(),
+    viewModel: NotificationViewModel
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val repo = remember { NotificationRepository() }
-    val userRepo = remember { UserRepository(context) }
     val roomRepo = remember { RoomRepository() }
     val scope = rememberCoroutineScope()
 
     // Scroll behavior for LargeTopAppBar
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
-    var notifications by remember { mutableStateOf<List<Notification>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        val userId = userRepo.getCurrentUserId()
-        if (userId != null) {
-            repo.observeNotifications(userId).collect {
-                notifications = it
-            }
-        }
-    }
+    val uiItems by viewModel.uiItems.collectAsState()
+    val currentFilter by viewModel.filter.collectAsState()
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LargeTopAppBar(
-                title = {
-                    Text(
-                        "Inbox",
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
-                    )
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = { navController.navigateUp() },
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                                CircleShape
-                            )
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+            Column {
+                LargeTopAppBar(
+                    title = {
+                        Text(
+                            "Inbox",
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = { navController.navigateUp() },
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    scrollBehavior = scrollBehavior
+                )
+
+                // Filter Chips
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = currentFilter == NotificationFilter.ALL,
+                            onClick = { viewModel.setFilter(NotificationFilter.ALL) },
+                            label = { Text("All") },
+                            leadingIcon = if (currentFilter == NotificationFilter.ALL) {
+                                { Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }
+                            } else null
+                        )
                     }
-                },
-                // FIXED: Used the unified 'topAppBarColors' builder
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                scrollBehavior = scrollBehavior
-            )
+                    item {
+                        FilterChip(
+                            selected = currentFilter == NotificationFilter.INVITES,
+                            onClick = { viewModel.setFilter(NotificationFilter.INVITES) },
+                            label = { Text("Invites") }
+                        )
+                    }
+                    item {
+                        FilterChip(
+                            selected = currentFilter == NotificationFilter.REQUESTS,
+                            onClick = { viewModel.setFilter(NotificationFilter.REQUESTS) },
+                            label = { Text("Requests") }
+                        )
+                    }
+                }
+            }
         }
     ) { padding ->
-        if (notifications.isEmpty()) {
+        if (uiItems.isEmpty()) {
             EmptyStateExpressive(modifier = Modifier.padding(padding))
         } else {
             LazyColumn(
@@ -178,87 +203,204 @@ fun NotificationsScreen(
                     start = 16.dp,
                     end = 16.dp
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp) // More space between cards
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(
-                    items = notifications,
+                    items = uiItems,
                     key = { it.id }
-                ) { notification ->
-                    // Expressive Animation: Bouncy spring
+                ) { item ->
                     Box(
                         modifier = Modifier.animateItem(
                             placementSpec = spring(
-                                dampingRatio = 0.7f, // Bouncier
+                                dampingRatio = 0.7f,
                                 stiffness = 300f
-                            ),
-                            fadeOutSpec = spring(stiffness = Spring.StiffnessLow),
-                            fadeInSpec = spring(stiffness = Spring.StiffnessLow)
+                            )
                         )
                     ) {
-                        ExpressiveNotificationCard(
-                            notification = notification,
-                            onAccept = {
-                                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                if (notification.type == NotificationType.ROOM_INVITE) {
-                                    val roomId = notification.payload["roomId"]
-                                    if (roomId != null) {
-                                        // Check permissions first
-                                        val permissionsToCheck = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
-                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                                            permissionsToCheck.add(android.Manifest.permission.POST_NOTIFICATIONS)
-                                        }
+                        when (item) {
+                            is NotificationUiItem.Standard -> {
+                                ExpressiveNotificationCard(
+                                    notification = item.notification,
+                                    onAccept = {
+                                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        if (item.notification.type == NotificationType.ROOM_INVITE) {
+                                            val roomId = item.notification.payload["roomId"]
+                                            if (roomId != null) {
+                                                // Check permissions
+                                                val permissionsToCheck = mutableListOf(android.Manifest.permission.RECORD_AUDIO)
+                                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                                    permissionsToCheck.add(android.Manifest.permission.POST_NOTIFICATIONS)
+                                                }
 
-                                        val hasPermissions = permissionsToCheck.all {
-                                            androidx.core.content.ContextCompat.checkSelfPermission(
-                                                context, it
-                                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                        }
+                                                val hasPermissions = permissionsToCheck.all {
+                                                    androidx.core.content.ContextCompat.checkSelfPermission(
+                                                        context, it
+                                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                                }
 
-                                        if (!hasPermissions) {
-                                            // Navigate to permissions screen or show rationale
-                                            // For now, let's redirect to PermissionsScreen if available or just show a toast/snackbar
-                                            // Ideally, we should use a permission launcher here, but since we are in a list item,
-                                            // it's cleaner to navigate to a dedicated permission handling flow or show a dialog.
-                                            // Given the NavGraph, we can navigate to PermissionsScreen.
-                                            navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.Permissions.route)
-                                        } else {
-                                            // Fetch the room data and join using RoomStateManager
-                                            scope.launch {
-                                                val result = roomRepo.getRoom(roomId)
-                                                result.onSuccess { room ->
-                                                    // Join as session-only (temporary join)
-                                                    loungeViewModel.joinRoomSessionOnly(room)
-                                                    RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
-
-                                                    // Navigate back so the VoiceRoomScreen overlay is visible
-                                                    navController.navigateUp()
-
-                                                    // Delete notification after accepting
-                                                    userRepo.getCurrentUserId()?.let { uid ->
-                                                        repo.deleteNotification(uid, notification.id)
-                                                    }
-                                                }.onFailure {
-                                                    // Handle error - room might not exist anymore
-                                                    userRepo.getCurrentUserId()?.let { uid ->
-                                                        repo.deleteNotification(uid, notification.id)
+                                                if (!hasPermissions) {
+                                                    navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.Permissions.route)
+                                                } else {
+                                                    scope.launch {
+                                                        val result = roomRepo.getRoom(roomId)
+                                                        result.onSuccess { room ->
+                                                            loungeViewModel.joinRoomSessionOnly(room)
+                                                            RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
+                                                            navController.navigateUp()
+                                                            viewModel.deleteNotification(item.notification.id)
+                                                        }.onFailure {
+                                                            viewModel.deleteNotification(item.notification.id)
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
+                                    },
+                                    onReject = {
+                                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                        viewModel.deleteNotification(item.notification.id)
                                     }
-                                }
-                            },
-                            onReject = {
-                                haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                // ... (Same Logic as before) ...
-                                scope.launch {
-                                    userRepo.getCurrentUserId()?.let { uid ->
-                                        repo.deleteNotification(uid, notification.id)
-                                    }
-                                }
+                                )
                             }
+                            is NotificationUiItem.Request -> {
+                                ExpressiveFriendRequestCard(
+                                    request = item.request,
+                                    onAccept = {
+                                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        viewModel.acceptFriendRequest(item.request.friendship.id)
+                                    },
+                                    onDecline = {
+                                        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                        viewModel.declineFriendRequest(item.request.friendship.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ExpressiveFriendRequestCard(
+    request: FriendRequest,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        onClick = { }
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(modifier = Modifier.size(56.dp)) {
+                    AsyncImage(
+                        model = request.sender.profileImageUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(18.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+
+                    // Badge
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 6.dp, y = 6.dp),
+                        shape = ExpressiveStarShape(12),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(6.dp)
+                                .size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = request.sender.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Surface(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+                            shape = CircleShape
+                        ) {
+                            Text(
+                                text = getTimeAgo(request.friendship.createdAt.toDate().time),
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "@${request.sender.username}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        text = "Sent you a friend request",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onDecline,
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ),
+                    shape = CircleShape,
+                    elevation = null
+                ) {
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Decline")
+                }
+
+                Button(
+                    onClick = onAccept,
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary
+                    ),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.Check, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Accept")
                 }
             }
         }

@@ -27,6 +27,12 @@ class ChatViewModel(
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText.asStateFlow()
 
+    private val _replyingTo = MutableStateFlow<Message?>(null)
+    val replyingTo: StateFlow<Message?> = _replyingTo.asStateFlow()
+
+    private val _showEmojiPicker = MutableStateFlow(false)
+    val showEmojiPicker: StateFlow<Boolean> = _showEmojiPicker.asStateFlow()
+
     init {
         loadFriendDetails()
         loadMessages()
@@ -52,22 +58,51 @@ class ChatViewModel(
         _messageText.value = text
     }
 
+    fun setReplyingTo(message: Message?) {
+        _replyingTo.value = message
+    }
+
+    fun toggleEmojiPicker() {
+        _showEmojiPicker.value = !_showEmojiPicker.value
+    }
+
+    fun setShowEmojiPicker(show: Boolean) {
+        _showEmojiPicker.value = show
+    }
+
+    fun reactToMessage(messageId: String, emoji: String) {
+        viewModelScope.launch {
+            chatRepository.addReaction(messageId, emoji, "me")
+        }
+    }
+
+    fun removeReaction(messageId: String) {
+        viewModelScope.launch {
+            chatRepository.removeReaction(messageId, "me")
+        }
+    }
+
+    fun deleteMessage(messageId: String, forEveryone: Boolean) {
+        viewModelScope.launch {
+            chatRepository.deleteMessage(messageId, forEveryone, "me")
+        }
+    }
+
     fun sendMessage() {
         val text = _messageText.value
         if (text.isBlank()) return
 
-        viewModelScope.launch {
-            // Optimistic update
-            val newMessage = Message(
-                id = java.util.UUID.randomUUID().toString(),
-                senderId = "me", // In real app, get current user ID
-                receiverId = friendId,
-                text = text
-            )
-            _messages.value = listOf(newMessage) + _messages.value
-            _messageText.value = ""
+        val replyTo = _replyingTo.value
 
-            chatRepository.sendMessage("me", friendId, text)
+        viewModelScope.launch {
+            // Optimistic update is handled by Repository's MutableStateFlow in this dummy impl
+            // In real app, we might do local optimistic update here too.
+            
+            chatRepository.sendMessage("me", friendId, text, replyTo)
+            
+            _messageText.value = ""
+            _replyingTo.value = null
+            _showEmojiPicker.value = false
         }
     }
 

@@ -157,6 +157,12 @@ dependencies {
     // Google Auth (for OAuth)
     implementation(libs.play.services.auth)
 
+    // Emoji2
+    implementation("androidx.emoji2:emoji2:1.4.0")
+    implementation("androidx.emoji2:emoji2-views:1.4.0")
+    implementation("androidx.emoji2:emoji2-bundled:1.4.0")
+    implementation("androidx.emoji2:emoji2-emojipicker:1.4.0")
+
     // Debug
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

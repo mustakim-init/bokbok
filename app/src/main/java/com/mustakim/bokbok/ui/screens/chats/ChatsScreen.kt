@@ -60,57 +60,37 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
-import com.mustakim.bokbok.data.model.FriendWithUser
+import com.mustakim.bokbok.data.repository.ChatRepository
 import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
+import com.mustakim.bokbok.viewmodel.ChatUiModel
 import com.mustakim.bokbok.viewmodel.FriendsUiState
 import com.mustakim.bokbok.viewmodel.FriendsViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-// Wrapper to hold chat data along with the real friend data
-data class ChatUiModel(
-    val friend: FriendWithUser,
-    val lastMessage: String,
-    val timestamp: Long,
-    val unreadCount: Int
-)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatsScreen(
     friendsRepository: FriendsRepository,
+    chatRepository: ChatRepository,
     onFriendClick: (String) -> Unit,
     navController: NavHostController,
     userViewModel: UserViewModel
 ) {
     // Use the Factory to create the ViewModel
     val viewModel: FriendsViewModel = viewModel(
-        factory = FriendsViewModel.Factory(friendsRepository)
+        factory = FriendsViewModel.Factory(friendsRepository, chatRepository)
     )
 
-    val friends by viewModel.friends.collectAsState()
+    val chatList by viewModel.chats.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
     var showAddFriendDialog by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
-
-    // Transform real friends data into ChatUiModel
-    val chatList = remember(friends) {
-        friends.map { friend ->
-            ChatUiModel(
-                friend = friend,
-                // Placeholder logic for message/time since we don't have chat history yet
-                lastMessage = if (friend.isOnline) "Active now" else "Start a conversation",
-                timestamp = System.currentTimeMillis(), // Placeholder
-                unreadCount = 0 // Placeholder
-            )
-        }
-            // No sorting needed if we don't have real timestamps,
-            // but typically you'd sort by last message time.
-            // For now, let's keep the order from the repository or sort by online status?
-            // Let's sort by online status for now so active friends are top.
-            .sortedByDescending { it.friend.isOnline }
-    }
 
     LaunchedEffect(uiState) {
         when (uiState) {
@@ -348,14 +328,14 @@ fun ChatListItem(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    // Timestamp (Hidden for now as it's placeholder)
-                    /*
-                    Text(
-                        text = formatChatTime(chat.timestamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    */
+                    // Timestamp
+                    if (chat.timestamp > 0) {
+                        Text(
+                            text = formatChatTime(chat.timestamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -365,22 +345,61 @@ fun ChatListItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Subtitle / Last Message
+                    // Subtitle / Last Message with Sender
                     Text(
-                        text = if (friend.currentRoomId != null) "In a voice room • Join now" else chat.lastMessage,
+                        text = when {
+                            friend.currentRoomId != null -> "In a voice room • Join now"
+                            chat.lastMessage.isEmpty() -> if (friend.isOnline) "Active now" else "Start a conversation"
+                            else -> {
+                                val prefix = when (chat.lastMessageSender) {
+                                    "You" -> "You: "
+                                    null -> ""
+                                    else -> "${chat.lastMessageSender}: "
+                                }
+                                prefix + chat.lastMessage
+                            }
+                        },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (friend.currentRoomId != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = when {
+                            friend.currentRoomId != null -> MaterialTheme.colorScheme.primary
+                            !chat.isLastMessageRead && chat.lastMessageSender != "You" -> MaterialTheme.colorScheme.onSurface
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = if (!chat.isLastMessageRead && chat.lastMessageSender != "You")
+                            FontWeight.SemiBold
+                        else
+                            FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    
+                    // Unread Count Badge
+                    if (chat.unreadCount > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.primary,
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (chat.unreadCount > 9) "9+" else chat.unreadCount.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-// ... (Keep EmptyFriendsState and AddFriendDialog as is)
 @Composable
 private fun EmptyFriendsState() {
     Box(
@@ -404,4 +423,34 @@ private fun EmptyFriendsState() {
             )
         }
     }
+}
+
+fun formatChatTime(timestamp: Long): String {
+    val now = System.currentTimeMillis()
+    val diff = now - timestamp
+    val date = Date(timestamp)
+    
+    return when {
+        diff < 24 * 60 * 60 * 1000 && isSameDay(date, Date()) -> {
+            SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
+        }
+        diff < 48 * 60 * 60 * 1000 && isYesterday(date) -> {
+            "Yesterday"
+        }
+        else -> {
+            SimpleDateFormat("MMM d", Locale.getDefault()).format(date)
+        }
+    }
+}
+
+// Helper functions for date formatting (copied from ChatScreen/GroupChatScreen to avoid circular deps or just for simplicity)
+fun isSameDay(date1: Date, date2: Date): Boolean {
+    val fmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+    return fmt.format(date1) == fmt.format(date2)
+}
+
+fun isYesterday(date: Date): Boolean {
+    val cal = java.util.Calendar.getInstance()
+    cal.add(java.util.Calendar.DATE, -1)
+    return isSameDay(date, cal.time)
 }

@@ -127,7 +127,7 @@ fun ChatScreen(
     
     // Filter out messages deleted by current user
     val messages = remember(allMessages) {
-        allMessages.filter { !it.deletedBy.contains("me") }
+        allMessages.filter { !it.deletedBy.contains(viewModel.currentUserId) }
     }
     val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
     
@@ -245,7 +245,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     itemsIndexed(messages) { index, message ->
-                        val isMe = message.senderId == "me"
+                        val isMe = message.senderId == viewModel.currentUserId
                         val nextMessage = messages.getOrNull(index - 1)
                         val prevMessage = messages.getOrNull(index + 1)
                         
@@ -253,7 +253,7 @@ fun ChatScreen(
                         val isFirstInSequence = prevMessage?.senderId != message.senderId
                         
                         // Find the last read message from me (for read receipt)
-                        val lastReadMessage = messages.firstOrNull { it.senderId == "me" && it.isRead }
+                        val lastReadMessage = messages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
                         val isLastReadMessage = message.id == lastReadMessage?.id
 
                         // Date Header Logic
@@ -308,7 +308,8 @@ fun ChatScreen(
                     replyingTo = replyingTo,
                     onCancelReply = { viewModel.setReplyingTo(null) },
                     onEmojiClick = viewModel::toggleEmojiPicker,
-                    showEmojiPicker = showEmojiPicker
+                    showEmojiPicker = showEmojiPicker,
+                    onFocus = { viewModel.setShowEmojiPicker(false) }
                 )
 
                 // Emoji Picker
@@ -464,7 +465,9 @@ fun MessageBubble(
                 }
 
                 // Bubble Content
-                Box {
+                Box(
+                    modifier = Modifier.padding(bottom = if (message.reactions.isNotEmpty()) 10.dp else 0.dp)
+                ) {
                     val cornerRadius = 24.dp
                     val smallCorner = 4.dp
 
@@ -685,80 +688,14 @@ fun MessageBubble(
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.error
                                     )
+
                                 }
                             }
-                        }
-
-                        // Delete Dialog
-                        if (showDeleteDialog) {
-                            AlertDialog(
-                                onDismissRequest = { showDeleteDialog = false },
-                                title = {
-                                    Text(
-                                        "Delete Message",
-                                        style = MaterialTheme.typography.headlineSmall
-                                    )
-                                },
-                                text = {
-                                    Text(
-                                        if (isMe) "Choose how you want to delete this message" else "This message will be deleted for you",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                },
-                                confirmButton = {
-                                    if (isMe) {
-                                        // For own messages: show both options
-                                        Row(
-                                            horizontalArrangement = Arrangement.End,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            TextButton(onClick = { showDeleteDialog = false }) {
-                                                Text("Cancel")
-                                            }
-                                            TextButton(
-                                                onClick = {
-                                                    onDelete(false) // Delete for me
-                                                    showDeleteDialog = false
-                                                }
-                                            ) {
-                                                Text("Delete for Me")
-                                            }
-                                            TextButton(
-                                                onClick = {
-                                                    onDelete(true) // Delete for everyone
-                                                    showDeleteDialog = false
-                                                }
-                                            ) {
-                                                Text("Delete for Everyone")
-                                            }
-                                        }
-                                    } else {
-                                        // For friend's messages: only delete for me
-                                        Row(
-                                            horizontalArrangement = Arrangement.End,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            TextButton(onClick = { showDeleteDialog = false }) {
-                                                Text("Cancel")
-                                            }
-                                            TextButton(
-                                                onClick = {
-                                                    onDelete(false) // Delete for me only
-                                                    showDeleteDialog = false
-                                                }
-                                            ) {
-                                                Text("Delete")
-                                            }
-                                        }
-                                    }
-                                },
-                                dismissButton = null
-                            )
                         }
                     }
                 }
             }
-            
+
             // Read receipt avatar - always visible, only for last read message
             if (isMe && isLastRead && !message.isDeletedForEveryone) {
                 Row(
@@ -800,8 +737,8 @@ fun MessageBubble(
             // Time and status indicator - appear on tap
             AnimatedVisibility(
                 visible = showTime,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut()
+                enter = androidx.compose.animation.expandVertically() + fadeIn(),
+                exit = androidx.compose.animation.shrinkVertically() + fadeOut()
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
@@ -825,12 +762,15 @@ fun MessageBubble(
                                 MessageStatus.SENDING -> MaterialTheme.colorScheme.onSurfaceVariant.copy(
                                     alpha = 0.5f
                                 )
+
                                 MessageStatus.SENT -> MaterialTheme.colorScheme.onSurfaceVariant.copy(
                                     alpha = 0.6f
                                 )
+
                                 MessageStatus.DELIVERED -> MaterialTheme.colorScheme.onSurfaceVariant.copy(
                                     alpha = 0.6f
                                 )
+
                                 MessageStatus.READ -> Color(0xFF4CAF50)
                             }
 
@@ -842,7 +782,7 @@ fun MessageBubble(
                             )
                         }
                     }
-                    
+
                     // Timestamp
                     Text(
                         text = SimpleDateFormat(
@@ -863,18 +803,87 @@ fun MessageBubble(
             }
         }
     }
+
+    
+    // Delete Dialog - placed outside DropdownMenu to fix UI issues
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(
+                    "Delete Message",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            },
+            text = {
+                Text(
+                    if (isMe) "Choose how you want to delete this message" else "This message will be deleted for you",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                if (isMe) {
+                    // For own messages: show both options
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        TextButton(onClick = { showDeleteDialog = false }) {
+                            Text("Cancel")
+                        }
+                        TextButton(
+                            onClick = {
+                                onDelete(false) // Delete for me
+                                showDeleteDialog = false
+                            }
+                        ) {
+                            Text("Delete for Me")
+                        }
+                        TextButton(
+                            onClick = {
+                                onDelete(true) // Delete for everyone
+                                showDeleteDialog = false
+                            }
+                        ) {
+                            Text("Delete for Everyone")
+                        }
+                    }
+                } else {
+                    // For friend's messages: only delete for me
+                    Row(
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        TextButton(onClick = { showDeleteDialog = false }) {
+                            Text("Cancel")
+                        }
+                        TextButton(
+                            onClick = {
+                                onDelete(false) // Delete for me only
+                                showDeleteDialog = false
+                            }
+                        ) {
+                            Text("Delete")
+                        }
+                    }
+                }
+            },
+            dismissButton = null
+        )
+    }
 }
 
 @Composable
 fun ChatInputBar(
     text: String,
+    modifier: Modifier = Modifier,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     replyingTo: Message?,
     onCancelReply: () -> Unit,
     onEmojiClick: () -> Unit,
     showEmojiPicker: Boolean,
-    modifier: Modifier = Modifier
+    onFocus: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
     
@@ -972,6 +981,9 @@ fun ChatInputBar(
                                 .fillMaxWidth()
                                 .onFocusChanged { focusState -> 
                                     isFocused = focusState.isFocused 
+                                    if (focusState.isFocused) {
+                                        onFocus()
+                                    }
                                 }
                         )
                     }
@@ -993,8 +1005,8 @@ fun ChatInputBar(
                 // Send Button - use derived state
                 AnimatedVisibility(
                     visible = showSendButton,
-                    enter = scaleIn(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
-                    exit = scaleOut() + fadeOut()
+                    enter = scaleIn(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn() + androidx.compose.animation.expandHorizontally(),
+                    exit = scaleOut() + fadeOut() + androidx.compose.animation.shrinkHorizontally()
                 ) {
                     IconButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) {
                         Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = MaterialTheme.colorScheme.primary)

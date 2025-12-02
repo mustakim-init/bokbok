@@ -17,7 +17,8 @@ data class Message(
     val replyToSenderName: String? = null,
     val isDeletedForEveryone: Boolean = false,
     val deletedBy: List<String> = emptyList(), // List of userIds who deleted this message for themselves
-    val status: MessageStatus = MessageStatus.SENT // For sent messages tracking
+    val status: MessageStatus = MessageStatus.SENT, // For sent messages tracking
+    val readBy: List<String> = emptyList() // List of userIds who read the message
 )
 
 enum class MessageType {

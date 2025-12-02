@@ -192,6 +192,7 @@ fun NavGraph(
             // ✅ Use memoized repositories from NavGraph
             ChatsScreen(
                 friendsRepository = friendsRepository,
+                chatRepository = chatRepository,
                 onFriendClick = { userId ->
                     navController.navigate(NavRoutes.Chat.createRoute(userId))
                 },

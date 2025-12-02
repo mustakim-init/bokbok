@@ -12,19 +12,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ChatViewModel(
+class GroupChatViewModel(
     private val chatRepository: ChatRepository,
     private val userRepository: UserRepository,
-    private val friendId: String
+    private val groupId: String
 ) : ViewModel() {
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
     val messages: StateFlow<List<Message>> = _messages.asStateFlow()
 
-    val currentUserId: String = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-
-    private val _friendUser = MutableStateFlow<User?>(null)
-    val friendUser: StateFlow<User?> = _friendUser.asStateFlow()
+    private val _groupMembers = MutableStateFlow<Map<String, User>>(emptyMap())
+    val groupMembers: StateFlow<Map<String, User>> = _groupMembers.asStateFlow()
 
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText.asStateFlow()
@@ -36,28 +34,17 @@ class ChatViewModel(
     val showEmojiPicker: StateFlow<Boolean> = _showEmojiPicker.asStateFlow()
 
     init {
-        loadFriendDetails()
+        loadGroupDetails()
         loadMessages()
-        markMessagesAsRead()
     }
 
-    private fun markMessagesAsRead() {
-        viewModelScope.launch {
-            chatRepository.markMessagesAsRead(friendId)
-        }
-    }
-
-    private fun loadFriendDetails() {
-        viewModelScope.launch {
-            userRepository.getUserProfile(friendId).onSuccess { user ->
-                _friendUser.value = user
-            }
-        }
+    private fun loadGroupDetails() {
+        _groupMembers.value = chatRepository.getGroupMembers(groupId)
     }
 
     private fun loadMessages() {
         viewModelScope.launch {
-            chatRepository.getMessages(friendId).collect {
+            chatRepository.getGroupMessages(groupId).collect {
                 _messages.value = it
             }
         }
@@ -80,23 +67,20 @@ class ChatViewModel(
     }
 
     fun reactToMessage(messageId: String, emoji: String) {
-        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
         viewModelScope.launch {
-            chatRepository.addReaction(messageId, emoji, currentUserId, friendId)
+            chatRepository.addGroupReaction(groupId, messageId, emoji, "me")
         }
     }
 
     fun removeReaction(messageId: String) {
-        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
         viewModelScope.launch {
-            chatRepository.removeReaction(messageId, currentUserId, friendId)
+            chatRepository.removeGroupReaction(groupId, messageId, "me")
         }
     }
 
     fun deleteMessage(messageId: String, forEveryone: Boolean) {
-        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
         viewModelScope.launch {
-            chatRepository.deleteMessage(messageId, forEveryone, currentUserId, friendId)
+            chatRepository.deleteGroupMessage(groupId, messageId, forEveryone, "me")
         }
     }
 
@@ -105,10 +89,9 @@ class ChatViewModel(
         if (text.isBlank()) return
 
         val replyTo = _replyingTo.value
-        val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
 
         viewModelScope.launch {
-            chatRepository.sendMessage(currentUserId, friendId, text, replyTo)
+            chatRepository.sendGroupMessage("me", groupId, text, replyTo)
             
             _messageText.value = ""
             _replyingTo.value = null
@@ -119,11 +102,11 @@ class ChatViewModel(
     class Factory(
         private val chatRepository: ChatRepository,
         private val userRepository: UserRepository,
-        private val friendId: String
+        private val groupId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(chatRepository, userRepository, friendId) as T
+            return GroupChatViewModel(chatRepository, userRepository, groupId) as T
         }
     }
 }

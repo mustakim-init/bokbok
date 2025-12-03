@@ -319,4 +319,29 @@ class FriendsRepository(
         val friendship = getFriendship(currentUserId, targetUserId)
         return friendship?.status
     }
+
+    /**
+     * Observes a single user's online status from Firebase Realtime Database.
+     * This is used by ChatScreen to sync with the friend's real-time status.
+     * @return Flow that emits true when user is online, false when offline
+     */
+    fun observeUserOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
+        val statusListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val online = snapshot.child("online").getValue(Boolean::class.java) ?: false
+                trySend(online)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                // On error, emit offline status
+                trySend(false)
+            }
+        }
+        
+        userStatusRef.child(userId).addValueEventListener(statusListener)
+
+        awaitClose {
+            userStatusRef.child(userId).removeEventListener(statusListener)
+        }
+    }
 }

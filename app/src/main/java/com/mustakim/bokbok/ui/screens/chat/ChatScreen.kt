@@ -77,6 +77,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -122,12 +123,15 @@ fun ChatScreen(
 ) {
     val allMessages by viewModel.messages.collectAsState()
     val friendUser by viewModel.friendUser.collectAsState()
+    val isFriendOnline by viewModel.isFriendOnline.collectAsState()
     val messageText by viewModel.messageText.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
     
-    // Filter out messages deleted by current user
-    val messages = remember(allMessages) {
-        allMessages.filter { !it.deletedBy.contains(viewModel.currentUserId) }
+    // Filter out messages deleted by current user (Optimized with derivedStateOf)
+    val messages by remember {
+        derivedStateOf {
+            allMessages.filter { !it.deletedBy.contains(viewModel.currentUserId) }
+        }
     }
     val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
     
@@ -159,15 +163,15 @@ fun ChatScreen(
                                     model = user.profileImageUrl,
                                     contentDescription = null,
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(50.dp)
                                         .clip(CircleShape),
                                     contentScale = ContentScale.Crop
                                 )
                             } else {
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
+                                        .size(50.dp)
+                                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
@@ -188,9 +192,9 @@ fun ChatScreen(
                             )
                             if (user != null) {
                                 Text(
-                                    text = "Active now",
+                                    text = if (isFriendOnline) "Active now" else "Offline",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = if (isFriendOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -232,62 +236,72 @@ fun ChatScreen(
                         )
                     }
             ) {
-                LazyColumn(
-                    state = listState,
-                    reverseLayout = true,
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 16.dp,
-                        bottom = 16.dp
-                    ),
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    itemsIndexed(messages) { index, message ->
-                        val isMe = message.senderId == viewModel.currentUserId
-                        val nextMessage = messages.getOrNull(index - 1)
-                        val prevMessage = messages.getOrNull(index + 1)
-                        
-                        val isLastInSequence = nextMessage?.senderId != message.senderId
-                        val isFirstInSequence = prevMessage?.senderId != message.senderId
-                        
-                        // Find the last read message from me (for read receipt)
-                        val lastReadMessage = messages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
-                        val isLastReadMessage = message.id == lastReadMessage?.id
-
-                        // Date Header Logic
-                        val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
-                        if (showDateHeader) {
-                            DateHeader(date = message.timestamp.toDate())
-                            Spacer(modifier = Modifier.height(8.dp))
+                // Show empty state if no messages
+                if (messages.isEmpty()) {
+                    EmptyChatState(
+                        friendName = friendUser?.displayName ?: "your friend",
+                        onSendSuggestion = { suggestion ->
+                            viewModel.onMessageChange(suggestion)
                         }
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        reverseLayout = true,
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 16.dp,
+                            bottom = 16.dp
+                        ),
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        itemsIndexed(messages) { index, message ->
+                            val isMe = message.senderId == viewModel.currentUserId
+                            val nextMessage = messages.getOrNull(index - 1)
+                            val prevMessage = messages.getOrNull(index + 1)
+                            
+                            val isLastInSequence = nextMessage?.senderId != message.senderId
+                            val isFirstInSequence = prevMessage?.senderId != message.senderId
+                            
+                            // Find the last read message from me (for read receipt)
+                            val lastReadMessage = messages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
+                            val isLastReadMessage = message.id == lastReadMessage?.id
 
-                        MessageBubble(
-                            message = message,
-                            isMe = isMe,
-                            showAvatar = !isMe && isLastInSequence,
-                            friendImageUrl = friendUser?.profileImageUrl,
-                            friendName = friendUser?.displayName,
-                            isFirst = isFirstInSequence,
-                            isLast = isLastInSequence,
-                            isLastRead = isLastReadMessage,
-                            onReply = { viewModel.setReplyingTo(message) },
-                            onReact = { emoji -> viewModel.reactToMessage(message.id, emoji) },
-                            onDelete = { forEveryone -> viewModel.deleteMessage(message.id, forEveryone) },
-                            onRemoveReaction = { viewModel.removeReaction(message.id) },
-                            onReplyClick = { replyToId ->
-                                val replyIndex = messages.indexOfFirst { it.id == replyToId }
-                                if (replyIndex != -1) {
-                                    scope.launch {
-                                        listState.animateScrollToItem(replyIndex)
+                            // Date Header Logic
+                            val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
+                            if (showDateHeader) {
+                                DateHeader(date = message.timestamp.toDate())
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            MessageBubble(
+                                message = message,
+                                isMe = isMe,
+                                showAvatar = !isMe && isLastInSequence,
+                                friendImageUrl = friendUser?.profileImageUrl,
+                                friendName = friendUser?.displayName,
+                                isFirst = isFirstInSequence,
+                                isLast = isLastInSequence,
+                                isLastRead = isLastReadMessage,
+                                onReply = { viewModel.setReplyingTo(message) },
+                                onReact = { emoji -> viewModel.reactToMessage(message.id, emoji) },
+                                onDelete = { forEveryone -> viewModel.deleteMessage(message.id, forEveryone) },
+                                onRemoveReaction = { viewModel.removeReaction(message.id) },
+                                onReplyClick = { replyToId ->
+                                    val replyIndex = messages.indexOfFirst { it.id == replyToId }
+                                    if (replyIndex != -1) {
+                                        scope.launch {
+                                            listState.animateScrollToItem(replyIndex)
+                                        }
                                     }
                                 }
+                            )
+                            
+                            if (isFirstInSequence) {
+                                Spacer(modifier = Modifier.height(12.dp))
                             }
-                        )
-                        
-                        if (isFirstInSequence) {
-                            Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
                 }

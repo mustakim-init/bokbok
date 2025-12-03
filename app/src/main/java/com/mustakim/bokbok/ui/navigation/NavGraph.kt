@@ -97,6 +97,7 @@ fun NavGraph(
     val friendsRepository = remember(userRepository) { FriendsRepository(userRepository) }
     val notificationRepository = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
     val chatRepository = remember { com.mustakim.bokbok.data.repository.ChatRepository() }
+    val hybridChatRepository = remember(context) { com.mustakim.bokbok.data.repository.HybridChatRepository(context) }
 
     // ✅ Memoize permission check logic
     val hasAllRequiredPermissions = remember(context) {
@@ -260,8 +261,9 @@ fun NavGraph(
             
             val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = viewModel(
                 factory = com.mustakim.bokbok.viewmodel.ChatViewModel.Factory(
-                    chatRepository,
+                    hybridChatRepository,
                     userRepository,
+                    friendsRepository,
                     userId
                 )
             )

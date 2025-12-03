@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.google.services)
+    id("com.google.devtools.ksp") version "2.0.21-1.0.25"
 }
 
 android {
@@ -162,6 +163,14 @@ dependencies {
     implementation("androidx.emoji2:emoji2-views:1.4.0")
     implementation("androidx.emoji2:emoji2-bundled:1.4.0")
     implementation("androidx.emoji2:emoji2-emojipicker:1.4.0")
+
+    // Room Database (for local messaging storage)
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    ksp("androidx.room:room-compiler:2.6.1")
+
+    // WorkManager (for background sync)
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // Debug
     debugImplementation(libs.compose.ui.tooling)

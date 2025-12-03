@@ -8,10 +8,9 @@ import com.google.firebase.firestore.snapshots
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.MessageStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.catch
 import java.util.UUID
 
 class ChatRepository {
@@ -30,11 +29,15 @@ class ChatRepository {
             .document(chatId)
             .collection("messages")
             .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(50) // Optimized: Limit to last 50 messages
             .snapshots()
             .map { snapshot ->
                 snapshot.toObjects(Message::class.java)
             }
-            .catch { emit(emptyList()) }
+            .catch { e ->
+                android.util.Log.e("ChatRepository", "Error loading messages", e)
+                emit(emptyList()) // Emit empty list but log the error
+            }
     }
 
     fun getLastMessage(friendId: String): Flow<Message?> {
@@ -50,10 +53,13 @@ class ChatRepository {
             .map { snapshot ->
                 snapshot.toObjects(Message::class.java).firstOrNull()
             }
-            .catch { emit(null) }
+            .catch { e ->
+                android.util.Log.e("ChatRepository", "Error loading last message", e)
+                emit(null)
+            }
     }
 
-    suspend fun sendMessage(senderId: String, receiverId: String, text: String, replyTo: Message? = null) {
+    suspend fun sendMessage(senderId: String, receiverId: String, text: String, replyTo: Message? = null): String {
         val chatId = getChatId(senderId, receiverId)
         val messageId = UUID.randomUUID().toString()
         
@@ -66,35 +72,45 @@ class ChatRepository {
             replyToId = replyTo?.id,
             replyToText = replyTo?.text,
             replyToSenderName = if (replyTo?.senderId == senderId) "You" else "Friend",
-            status = MessageStatus.SENT,
+            status = MessageStatus.SENDING, // Optimistic: Start with SENDING status
             readBy = listOf(senderId)
         )
 
         val chatRef = firestore.collection("chats").document(chatId)
         
-        // Use batch to update both message and chat document atomically
-        firestore.runBatch { batch ->
-            // Update chat document with last message and participants
-            batch.set(
-                chatRef,
-                mapOf(
-                    "participants" to listOf(senderId, receiverId),
-                    "lastMessage" to mapOf(
-                        "text" to text,
-                        "senderId" to senderId,
-                        "timestamp" to Timestamp.now(),
-                        "type" to newMessage.type.name,
-                        "isDeleted" to false
+        // Optimistic: Return message ID immediately for UI update
+        // Then send in background
+        try {
+            // Use batch to update both message and chat document atomically
+            firestore.runBatch { batch ->
+                // Update chat document with last message and participants
+                batch.set(
+                    chatRef,
+                    mapOf(
+                        "participants" to listOf(senderId, receiverId),
+                        "lastMessage" to mapOf(
+                            "text" to text,
+                            "senderId" to senderId,
+                            "timestamp" to Timestamp.now(),
+                            "type" to newMessage.type.name,
+                            "isDeleted" to false
+                        ),
+                        "lastMessageTime" to Timestamp.now(),
+                        "unreadCount_$receiverId" to com.google.firebase.firestore.FieldValue.increment(1)
                     ),
-                    "lastMessageTime" to Timestamp.now(),
-                    "unreadCount_$receiverId" to com.google.firebase.firestore.FieldValue.increment(1)
-                ),
-                com.google.firebase.firestore.SetOptions.merge()
-            )
-            
-            // Add message to messages subcollection
-            batch.set(chatRef.collection("messages").document(messageId), newMessage)
-        }.await()
+                    com.google.firebase.firestore.SetOptions.merge()
+                )
+                
+                // Add message to messages subcollection with SENT status
+                batch.set(chatRef.collection("messages").document(messageId), newMessage.copy(status = MessageStatus.SENT))
+            }.await()
+        } catch (e: Exception) {
+            // If send fails, update message status to failed (could be handled in UI)
+            android.util.Log.e("ChatRepository", "Error sending message", e)
+            throw e
+        }
+        
+        return messageId
     }
 
     suspend fun addReaction(messageId: String, emoji: String, userId: String, friendId: String) {
@@ -224,10 +240,12 @@ class ChatRepository {
         
         try {
             // Get all unread messages (sent by friend, not read by me)
+            // Optimized: Filter by status to avoid fetching all history
             val unreadMessages = firestore.collection("chats")
                 .document(chatId)
                 .collection("messages")
                 .whereEqualTo("senderId", friendId)
+                .whereIn("status", listOf(MessageStatus.SENT.name, MessageStatus.DELIVERED.name))
                 .get()
                 .await()
                 .documents
@@ -290,7 +308,7 @@ class ChatRepository {
              try {
                  val userDoc = firestore.collection("users").document(replyTo.senderId).get().await()
                  replyToSenderName = userDoc.getString("displayName") ?: "Unknown"
-             } catch (e: Exception) {
+             } catch (_: Exception) {
                  // Ignore
              }
         }

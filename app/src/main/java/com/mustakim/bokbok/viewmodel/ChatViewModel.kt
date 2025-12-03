@@ -20,8 +20,8 @@ class ChatViewModel(
     private val friendId: String
 ) : ViewModel() {
 
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
-    val messages: StateFlow<List<Message>> = _messages.asStateFlow()
+    private val _messages = MutableStateFlow<List<Message>?>(null)
+    val messages: StateFlow<List<Message>?> = _messages.asStateFlow()
 
     val currentUserId: String = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
 

@@ -130,7 +130,7 @@ fun ChatScreen(
     // Filter out messages deleted by current user (Optimized with derivedStateOf)
     val messages by remember {
         derivedStateOf {
-            allMessages.filter { !it.deletedBy.contains(viewModel.currentUserId) }
+            allMessages?.filter { !it.deletedBy.contains(viewModel.currentUserId) }
         }
     }
     val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
@@ -144,8 +144,8 @@ fun ChatScreen(
         viewModel.setShowEmojiPicker(false)
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+    LaunchedEffect(messages?.size) {
+        if (messages?.isNotEmpty() == true) {
             listState.animateScrollToItem(0)
         }
     }
@@ -236,15 +236,17 @@ fun ChatScreen(
                         )
                     }
             ) {
-                // Show empty state if no messages
-                if (messages.isEmpty()) {
+                val currentMessages = messages
+                // Show empty state only if messages are loaded and empty (not null)
+                // null means still loading, don't show empty state to prevent flicker
+                if (currentMessages != null && currentMessages.isEmpty()) {
                     EmptyChatState(
                         friendName = friendUser?.displayName ?: "your friend",
                         onSendSuggestion = { suggestion ->
                             viewModel.onMessageChange(suggestion)
                         }
                     )
-                } else {
+                } else if (currentMessages != null) {
                     LazyColumn(
                         state = listState,
                         reverseLayout = true,
@@ -257,16 +259,16 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        itemsIndexed(messages) { index, message ->
+                        itemsIndexed(currentMessages) { index, message ->
                             val isMe = message.senderId == viewModel.currentUserId
-                            val nextMessage = messages.getOrNull(index - 1)
-                            val prevMessage = messages.getOrNull(index + 1)
+                            val nextMessage = currentMessages.getOrNull(index - 1)
+                            val prevMessage = currentMessages.getOrNull(index + 1)
                             
                             val isLastInSequence = nextMessage?.senderId != message.senderId
                             val isFirstInSequence = prevMessage?.senderId != message.senderId
                             
                             // Find the last read message from me (for read receipt)
-                            val lastReadMessage = messages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
+                            val lastReadMessage = currentMessages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
                             val isLastReadMessage = message.id == lastReadMessage?.id
 
                             // Date Header Logic
@@ -290,7 +292,7 @@ fun ChatScreen(
                                 onDelete = { forEveryone -> viewModel.deleteMessage(message.id, forEveryone) },
                                 onRemoveReaction = { viewModel.removeReaction(message.id) },
                                 onReplyClick = { replyToId ->
-                                    val replyIndex = messages.indexOfFirst { it.id == replyToId }
+                                    val replyIndex = currentMessages.indexOfFirst { it.id == replyToId }
                                     if (replyIndex != -1) {
                                         scope.launch {
                                             listState.animateScrollToItem(replyIndex)

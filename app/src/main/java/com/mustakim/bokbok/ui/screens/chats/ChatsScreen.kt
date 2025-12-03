@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,22 +27,33 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,14 +66,17 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.repository.ChatRepository
 import com.mustakim.bokbok.data.repository.FriendsRepository
+import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.ChatUiModel
 import com.mustakim.bokbok.viewmodel.FriendsUiState
@@ -70,6 +85,7 @@ import com.mustakim.bokbok.viewmodel.UserViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -77,11 +93,11 @@ import java.util.Locale
 fun ChatsScreen(
     friendsRepository: FriendsRepository,
     chatRepository: ChatRepository,
+    isMinimized: Boolean = RoomStateManager.isMinimized.value,
     onFriendClick: (String) -> Unit,
     navController: NavHostController,
     userViewModel: UserViewModel
 ) {
-    // Use the Factory to create the ViewModel
     val viewModel: FriendsViewModel = viewModel(
         factory = FriendsViewModel.Factory(friendsRepository, chatRepository)
     )
@@ -90,7 +106,24 @@ fun ChatsScreen(
     val uiState by viewModel.uiState.collectAsState()
 
     var showAddFriendDialog by remember { mutableStateOf(false) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var isFabMenuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Local search state
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Filtered list based on search query
+    val filteredChats = remember(chatList, searchQuery) {
+        if (searchQuery.isBlank()) {
+            chatList
+        } else {
+            chatList.filter { chat ->
+                val name = if (chat.isGroup) chat.groupName else chat.friend?.user?.displayName
+                name?.contains(searchQuery, ignoreCase = true) == true
+            }
+        }
+    }
 
     LaunchedEffect(uiState) {
         when (uiState) {
@@ -106,19 +139,19 @@ fun ChatsScreen(
         }
     }
 
-    // Scroll State for hiding Search Bar
     val listState = rememberLazyListState()
-    var isSearchBarVisible by remember { mutableStateOf(true) }
 
-    // Nested Scroll Connection to detect scroll direction
+    // Search Bar Scroll Logic
+    val searchBarHeight = 72.dp
+    val searchBarHeightPx = with(LocalDensity.current) { searchBarHeight.toPx() }
+    var searchBarOffsetHeightPx by remember { mutableFloatStateOf(0f) }
+
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < -10) { // Scrolling Down
-                    isSearchBarVisible = false
-                } else if (available.y > 10) { // Scrolling Up
-                    isSearchBarVisible = true
-                }
+                val delta = available.y
+                val newOffset = searchBarOffsetHeightPx + delta
+                searchBarOffsetHeightPx = newOffset.coerceIn(-searchBarHeightPx, 0f)
                 return Offset.Zero
             }
         }
@@ -135,34 +168,42 @@ fun ChatsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .nestedScroll(nestedScrollConnection)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(nestedScrollConnection)
-            ) {
-                // Dynamic Search Bar
-                AnimatedVisibility(
-                    visible = isSearchBarVisible,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
+            if (chatList.isEmpty()) {
+                EmptyFriendsState()
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        top = searchBarHeight, // Push content down by search bar height
+                        bottom = 80.dp
+                    ),
                 ) {
-                    SearchBarDummy()
-                }
-
-                if (chatList.isEmpty()) {
-                    EmptyFriendsState()
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 80.dp), // Space for FAB
-                    ) {
+                    if (filteredChats.isEmpty() && searchQuery.isNotBlank()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No results found",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else {
                         items(
-                            items = chatList,
-                            key = { it.friend.friendship.id }
+                            items = filteredChats,
+                            key = { chat ->
+                                if (chat.isGroup) "group_${chat.groupId}"
+                                else "friend_${chat.friend?.friendship?.id}"
+                            }
                         ) { chatItem ->
-                            // Expressive Animation
                             Box(
                                 modifier = Modifier.animateItem(
                                     placementSpec = spring(
@@ -173,7 +214,14 @@ fun ChatsScreen(
                             ) {
                                 ChatListItem(
                                     chat = chatItem,
-                                    onClick = { onFriendClick(chatItem.friend.user.uid) }
+                                    onClick = {
+                                        if (chatItem.isGroup && chatItem.groupId != null) {
+                                            // TODO: Navigate to group chat
+                                            // For now, just show a message
+                                        } else if (chatItem.friend != null) {
+                                            onFriendClick(chatItem.friend.user.uid)
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -181,23 +229,86 @@ fun ChatsScreen(
                 }
             }
 
-            // Expressive FAB
-            FloatingActionButton(
-                onClick = { showAddFriendDialog = true },
+            // Search Bar (Overlay)
+            if (chatList.isNotEmpty()) {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset { IntOffset(x = 0, y = searchBarOffsetHeightPx.roundToInt()) }
+                )
+            }
+
+            // Scrim overlay when menu is expanded
+            if (isFabMenuExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable { isFabMenuExpanded = false }
+                )
+            }
+
+            // M3-compliant FAB Menu (Extended FABs)
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 24.dp, bottom = 24.dp),
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                shape = RoundedCornerShape(16.dp) // Squircle FAB
+                    .padding(
+                        end = 32.dp,
+                        bottom = if (isMinimized) 120.dp else 36.dp
+                    ),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Menu items (appear above main FAB)
+                AnimatedVisibility(
+                    visible = isFabMenuExpanded,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("New Chat", fontWeight = FontWeight.Bold)
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Create Group
+                        ExtendedFloatingActionButton(
+                            onClick = {
+                                isFabMenuExpanded = false
+                                showCreateGroupDialog = true
+                            },
+                            icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
+                            text = { Text("Create Group") },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            expanded = true
+                        )
+
+                        // Add Friend
+                        ExtendedFloatingActionButton(
+                            onClick = {
+                                isFabMenuExpanded = false
+                                showAddFriendDialog = true
+                            },
+                            icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
+                            text = { Text("Add Friend") },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            expanded = true
+                        )
+                    }
+                }
+
+                // Main FAB
+                FloatingActionButton(
+                    onClick = { isFabMenuExpanded = !isFabMenuExpanded },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ) {
+                    Icon(
+                        imageVector = if (isFabMenuExpanded) Icons.Default.Close else Icons.Default.Add,
+                        contentDescription = if (isFabMenuExpanded) "Close" else "Menu"
+                    )
                 }
             }
 
@@ -216,36 +327,39 @@ fun ChatsScreen(
             onDismiss = { showAddFriendDialog = false }
         )
     }
+
+    if (showCreateGroupDialog) {
+        CreateGroupChatDialog(
+            viewModel = viewModel,
+            onDismiss = { showCreateGroupDialog = false }
+        )
+    }
 }
 
 @Composable
-fun SearchBarDummy() {
-    Surface(
-        modifier = Modifier
+fun SearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
-            .height(52.dp),
-        shape = CircleShape, // Fully rounded
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        onClick = { /* TODO: Implement Search */ }
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Search",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "Search chats...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        placeholder = { Text("Search chats...") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        shape = CircleShape,
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.Transparent
+        )
+    )
 }
 
 @Composable
@@ -253,8 +367,18 @@ fun ChatListItem(
     chat: ChatUiModel,
     onClick: () -> Unit
 ) {
-    val friend = chat.friend
-    val user = friend.user
+
+    // Handle both individual and group chats
+    val displayName = if (chat.isGroup) {
+        chat.groupName ?: "Group"
+    } else {
+        chat.friend?.user?.displayName ?: "Unknown"
+    }
+
+    val avatarText = displayName.take(1).uppercase()
+    val profileImageUrl = chat.friend?.user?.profileImageUrl ?: ""
+    val isOnline = chat.friend?.isOnline ?: false
+    val currentRoomId = chat.friend?.currentRoomId
 
     Surface(
         onClick = onClick,
@@ -267,15 +391,14 @@ fun ChatListItem(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar
             Box(modifier = Modifier.size(56.dp)) {
-                if (user.profileImageUrl.isNotEmpty()) {
+                if (profileImageUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = user.profileImageUrl,
+                        model = profileImageUrl,
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp)), // Squircle
+                            .clip(CircleShape),
                         contentScale = ContentScale.Crop
                     )
                 } else {
@@ -284,12 +407,12 @@ fun ChatListItem(
                             .fillMaxSize()
                             .background(
                                 MaterialTheme.colorScheme.primaryContainer,
-                                RoundedCornerShape(18.dp)
+                                CircleShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = user.displayName.take(1).uppercase(),
+                            text = avatarText,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -297,24 +420,22 @@ fun ChatListItem(
                     }
                 }
 
-                // Online Status Indicator
-                if (friend.isOnline) {
+                if (isOnline) {
                     Box(
                         modifier = Modifier
                             .size(14.dp)
                             .align(Alignment.BottomEnd)
                             .offset(x = 2.dp, y = 2.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface) // Border effect
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(2.dp)
-                            .background(Color.Green, CircleShape) // Inner dot
+                            .background(Color.Green, CircleShape)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Content
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -322,13 +443,12 @@ fun ChatListItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = user.displayName,
+                        text = displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    // Timestamp
                     if (chat.timestamp > 0) {
                         Text(
                             text = formatChatTime(chat.timestamp),
@@ -345,11 +465,10 @@ fun ChatListItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Subtitle / Last Message with Sender
                     Text(
                         text = when {
-                            friend.currentRoomId != null -> "In a voice room • Join now"
-                            chat.lastMessage.isEmpty() -> if (friend.isOnline) "Active now" else "Start a conversation"
+                            currentRoomId != null -> "In a voice room • Join now"
+                            chat.lastMessage.isEmpty() -> if (isOnline) "Active now" else "Start a conversation"
                             else -> {
                                 val prefix = when (chat.lastMessageSender) {
                                     "You" -> "You: "
@@ -361,7 +480,7 @@ fun ChatListItem(
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = when {
-                            friend.currentRoomId != null -> MaterialTheme.colorScheme.primary
+                            currentRoomId != null -> MaterialTheme.colorScheme.primary
                             !chat.isLastMessageRead && chat.lastMessageSender != "You" -> MaterialTheme.colorScheme.onSurface
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -374,7 +493,6 @@ fun ChatListItem(
                         modifier = Modifier.weight(1f)
                     )
                     
-                    // Unread Count Badge
                     if (chat.unreadCount > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
@@ -443,7 +561,6 @@ fun formatChatTime(timestamp: Long): String {
     }
 }
 
-// Helper functions for date formatting (copied from ChatScreen/GroupChatScreen to avoid circular deps or just for simplicity)
 fun isSameDay(date1: Date, date2: Date): Boolean {
     val fmt = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
     return fmt.format(date1) == fmt.format(date2)
@@ -453,4 +570,88 @@ fun isYesterday(date: Date): Boolean {
     val cal = java.util.Calendar.getInstance()
     cal.add(java.util.Calendar.DATE, -1)
     return isSameDay(date, cal.time)
+}
+
+@Composable
+fun CreateGroupChatDialog(
+    viewModel: FriendsViewModel,
+    onDismiss: () -> Unit
+) {
+    var groupName by remember { mutableStateOf("") }
+    val friends by viewModel.friends.collectAsState()
+    val selectedFriends = remember { mutableStateListOf<String>() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create Group Chat") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text("Group Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Select Friends:", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(
+                    modifier = Modifier.height(200.dp)
+                ) {
+                    items(friends) { friend ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val uid = friend.user.uid
+                                    if (selectedFriends.contains(uid)) {
+                                        selectedFriends.remove(uid)
+                                    } else {
+                                        selectedFriends.add(uid)
+                                    }
+                                }
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Checkbox(
+                                checked = selectedFriends.contains(friend.user.uid),
+                                onCheckedChange = { checked ->
+                                    val uid = friend.user.uid
+                                    if (checked) {
+                                        selectedFriends.add(uid)
+                                    } else {
+                                        selectedFriends.remove(uid)
+                                    }
+                                }
+                            )
+                            Text(
+                                text = friend.user.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (groupName.isNotBlank() && selectedFriends.isNotEmpty()) {
+                        viewModel.createGroupChat(groupName, selectedFriends.toList())
+                        onDismiss()
+                    }
+                },
+                enabled = groupName.isNotBlank() && selectedFriends.isNotEmpty()
+            ) {
+                Text("Create")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

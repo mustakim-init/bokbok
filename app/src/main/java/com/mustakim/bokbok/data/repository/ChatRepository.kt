@@ -380,4 +380,24 @@ class ChatRepository {
             throw e
         }
     }
+    suspend fun createGroupChat(groupName: String, participantIds: List<String>): String {
+        val currentUserId = auth.currentUser?.uid ?: throw IllegalStateException("User not logged in")
+        val groupId = UUID.randomUUID().toString()
+        
+        val allParticipants = (participantIds + currentUserId).distinct()
+        
+        val groupData = mapOf(
+            "id" to groupId,
+            "name" to groupName,
+            "participants" to allParticipants,
+            "createdBy" to currentUserId,
+            "createdAt" to Timestamp.now(),
+            "lastMessage" to null,
+            "lastMessageTime" to Timestamp.now(),
+            "type" to "GROUP"
+        )
+        
+        firestore.collection("groups").document(groupId).set(groupData).await()
+        return groupId
+    }
 }

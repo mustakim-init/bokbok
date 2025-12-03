@@ -31,31 +31,29 @@ class FriendsViewModel(
     // Optimized: Use single listener on chats collection instead of N listeners (one per friend)
     @OptIn(ExperimentalCoroutinesApi::class)
     val chats: StateFlow<List<ChatUiModel>> = friends.flatMapLatest { friendList ->
-        if (friendList.isEmpty()) {
+        val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+        if (currentUserId == null) {
             flowOf(emptyList())
         } else {
-            val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
-            if (currentUserId == null) {
-                flowOf(emptyList())
-            } else {
-                // Single query for all chat documents where user is a participant
+            // Combine individual chats and group chats
+            combine(
+                // Individual chats flow
                 FirebaseFirestore.getInstance()
                     .collection("chats")
                     .whereArrayContains("participants", currentUserId)
                     .snapshots()
                     .map { snapshot ->
-                        // Create a map of friendId to chat data
                         val chatDataMap = snapshot.documents.mapNotNull { doc ->
                             val participants = doc.get("participants") as? List<*> ?: return@mapNotNull null
                             val friendId = participants.firstOrNull { it != currentUserId } as? String ?: return@mapNotNull null
-                            
+
                             val lastMsgMap = doc.get("lastMessage") as? Map<*, *>
                             val senderId = lastMsgMap?.get("senderId") as? String
                             val senderName = when {
                                 senderId == currentUserId -> "You"
-                                else -> null // Will be filled with friend name later
+                                else -> null
                             }
-                            
+
                             val lastMessageText = when {
                                 lastMsgMap == null -> null
                                 lastMsgMap["isDeleted"] as? Boolean == true -> "Message unsent"
@@ -63,46 +61,87 @@ class FriendsViewModel(
                                 lastMsgMap["type"] == "AUDIO" -> "Sent an audio"
                                 else -> lastMsgMap["text"] as? String ?: ""
                             }
-                            
+
                             val timestamp = (lastMsgMap?.get("timestamp") as? Timestamp)?.toDate()?.time ?: 0L
                             val unreadCount = (doc.getLong("unreadCount_$currentUserId"))?.toInt() ?: 0
-                            
+
                             friendId to Triple(lastMessageText, timestamp, unreadCount to senderName)
                         }.toMap()
-                        
-                        // Now create ChatUiModel for ALL friends, using chat data if available
-                        val chats = friendList.map { friend ->
+
+                        friendList.map { friend ->
                             val chatData = chatDataMap[friend.user.uid]
                             val (lastMessageText, timestamp, unreadData) = chatData ?: Triple(null, 0L, 0 to null)
                             val (unreadCount, senderNameFromChat) = unreadData as Pair<Int, String?>
-                            
+
                             val senderName = senderNameFromChat ?: run {
-                                // Determine sender from friend if not from "You"
                                 if (lastMessageText != null && senderNameFromChat == null) {
                                     friend.user.displayName.split(" ").firstOrNull() ?: "Friend"
                                 } else null
                             }
-                            
+
                             val displayMessage = when {
                                 lastMessageText != null -> lastMessageText
                                 friend.isOnline -> "Active now"
                                 else -> "Start a conversation"
                             }
-                            
+
                             ChatUiModel(
                                 friend = friend,
                                 lastMessage = displayMessage,
                                 lastMessageSender = senderName,
                                 timestamp = timestamp,
                                 unreadCount = unreadCount,
-                                isLastMessageRead = unreadCount == 0
+                                isLastMessageRead = unreadCount == 0,
+                                isGroup = false
                             )
                         }
-                        
-                        // Sort by timestamp, with chats without messages at the bottom
-                        chats.sortedByDescending { it.timestamp }
+                    }
+                    .catch { emit(emptyList()) },
+
+                // Group chats flow
+                FirebaseFirestore.getInstance()
+                    .collection("groups")
+                    .whereArrayContains("participants", currentUserId)
+                    .snapshots()
+                    .map { snapshot ->
+                        snapshot.documents.mapNotNull { doc ->
+                            val groupId = doc.getString("id") ?: return@mapNotNull null
+                            val groupName = doc.getString("name") ?: return@mapNotNull null
+                            val lastMsgMap = doc.get("lastMessage") as? Map<*, *>
+
+                            val lastMessageText = when {
+                                lastMsgMap == null -> "No messages yet"
+                                lastMsgMap["isDeleted"] as? Boolean == true -> "Message unsent"
+                                lastMsgMap["type"] == "IMAGE" -> "Sent an image"
+                                lastMsgMap["type"] == "AUDIO" -> "Sent an audio"
+                                else -> lastMsgMap["text"] as? String ?: ""
+                            }
+
+                            val senderId = lastMsgMap?.get("senderId") as? String
+                            val senderName = when {
+                                senderId == currentUserId -> "You"
+                                senderId != null -> "Member" // Simplified
+                                else -> null
+                            }
+
+                            val timestamp = (doc.getTimestamp("lastMessageTime"))?.toDate()?.time ?: 0L
+
+                            ChatUiModel(
+                                groupId = groupId,
+                                groupName = groupName,
+                                isGroup = true,
+                                lastMessage = lastMessageText,
+                                lastMessageSender = senderName,
+                                timestamp = timestamp,
+                                unreadCount = 0,
+                                isLastMessageRead = true
+                            )
+                        }
                     }
                     .catch { emit(emptyList()) }
+            ) { individualChats, groupChats ->
+                // Merge and sort by timestamp
+                (individualChats + groupChats).sortedByDescending { it.timestamp }
             }
         }
     }.stateIn(
@@ -214,6 +253,18 @@ class FriendsViewModel(
         }
     }
 
+    fun createGroupChat(name: String, participantIds: List<String>) {
+        viewModelScope.launch {
+            _uiState.value = FriendsUiState.Loading
+            try {
+                chatRepository.createGroupChat(name, participantIds)
+                _uiState.value = FriendsUiState.Success("Group chat created!")
+            } catch (e: Exception) {
+                _uiState.value = FriendsUiState.Error(e.message ?: "Failed to create group")
+            }
+        }
+    }
+
     fun clearUiState() {
         _uiState.value = FriendsUiState.Idle
     }
@@ -233,11 +284,14 @@ class FriendsViewModel(
     }
 }
 
-// Data class for UI representation of a chat item
+// Data class for UI representation of a chat item (individual or group)
 data class ChatUiModel(
-    val friend: FriendWithUser,
+    val friend: FriendWithUser? = null, // null for group chats
+    val groupId: String? = null, // null for individual chats
+    val groupName: String? = null, // null for individual chats
+    val isGroup: Boolean = false,
     val lastMessage: String,
-    val lastMessageSender: String? = null, // "You", friend name, or null
+    val lastMessageSender: String? = null,
     val timestamp: Long,
     val unreadCount: Int = 0,
     val isLastMessageRead: Boolean = true

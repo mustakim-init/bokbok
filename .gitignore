@@ -16,4 +16,7 @@ local.properties
 .apk
 /app/release
 /Ref Project
+*.md
+.agent
+/.md
 .md

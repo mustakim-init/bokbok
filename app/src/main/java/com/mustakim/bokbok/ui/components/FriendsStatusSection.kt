@@ -114,8 +114,8 @@ fun FriendStatusCard(
 
     val isInRoom = remember(friend.status) { friend.status == UserStatus.IN_ROOM }
     val backgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+    val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
+    val onPrimaryContainerColor = MaterialTheme.colorScheme.onPrimaryContainer
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -159,13 +159,13 @@ fun FriendStatusCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(primaryColor),
+                            .background(primaryContainerColor),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = friend.displayName.firstOrNull()?.uppercase() ?: "?",
                             style = MaterialTheme.typography.headlineMedium,
-                            color = onPrimaryColor,
+                            color = onPrimaryContainerColor,
                             fontWeight = FontWeight.Bold
                         )
                     }

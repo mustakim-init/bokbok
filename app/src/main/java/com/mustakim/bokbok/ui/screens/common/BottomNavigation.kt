@@ -51,22 +51,26 @@ fun BottomNavigationBar(
     )
 
     NavigationBar(
+        // Use surfaceContainer for slight elevation/contrast from background
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp // Prevents additional tonal overlay
     ) {
         items.forEach { item ->
             val selected = currentRoute == item.route
             
-            // Bounce Animation
+            // Smooth bounce animation
             val scale = remember { Animatable(1f) }
             
             LaunchedEffect(selected) {
                 if (selected) {
                     launch {
+                        // Quick squish
                         scale.animateTo(
-                            targetValue = 0.8f,
+                            targetValue = 0.85f,
                             animationSpec = tween(durationMillis = 50)
                         )
+                        // Bounce up
                         scale.animateTo(
                             targetValue = 1.2f,
                             animationSpec = spring(
@@ -74,11 +78,12 @@ fun BottomNavigationBar(
                                 stiffness = Spring.StiffnessLow
                             )
                         )
+                        // Settle
                         scale.animateTo(
                             targetValue = 1f,
                             animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessLow
                             )
                         )
                     }
@@ -105,15 +110,15 @@ fun BottomNavigationBar(
                 label = {
                     Text(
                         text = item.label,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                     )
                 },
                 alwaysShowLabel = true,
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = MaterialTheme.colorScheme.primary,
                     selectedTextColor = MaterialTheme.colorScheme.primary,
-                    indicatorColor = MaterialTheme.colorScheme.primaryContainer, // Remove the pill indicator background
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )

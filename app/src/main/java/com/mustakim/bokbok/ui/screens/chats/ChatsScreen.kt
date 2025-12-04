@@ -2,6 +2,8 @@ package com.mustakim.bokbok.ui.screens.chats
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -27,19 +29,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -47,20 +52,21 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -86,7 +92,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
-
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -177,24 +182,16 @@ fun ChatsScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = searchBarHeight, // Push content down by search bar height
-                        bottom = 80.dp
+                        top = searchBarHeight + 8.dp,
+                        bottom = 80.dp,
+                        start = 16.dp,
+                        end = 16.dp
                     ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (filteredChats.isEmpty() && searchQuery.isNotBlank()) {
                         item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No results found",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            NoSearchResults()
                         }
                     } else {
                         items(
@@ -217,7 +214,6 @@ fun ChatsScreen(
                                     onClick = {
                                         if (chatItem.isGroup && chatItem.groupId != null) {
                                             // TODO: Navigate to group chat
-                                            // For now, just show a message
                                         } else if (chatItem.friend != null) {
                                             onFriendClick(chatItem.friend.user.uid)
                                         }
@@ -229,9 +225,9 @@ fun ChatsScreen(
                 }
             }
 
-            // Search Bar (Overlay)
+            // Premium Search Bar
             if (chatList.isNotEmpty()) {
-                SearchBar(
+                PremiumSearchBar(
                     query = searchQuery,
                     onQueryChange = { searchQuery = it },
                     modifier = Modifier
@@ -245,23 +241,38 @@ fun ChatsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
+                        .background(
+                            MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f)
+                        )
                         .clickable { isFabMenuExpanded = false }
                 )
             }
 
-            // M3-compliant FAB Menu (Extended FABs)
+            // Premium FAB Menu
+            val fabRotation by animateFloatAsState(
+                targetValue = if (isFabMenuExpanded) 45f else 0f,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                label = "fabRotation"
+            )
+
+            // Animate FAB shape: Squircle (16.dp) -> Circle (50%)
+            val fabCornerRadius by animateIntAsState(
+                targetValue = if (isFabMenuExpanded) 50 else 25, // Percentage
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                label = "fabShape"
+            )
+
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
-                        end = 32.dp,
-                        bottom = if (isMinimized) 120.dp else 36.dp
+                        end = 32.dp, // Match LoungeScreen padding
+                        bottom = if (isMinimized) 120.dp else 36.dp // Match LoungeScreen padding
                     ),
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Menu items (appear above main FAB)
+                // Menu items
                 AnimatedVisibility(
                     visible = isFabMenuExpanded,
                     enter = fadeIn() + expandVertically(),
@@ -269,7 +280,7 @@ fun ChatsScreen(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // Create Group
                         ExtendedFloatingActionButton(
@@ -278,10 +289,11 @@ fun ChatsScreen(
                                 showCreateGroupDialog = true
                             },
                             icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
-                            text = { Text("Create Group") },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            expanded = true
+                            text = { Text("New Group", fontWeight = FontWeight.Medium) },
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            expanded = true,
+                            modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
                         )
 
                         // Add Friend
@@ -291,23 +303,31 @@ fun ChatsScreen(
                                 showAddFriendDialog = true
                             },
                             icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
-                            text = { Text("Add Friend") },
+                            text = { Text("Add Friend", fontWeight = FontWeight.Medium) },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            expanded = true
+                            expanded = true,
+                            modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
                         )
                     }
                 }
 
-                // Main FAB
+                // Main FAB with rotation and shape morph
                 FloatingActionButton(
                     onClick = { isFabMenuExpanded = !isFabMenuExpanded },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(fabCornerRadius),
+                    modifier = Modifier
+                        .size(56.dp)
+                        .shadow(6.dp, RoundedCornerShape(fabCornerRadius))
                 ) {
                     Icon(
-                        imageVector = if (isFabMenuExpanded) Icons.Default.Close else Icons.Default.Add,
-                        contentDescription = if (isFabMenuExpanded) "Close" else "Menu"
+                        imageVector = Icons.Default.Add,
+                        contentDescription = if (isFabMenuExpanded) "Close" else "Menu",
+                        modifier = Modifier
+                            .size(24.dp)
+                            .rotate(fabRotation)
                     )
                 }
             }
@@ -329,7 +349,7 @@ fun ChatsScreen(
     }
 
     if (showCreateGroupDialog) {
-        CreateGroupChatDialog(
+        CreateGroupDialog(
             viewModel = viewModel,
             onDismiss = { showCreateGroupDialog = false }
         )
@@ -337,29 +357,71 @@ fun ChatsScreen(
 }
 
 @Composable
-fun SearchBar(
+fun PremiumSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        placeholder = { Text("Search chats...") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        shape = CircleShape,
-        singleLine = true,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            focusedBorderColor = Color.Transparent,
-            unfocusedBorderColor = Color.Transparent
-        )
-    )
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 2.dp,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp),
+                placeholder = {
+                    Text(
+                        "Search conversations...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    cursorColor = MaterialTheme.colorScheme.primary
+                ),
+                textStyle = MaterialTheme.typography.bodyMedium
+            )
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = { onQueryChange("") },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -367,8 +429,6 @@ fun ChatListItem(
     chat: ChatUiModel,
     onClick: () -> Unit
 ) {
-
-    // Handle both individual and group chats
     val displayName = if (chat.isGroup) {
         chat.groupName ?: "Group"
     } else {
@@ -379,18 +439,29 @@ fun ChatListItem(
     val profileImageUrl = chat.friend?.user?.profileImageUrl ?: ""
     val isOnline = chat.friend?.isOnline ?: false
     val currentRoomId = chat.friend?.currentRoomId
+    val hasUnread = chat.unreadCount > 0 && chat.lastMessageSender != "You"
 
-    Surface(
+    Card(
         onClick = onClick,
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (hasUnread)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+            else
+                MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (hasUnread) 2.dp else 0.dp
+        )
     ) {
         Row(
             modifier = Modifier
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(12.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Avatar with online indicator
             Box(modifier = Modifier.size(56.dp)) {
                 if (profileImageUrl.isNotEmpty()) {
                     AsyncImage(
@@ -398,16 +469,21 @@ fun ChatListItem(
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(CircleShape),
+                            .clip(RoundedCornerShape(18.dp)),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            .clip(RoundedCornerShape(18.dp))
                             .background(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                CircleShape
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                )
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -420,21 +496,38 @@ fun ChatListItem(
                     }
                 }
 
-                if (isOnline) {
+                // Online / In Room indicator
+                if (isOnline || currentRoomId != null) {
                     Box(
                         modifier = Modifier
-                            .size(14.dp)
+                            .size(16.dp)
                             .align(Alignment.BottomEnd)
                             .offset(x = 2.dp, y = 2.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surface)
                             .padding(2.dp)
-                            .background(Color.Green, CircleShape)
-                    )
+                            .clip(CircleShape)
+                            .background(
+                                if (currentRoomId != null)
+                                    MaterialTheme.colorScheme.tertiary
+                                else
+                                    MaterialTheme.colorScheme.primary
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (currentRoomId != null) {
+                            Icon(
+                                imageVector = Icons.Rounded.Call,
+                                contentDescription = null,
+                                modifier = Modifier.size(10.dp),
+                                tint = MaterialTheme.colorScheme.onTertiary
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(
@@ -445,15 +538,22 @@ fun ChatListItem(
                     Text(
                         text = displayName,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     if (chat.timestamp > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = formatChatTime(chat.timestamp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (hasUnread)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -467,7 +567,7 @@ fun ChatListItem(
                 ) {
                     Text(
                         text = when {
-                            currentRoomId != null -> "In a voice room • Join now"
+                            currentRoomId != null -> "🎙️ In a voice room • Tap to join"
                             chat.lastMessage.isEmpty() -> if (isOnline) "Active now" else "Start a conversation"
                             else -> {
                                 val prefix = when (chat.lastMessageSender) {
@@ -480,32 +580,25 @@ fun ChatListItem(
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = when {
-                            currentRoomId != null -> MaterialTheme.colorScheme.primary
-                            !chat.isLastMessageRead && chat.lastMessageSender != "You" -> MaterialTheme.colorScheme.onSurface
+                            currentRoomId != null -> MaterialTheme.colorScheme.tertiary
+                            hasUnread -> MaterialTheme.colorScheme.onSurface
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        fontWeight = if (!chat.isLastMessageRead && chat.lastMessageSender != "You")
-                            FontWeight.SemiBold
-                        else
-                            FontWeight.Normal,
+                        fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    
+
                     if (chat.unreadCount > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(24.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.primary,
-                                    CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primary
                         ) {
                             Text(
                                 text = if (chat.unreadCount > 9) "9+" else chat.unreadCount.toString(),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimary,
                                 fontWeight = FontWeight.Bold
@@ -519,6 +612,38 @@ fun ChatListItem(
 }
 
 @Composable
+private fun NoSearchResults() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Text(
+                text = "No results found",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Try a different search term",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun EmptyFriendsState() {
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -526,18 +651,44 @@ private fun EmptyFriendsState() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
         ) {
+            // Decorative icon with gradient background
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.ChatBubbleOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
             Text(
-                text = "No Chats Yet",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
+                text = "No Conversations Yet",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             Text(
-                text = "Start a new conversation!",
+                text = "Add friends to start chatting.\nTap the + button below to get started!",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }
@@ -547,7 +698,7 @@ fun formatChatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
     val date = Date(timestamp)
-    
+
     return when {
         diff < 24 * 60 * 60 * 1000 && isSameDay(date, Date()) -> {
             SimpleDateFormat("h:mm a", Locale.getDefault()).format(date)
@@ -570,88 +721,4 @@ fun isYesterday(date: Date): Boolean {
     val cal = java.util.Calendar.getInstance()
     cal.add(java.util.Calendar.DATE, -1)
     return isSameDay(date, cal.time)
-}
-
-@Composable
-fun CreateGroupChatDialog(
-    viewModel: FriendsViewModel,
-    onDismiss: () -> Unit
-) {
-    var groupName by remember { mutableStateOf("") }
-    val friends by viewModel.friends.collectAsState()
-    val selectedFriends = remember { mutableStateListOf<String>() }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Group Chat") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = groupName,
-                    onValueChange = { groupName = it },
-                    label = { Text("Group Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Select Friends:", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyColumn(
-                    modifier = Modifier.height(200.dp)
-                ) {
-                    items(friends) { friend ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val uid = friend.user.uid
-                                    if (selectedFriends.contains(uid)) {
-                                        selectedFriends.remove(uid)
-                                    } else {
-                                        selectedFriends.add(uid)
-                                    }
-                                }
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Checkbox(
-                                checked = selectedFriends.contains(friend.user.uid),
-                                onCheckedChange = { checked ->
-                                    val uid = friend.user.uid
-                                    if (checked) {
-                                        selectedFriends.add(uid)
-                                    } else {
-                                        selectedFriends.remove(uid)
-                                    }
-                                }
-                            )
-                            Text(
-                                text = friend.user.displayName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (groupName.isNotBlank() && selectedFriends.isNotEmpty()) {
-                        viewModel.createGroupChat(groupName, selectedFriends.toList())
-                        onDismiss()
-                    }
-                },
-                enabled = groupName.isNotBlank() && selectedFriends.isNotEmpty()
-            ) {
-                Text("Create")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }

@@ -176,7 +176,7 @@ fun GroupChatScreen(
                     IconButton(onClick = { }) { Icon(Icons.Default.MoreVert, "More") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             )
         }
@@ -439,7 +439,8 @@ fun GroupMessageBubble(
                         )
                     }
 
-                    val backgroundColor = if (isMe) Color(0xFFB3C5F6) else Color(0xFFE1D9F5)
+                    val backgroundColor = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
                     
                     Surface(
                         color = backgroundColor,
@@ -463,7 +464,7 @@ fun GroupMessageBubble(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(bottom = 4.dp)
-                                        .background(Color.Black.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
                                         .clickable { message.replyToId?.let { onReplyClick(it) } }
                                         .padding(8.dp)
                                 ) {
@@ -472,13 +473,13 @@ fun GroupMessageBubble(
                                             text = message.replyToSenderName ?: "Unknown",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.Black.copy(alpha = 0.7f)
+                                            color = contentColor.copy(alpha = 0.7f)
                                         )
                                         Text(
                                             text = message.replyToText,
                                             style = MaterialTheme.typography.bodySmall,
                                             maxLines = 1,
-                                            color = Color.Black.copy(alpha = 0.6f)
+                                            color = contentColor.copy(alpha = 0.6f)
                                         )
                                     }
                                 }
@@ -487,7 +488,7 @@ fun GroupMessageBubble(
                             Text(
                                 text = message.text,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = Color.Black
+                                color = contentColor
                             )
                         }
                     }

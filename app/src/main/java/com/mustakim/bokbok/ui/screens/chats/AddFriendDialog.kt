@@ -1,5 +1,6 @@
 package com.mustakim.bokbok.ui.screens.chats
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PersonAdd
@@ -31,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,9 +70,9 @@ fun AddFriendDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.8f),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
+                .fillMaxHeight(0.85f),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp
         ) {
             Column(
@@ -79,16 +82,27 @@ fun AddFriendDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Add Friend",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(onClick = onDismiss) {
+                    Column {
+                        Text(
+                            text = "Add Friend",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Find people to chat with",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close"
@@ -96,70 +110,88 @@ fun AddFriendDialog(
                     }
                 }
 
-                // Search Bar
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { viewModel.searchUsers(it) },
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    placeholder = { Text("Search by username") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search"
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.searchUsers("") }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear"
-                                )
+                        .weight(1f)
+                        .padding(horizontal = 24.dp)
+                ) {
+                    // Search Bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.searchUsers(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search by username") },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search"
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.searchUsers("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear"
+                                    )
+                                }
                             }
-                        }
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium
-                )
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            disabledContainerColor = MaterialTheme.colorScheme.surface,
+                        )
+                    )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Results
-                when {
-                    isSearching -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                    searchQuery.isEmpty() -> {
-                        EmptySearchState()
-                    }
-                    searchResults.isEmpty() -> {
-                        NoResultsState()
-                    }
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(searchResults, key = { it.uid }) { user ->
-                                UserSearchResultItem(
-                                    user = user,
-                                    isRequestSent = outgoingRequests.any { it.friendship.getOtherUserId(user.uid) == user.uid },
-                                    onAddClick = {
-                                        viewModel.sendFriendRequest(user.uid)
+                    // Results Container
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 1.dp
+                    ) {
+                        when {
+                            isSearching -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator()
+                                }
+                            }
+                            searchQuery.isEmpty() -> {
+                                EmptySearchState()
+                            }
+                            searchResults.isEmpty() -> {
+                                NoResultsState()
+                            }
+                            else -> {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(searchResults, key = { it.uid }) { user ->
+                                        UserSearchResultItem(
+                                            user = user,
+                                            isRequestSent = outgoingRequests.any { it.friendship.getOtherUserId(user.uid) == user.uid },
+                                            onAddClick = {
+                                                viewModel.sendFriendRequest(user.uid)
+                                            }
+                                        )
                                     }
-                                )
+                                }
                             }
                         }
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
@@ -173,21 +205,23 @@ private fun UserSearchResultItem(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
                 model = user.profileImageUrl,
                 contentDescription = "${user.displayName}'s avatar",
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(48.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop
             )
@@ -198,7 +232,7 @@ private fun UserSearchResultItem(
                 Text(
                     text = user.displayName,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -212,13 +246,13 @@ private fun UserSearchResultItem(
                 )
 
                 if (user.bio.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = user.bio,
                         style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                     )
                 }
             }
@@ -232,12 +266,16 @@ private fun UserSearchResultItem(
                     colors = ButtonDefaults.buttonColors(
                         disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                         disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
                 ) {
                     Text("Sent")
                 }
             } else {
-                FilledTonalButton(onClick = onAddClick) {
+                FilledTonalButton(
+                    onClick = onAddClick,
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.PersonAdd,
                         contentDescription = "Add Friend",
@@ -259,24 +297,35 @@ private fun EmptySearchState() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Search for Friends",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Enter a username to find friends",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "Search for Friends",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Enter a username to find friends",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -289,7 +338,7 @@ private fun NoResultsState() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
                 text = "No Users Found",

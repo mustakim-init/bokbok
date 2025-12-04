@@ -126,7 +126,7 @@ fun LoungeScreen(
 
     MainScaffold(
         navController = navController,
-        title = "BokBok Lounge",
+        title = "BokBok",
         notificationCount = notificationCount,
         userViewModel = userViewModel
     ) { paddingValues ->
@@ -318,7 +318,8 @@ private fun LoungeContent(
                     end = 32.dp,
                     bottom = if (isMinimized) 120.dp else 36.dp
                 ),
-            containerColor = MaterialTheme.colorScheme.primary
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
         ) {
             Icon(Icons.Default.Add, "Create Room")
         }
@@ -425,12 +426,22 @@ private fun LazyListScope.myRoomsSection(
                 initialOffsetX = { it / 2 } // Slide from right
             )
         ) {
-            Text(
-                text = "My Rooms",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
-            )
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    text = "My Rooms",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (rooms.isEmpty()) "Create your first room" else "${rooms.size} active rooms",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 

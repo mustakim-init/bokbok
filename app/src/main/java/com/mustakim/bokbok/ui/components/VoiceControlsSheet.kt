@@ -128,7 +128,7 @@ fun VoiceControlsSheet(
                         bottomEnd = bottomCornerRadius
                     )
                 )
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .background(MaterialTheme.colorScheme.surfaceContainer)
         )
 
         // --- CONTENT ---

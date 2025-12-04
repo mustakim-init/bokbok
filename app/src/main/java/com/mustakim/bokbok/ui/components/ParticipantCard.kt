@@ -52,11 +52,11 @@ fun ParticipantCard(
                     )
                 )
             )
-            // Green border when speaking (NO animation)
+            // Speaking indicator border - uses tertiary for semantic "active/speaking" state
             .border(
                 width = if (participant.isSpeaking && !participant.isMuted) 3.dp else 1.dp,
                 color = if (participant.isSpeaking && !participant.isMuted)
-                    Color.Green
+                    MaterialTheme.colorScheme.tertiary
                 else
                     Color.White.copy(alpha = 0.3f),
                 shape = RoundedCornerShape(24.dp)

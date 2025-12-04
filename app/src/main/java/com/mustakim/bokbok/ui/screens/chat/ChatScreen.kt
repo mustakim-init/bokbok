@@ -89,7 +89,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -177,7 +176,7 @@ fun ChatScreen(
                                     Text(
                                         text = user.displayName.take(1).uppercase(),
                                         style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
                                     )
                                 }
                             }
@@ -213,7 +212,7 @@ fun ChatScreen(
                     IconButton(onClick = { }) { Icon(Icons.Default.VideoCall, "Video") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             )
         }
@@ -503,8 +502,8 @@ fun MessageBubble(
                         )
                     }
 
-                    val backgroundColor = if (isMe) Color(0xFFB3C5F6) else Color(0xFFE1D9F5)
-                    val contentColor = Color.Black
+                    val backgroundColor = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
 
                     Surface(
                         color = backgroundColor,
@@ -529,7 +528,7 @@ fun MessageBubble(
                                         .fillMaxWidth()
                                         .padding(bottom = 4.dp)
                                         .background(
-                                            Color.Black.copy(alpha = 0.05f),
+                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
                                             RoundedCornerShape(8.dp)
                                         )
                                         .clickable { message.replyToId?.let { onReplyClick(it) } }
@@ -787,7 +786,7 @@ fun MessageBubble(
                                     alpha = 0.6f
                                 )
 
-                                MessageStatus.READ -> Color(0xFF4CAF50)
+                                MessageStatus.READ -> MaterialTheme.colorScheme.primary
                             }
 
                             Icon(
@@ -945,7 +944,7 @@ fun ChatInputBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(32.dp))
-                    .background(Color(0xFFE1D9F5))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -957,13 +956,13 @@ fun ChatInputBar(
                 ) {
                     Row {
                         IconButton(onClick = { }) {
-                            Icon(Icons.Default.AddCircle, "Add", tint = Color(0xFF1D1B20), modifier = Modifier.size(28.dp))
+                            Icon(Icons.Default.AddCircle, "Add", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
                         IconButton(onClick = { }) {
-                            Icon(Icons.Default.CameraAlt, "Camera", tint = Color(0xFF1D1B20), modifier = Modifier.size(28.dp))
+                            Icon(Icons.Default.CameraAlt, "Camera", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
                         IconButton(onClick = { }) {
-                            Icon(Icons.Default.Mic, "Mic", tint = Color(0xFF1D1B20), modifier = Modifier.size(28.dp))
+                            Icon(Icons.Default.Mic, "Mic", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
                     }
                 }
@@ -976,7 +975,7 @@ fun ChatInputBar(
                         .weight(1f)
                         .heightIn(min = 48.dp, max = 120.dp)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color.White)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
                         .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -985,13 +984,13 @@ fun ChatInputBar(
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (text.isEmpty() && !isFocused) {
-                            Text("Message", style = MaterialTheme.typography.bodyLarge, color = Color.Gray)
+                            Text("Message", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         BasicTextField(
                             value = text,
                             onValueChange = onTextChange,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.Black),
-                            cursorBrush = SolidColor(Color.Black),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             maxLines = 5,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1012,7 +1011,7 @@ fun ChatInputBar(
                         Icon(
                             Icons.Default.EmojiEmotions,
                             contentDescription = "Emoji",
-                            tint = if (showEmojiPicker) MaterialTheme.colorScheme.primary else Color(0xFF6B6B6B),
+                            tint = if (showEmojiPicker) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(24.dp)
                         )
                     }

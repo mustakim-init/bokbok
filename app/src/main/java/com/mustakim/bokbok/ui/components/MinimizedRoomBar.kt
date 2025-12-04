@@ -68,7 +68,7 @@ fun MinimizedRoomBar(
                 .shadow(8.dp, RoundedCornerShape(16.dp))
                 .clickable(onClick = onExpand),
             shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 8.dp
         ) {
             Row(
@@ -99,13 +99,13 @@ fun MinimizedRoomBar(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.primary),
+                                .background(MaterialTheme.colorScheme.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
@@ -141,7 +141,7 @@ fun MinimizedRoomBar(
                             .clip(CircleShape)
                             .background(
                                 if (isMuted)
-                                    MaterialTheme.colorScheme.errorContainer
+                                    MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
                                 else
                                     MaterialTheme.colorScheme.primaryContainer
                             )
@@ -150,7 +150,7 @@ fun MinimizedRoomBar(
                             imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                             contentDescription = if (isMuted) "Unmute" else "Mute",
                             tint = if (isMuted)
-                                MaterialTheme.colorScheme.onErrorContainer
+                                MaterialTheme.colorScheme.onError
                             else
                                 MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(20.dp)

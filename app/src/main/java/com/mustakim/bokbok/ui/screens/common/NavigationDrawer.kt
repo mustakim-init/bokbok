@@ -77,7 +77,7 @@ fun AppNavigationDrawer(
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier.width(300.dp),
-                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 drawerContentColor = MaterialTheme.colorScheme.onSurface
             ) {
                 // Profile Header with real data
@@ -112,7 +112,7 @@ fun AppNavigationDrawer(
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                             selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                             unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                             unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -141,7 +141,7 @@ fun DrawerProfileHeader(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.medium,
         onClick = onProfileClick
     ) {
@@ -169,14 +169,14 @@ fun DrawerProfileHeader(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = displayName.firstOrNull()?.uppercase() ?: "?",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }

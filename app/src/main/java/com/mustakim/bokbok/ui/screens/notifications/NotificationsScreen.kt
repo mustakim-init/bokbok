@@ -451,7 +451,7 @@ fun ExpressiveNotificationCard(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                    MaterialTheme.colorScheme.primaryContainer,
                                     RoundedCornerShape(18.dp)
                                 ),
                             contentAlignment = Alignment.Center
@@ -459,7 +459,7 @@ fun ExpressiveNotificationCard(
                             Text(
                                 text = notification.senderName.take(1).uppercase(),
                                 style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }

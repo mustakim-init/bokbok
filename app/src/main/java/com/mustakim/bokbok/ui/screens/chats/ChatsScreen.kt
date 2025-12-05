@@ -213,7 +213,7 @@ fun ChatsScreen(
                                     chat = chatItem,
                                     onClick = {
                                         if (chatItem.isGroup && chatItem.groupId != null) {
-                                            // TODO: Navigate to group chat
+                                            navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.GroupChat.createRoute(chatItem.groupId))
                                         } else if (chatItem.friend != null) {
                                             onFriendClick(chatItem.friend.user.uid)
                                         }

@@ -246,7 +246,7 @@ fun NavGraph(
         // NOTE: VoiceRoomScreen is rendered via RoomStateManager in MainScaffold, not via navigation
         // The NavRoutes.Room route has been removed to avoid duplicate rendering
 
-        // ============= CHAT SCREEN (Future) =============
+        // ============= CHAT SCREEN =============
         composable(
             route = NavRoutes.Chat.route,
             arguments = listOf(
@@ -271,6 +271,31 @@ fun NavGraph(
             com.mustakim.bokbok.ui.screens.chat.ChatScreen(
                 navController = navController,
                 viewModel = chatViewModel
+            )
+        }
+
+        composable(
+            route = NavRoutes.GroupChat.route,
+            arguments = listOf(
+                navArgument("groupId") {
+                    type = NavType.StringType
+                    nullable = false
+                }
+            )
+        ) { backStackEntry ->
+            val groupId = backStackEntry.arguments?.getString("groupId")
+                ?: return@composable
+
+            val groupChatViewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
+                factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(
+                    context,
+                    groupId
+                )
+            )
+
+            com.mustakim.bokbok.ui.screens.chat.GroupChatScreen(
+                navController = navController,
+                viewModel = groupChatViewModel
             )
         }
     }

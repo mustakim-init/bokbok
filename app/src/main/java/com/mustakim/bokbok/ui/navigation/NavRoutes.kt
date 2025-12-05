@@ -40,4 +40,10 @@ sealed class NavRoutes(val route: String) {
         }
     }
 
+    object GroupChat : NavRoutes("group_chat/{groupId}") {
+        fun createRoute(groupId: String): String {
+            require(groupId.isNotBlank()) { "Group ID cannot be blank" }
+            return "group_chat/$groupId"
+        }
+    }
 }

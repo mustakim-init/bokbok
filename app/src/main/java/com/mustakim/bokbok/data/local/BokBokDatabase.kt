@@ -4,17 +4,27 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.mustakim.bokbok.data.local.dao.GroupDao
 import com.mustakim.bokbok.data.local.dao.MessageDao
+import com.mustakim.bokbok.data.local.entity.GroupEntity
+import com.mustakim.bokbok.data.local.entity.GroupMemberEntity
+import com.mustakim.bokbok.data.local.entity.GroupMessageEntity
 import com.mustakim.bokbok.data.local.entity.MessageEntity
 
 @Database(
-    entities = [MessageEntity::class],
-    version = 1,
+    entities = [
+        MessageEntity::class,
+        GroupEntity::class,
+        GroupMemberEntity::class,
+        GroupMessageEntity::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class BokBokDatabase : RoomDatabase() {
     
     abstract fun messageDao(): MessageDao
+    abstract fun groupDao(): GroupDao
     
     companion object {
         @Volatile

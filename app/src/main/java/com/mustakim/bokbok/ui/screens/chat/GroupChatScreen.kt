@@ -3,6 +3,8 @@ package com.mustakim.bokbok.ui.screens.chat
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +35,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,12 +49,10 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.VideoCall
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,10 +62,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +77,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -84,6 +87,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,13 +97,14 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
+import com.mustakim.bokbok.ui.components.ScallopShape
+import com.mustakim.bokbok.ui.components.SquircleShape
 import com.mustakim.bokbok.viewmodel.GroupChatViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupChatScreen(
     navController: NavHostController,
@@ -106,18 +112,28 @@ fun GroupChatScreen(
 ) {
     val allMessages by viewModel.messages.collectAsState()
     val groupMembers by viewModel.groupMembers.collectAsState()
+    val groupName by viewModel.groupName.collectAsState()
     val messageText by viewModel.messageText.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
+    val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
+    
+    val currentUserId = viewModel.currentUserId
     
     // Filter out messages deleted by current user
-    val messages = remember(allMessages) {
-        allMessages.filter { !it.deletedBy.contains("me") }
+    val messages = remember(allMessages, currentUserId) {
+        allMessages.filter { !it.deletedBy.contains(currentUserId) }
     }
-    val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
     
     val listState = rememberLazyListState()
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
+
+    // Determine if we're at the bottom of the chat (newest messages)
+    val isAtBottom by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 100
+        }
+    }
 
     // Handle Back Press to close Emoji Picker
     BackHandler(enabled = showEmojiPicker) {
@@ -130,12 +146,14 @@ fun GroupChatScreen(
         }
     }
 
-    // Calculate Read Receipts: Map<MessageId, List<User>>
-    // For each user (except me), find the *latest* message they have read.
-    val readReceiptsMap = remember(messages, groupMembers) {
+    // Calculate Read Receipts
+    val groupMembersMap = remember(groupMembers) {
+        groupMembers.associateBy { it.uid }
+    }
+    
+    val readReceiptsMap = remember(messages, groupMembers, currentUserId) {
         val map = mutableMapOf<String, MutableList<User>>()
-        groupMembers.values.filter { it.uid != "me" }.forEach { user ->
-            // Find the latest message (first in list) that contains user.uid in readBy
+        groupMembers.filter { it.uid != currentUserId }.forEach { user ->
             val lastReadMsg = messages.firstOrNull { it.readBy.contains(user.uid) }
             if (lastReadMsg != null) {
                 map.getOrPut(lastReadMsg.id) { mutableListOf() }.add(user)
@@ -145,51 +163,30 @@ fun GroupChatScreen(
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Trip Planning", // Hardcoded for now, or derive from VM
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "${groupMembers.size} members",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { }) { Icon(Icons.Default.Call, "Call") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.VideoCall, "Video") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.MoreVert, "More") }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            )
-        }
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MaterialTheme.colorScheme.surfaceContainer) // Header color for the curved edges
         ) {
+            // ========== SEPARATE HEADER COMPONENT ==========
+            // This is completely outside the LazyColumn - NO LAG
+            GroupChatHeader(
+                groupName = groupName,
+                members = groupMembers,
+                isExpanded = isAtBottom,
+                onBackClick = { navController.navigateUp() }
+            )
+            
+            // ========== CHAT MESSAGES (Separate from header) ==========
+            // Rounded top corners create the curved inward effect
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                    .background(MaterialTheme.colorScheme.surface)
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onTap = { 
@@ -202,27 +199,24 @@ fun GroupChatScreen(
                 LazyColumn(
                     state = listState,
                     reverseLayout = true,
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 16.dp,
-                        bottom = 16.dp
-                    ),
+                    contentPadding = PaddingValues(16.dp),
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    itemsIndexed(messages) { index, message ->
-                        val isMe = message.senderId == "me"
+                    itemsIndexed(
+                        items = messages,
+                        key = { _, message -> message.id }
+                    ) { index, message ->
+                        val isMe = message.senderId == currentUserId
                         val nextMessage = messages.getOrNull(index - 1)
                         val prevMessage = messages.getOrNull(index + 1)
                         
                         val isLastInSequence = nextMessage?.senderId != message.senderId
                         val isFirstInSequence = prevMessage?.senderId != message.senderId
                         
-                        // Sender Info
-                        val sender = groupMembers[message.senderId]
+                        val sender = groupMembersMap[message.senderId]
                         
-                        // Date Header Logic
+                        // Date Header
                         val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
                         if (showDateHeader) {
                             DateHeader(date = message.timestamp.toDate())
@@ -245,9 +239,7 @@ fun GroupChatScreen(
                             onReplyClick = { replyToId ->
                                 val replyIndex = messages.indexOfFirst { it.id == replyToId }
                                 if (replyIndex != -1) {
-                                    scope.launch {
-                                        listState.animateScrollToItem(replyIndex)
-                                    }
+                                    scope.launch { listState.animateScrollToItem(replyIndex) }
                                 }
                             }
                         )
@@ -259,9 +251,7 @@ fun GroupChatScreen(
                 }
             }
 
-            // Input Area (Reusing ChatInputBar from ChatScreen.kt if possible, or copy it)
-            // Since ChatInputBar is in ChatScreen.kt, I can import it if it's public.
-            // It is public.
+            // Input Area
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -296,6 +286,464 @@ fun GroupChatScreen(
     }
 }
 
+/**
+ * Separate header component - NOT part of scroll, NO LAG
+ * Matches reference design with overlapping avatar cloud
+ */
+@Composable
+fun GroupChatHeader(
+    groupName: String,
+    members: List<User>,
+    isExpanded: Boolean,
+    onBackClick: () -> Unit
+) {
+    // Animate header height - collapsed needs enough for avatars + group name
+    val headerHeight by animateDpAsState(
+        targetValue = if (isExpanded) 200.dp else 110.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        label = "headerHeight"
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(headerHeight),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = 0.dp // Cleaner look like reference
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            // Back button - aligned with action buttons
+            IconButton(
+                onClick = onBackClick,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 4.dp, top = 4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            // Action buttons - Video call and Voice call only (like reference)
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 4.dp, top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                IconButton(onClick = { }) {
+                    Icon(
+                        Icons.Default.VideoCall, 
+                        "Video Call",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                IconButton(onClick = { }) {
+                    Icon(
+                        Icons.Default.Call, 
+                        "Voice Call",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            // Center content - Avatar Cloud + Group Name (always visible)
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 56.dp) // Padding to avoid overlap with side buttons
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Avatar Cloud (constrained width)
+                if (members.isNotEmpty()) {
+                    OverlappingAvatarCloud(
+                        members = members,
+                        isExpanded = isExpanded
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(if (isExpanded) 8.dp else 2.dp))
+
+                // Group name with dropdown indicator - ALWAYS visible
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Text(
+                        text = groupName,
+                        style = if (isExpanded) {
+                            MaterialTheme.typography.titleMedium
+                        } else {
+                            MaterialTheme.typography.titleSmall
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Options",
+                        modifier = Modifier.size(if (isExpanded) 18.dp else 16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Overlapping avatar cloud
+ * - Expanded: Random positions, sizes, and rotations (cloud effect)
+ * - Collapsed: Messenger-style stacked row
+ */
+@Composable
+fun OverlappingAvatarCloud(
+    members: List<User>,
+    isExpanded: Boolean
+) {
+    val memberCount = members.size
+    
+    // Container size - dynamic based on member count
+    val containerWidth = if (isExpanded) {
+        when {
+            memberCount <= 2 -> 160.dp
+            memberCount <= 4 -> 180.dp
+            else -> 200.dp
+        }
+    } else {
+        // Collapsed: width based on stacked avatars
+        (memberCount.coerceAtMost(4) * 20 + 40).dp
+    }
+    
+    val containerHeight = if (isExpanded) {
+        when {
+            memberCount <= 2 -> 100.dp
+            memberCount <= 4 -> 110.dp
+            else -> 120.dp
+        }
+    } else {
+        50.dp
+    }
+    
+    val animatedWidth by animateDpAsState(targetValue = containerWidth, label = "width")
+    val animatedHeight by animateDpAsState(targetValue = containerHeight, label = "height")
+
+    Box(
+        modifier = Modifier.size(width = animatedWidth, height = animatedHeight),
+        contentAlignment = Alignment.Center
+    ) {
+        val maxToShow = if (isExpanded) 6 else 4  // Reduced to 6 in expanded to avoid clutter
+        val displayMembers = members.take(maxToShow)
+        val remainingCount = members.size - maxToShow
+
+        // Get theme colors once
+        val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+        val onPrimaryContainer = MaterialTheme.colorScheme.onPrimaryContainer
+        val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
+
+        displayMembers.forEachIndexed { index, user ->
+            // Generate properties based on expanded/collapsed state
+            val avatarProps = remember(user.uid, isExpanded, displayMembers.size, index) {
+                if (isExpanded) {
+                    generateExpandedAvatarProps(user.uid.hashCode(), index, displayMembers.size)
+                } else {
+                    generateCollapsedAvatarProps(index, displayMembers.size)
+                }
+            }
+            
+            val animatedSize by animateDpAsState(
+                targetValue = avatarProps.size,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "size$index"
+            )
+            val animatedOffsetX by animateFloatAsState(
+                targetValue = avatarProps.offsetX,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "offsetX$index"
+            )
+            val animatedOffsetY by animateFloatAsState(
+                targetValue = avatarProps.offsetY,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "offsetY$index"
+            )
+            val animatedRotation by animateFloatAsState(
+                targetValue = avatarProps.rotation,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "rotation$index"
+            )
+
+            // Random shape per user (only in expanded)
+            val shape = remember(user.uid, isExpanded) {
+                if (isExpanded) getRandomShape(user.uid.hashCode()) else CircleShape
+            }
+
+            Box(
+                modifier = Modifier
+                    .offset(x = animatedOffsetX.dp, y = animatedOffsetY.dp)
+                    .zIndex(avatarProps.zIndex)
+                    .graphicsLayer { rotationZ = animatedRotation }
+                    .size(animatedSize)
+                    .clip(shape)
+                    .background(primaryContainer)
+                    .border(2.5.dp, surfaceContainer, shape),
+                contentAlignment = Alignment.Center
+            ) {
+                if (user.profileImageUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = user.profileImageUrl,
+                        contentDescription = user.displayName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Fallback with single letter - same as LoungeScreen
+                    Text(
+                        text = user.displayName.firstOrNull()?.uppercase() ?: "?",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = onPrimaryContainer,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (animatedSize.value * 0.45f).sp
+                    )
+                }
+            }
+        }
+
+        // +N indicator for additional members
+        if (remainingCount > 0) {
+            val indicatorSize = if (isExpanded) 38.dp else 32.dp
+            val indicatorProps = remember(remainingCount, isExpanded, displayMembers.size) {
+                if (isExpanded) {
+                    RandomAvatarProps(
+                        size = indicatorSize,
+                        offsetX = 70f,
+                        offsetY = 15f,
+                        rotation = 12f,
+                        zIndex = 20f
+                    )
+                } else {
+                    // Stack at the end in collapsed mode
+                    RandomAvatarProps(
+                        size = indicatorSize,
+                        offsetX = (displayMembers.size * 18f) - 36f,
+                        offsetY = 0f,
+                        rotation = 0f,
+                        zIndex = (displayMembers.size + 1).toFloat()
+                    )
+                }
+            }
+            
+            val animatedIndicatorSize by animateDpAsState(
+                targetValue = indicatorSize,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "indicatorSize"
+            )
+            val animatedIndicatorX by animateFloatAsState(
+                targetValue = indicatorProps.offsetX,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "indicatorX"
+            )
+            val animatedIndicatorY by animateFloatAsState(
+                targetValue = indicatorProps.offsetY,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                label = "indicatorY"
+            )
+            
+            val indicatorShape = if (isExpanded) {
+                ScallopShape(lobes = 8, innerRadiusRatio = 0.88f, rotationDegrees = 22f)
+            } else {
+                CircleShape
+            }
+            
+            Box(
+                modifier = Modifier
+                    .offset(x = animatedIndicatorX.dp, y = animatedIndicatorY.dp)
+                    .zIndex(indicatorProps.zIndex)
+                    .graphicsLayer { rotationZ = indicatorProps.rotation }
+                    .size(animatedIndicatorSize)
+                    .clip(indicatorShape)
+                    .background(MaterialTheme.colorScheme.tertiaryContainer)
+                    .border(2.5.dp, surfaceContainer, indicatorShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "+$remainingCount",
+                    fontSize = if (isExpanded) 14.sp else 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+            }
+        }
+    }
+}
+
+// Random avatar properties
+private data class RandomAvatarProps(
+    val size: Dp,
+    val offsetX: Float,
+    val offsetY: Float,
+    val rotation: Float,
+    val zIndex: Float
+)
+
+/**
+ * Generate EXPANDED state avatar properties - random cloud layout
+ * Includes minimum size constraints based on member count
+ * Fewer members = more spread out, More members = tighter clustering
+ */
+private fun generateExpandedAvatarProps(
+    hash: Int,
+    index: Int,
+    totalCount: Int
+): RandomAvatarProps {
+    val absHash = kotlin.math.abs(hash)
+    
+    // Use different bits of the hash for different properties
+    val sizeSeed = (absHash shr 0) and 0xFF
+    val xSeed = (absHash shr 8) and 0xFF
+    val ySeed = (absHash shr 16) and 0xFF
+    val rotSeed = (absHash shr 4) and 0xFF  // Different bits for rotation
+    
+    // Minimum size based on member count - fewer members = bigger avatars
+    val minSize = when {
+        totalCount <= 2 -> 56f
+        totalCount <= 3 -> 52f
+        totalCount <= 4 -> 48f
+        totalCount <= 5 -> 44f
+        else -> 40f
+    }
+    
+    // Size range based on member count
+    val sizeRange = when {
+        totalCount <= 2 -> 8f   // 56-64dp
+        totalCount <= 3 -> 10f  // 52-62dp
+        totalCount <= 4 -> 12f  // 48-60dp
+        else -> 16f             // 40-56dp
+    }
+    
+    val baseSize = minSize + (sizeSeed / 255f) * sizeRange
+    
+    // Radius range based on member count - fewer members = MORE spread, more members = tighter
+    // minRadius: base distance from center
+    // maxRadius: maximum distance from center
+    val (minRadius, maxRadius) = when {
+        totalCount <= 2 -> Pair(40f, 55f)   // Very spread out for 2 people
+        totalCount <= 3 -> Pair(35f, 50f)   // Spread out for 3
+        totalCount <= 4 -> Pair(28f, 48f)   // Medium spread for 4
+        totalCount <= 5 -> Pair(22f, 45f)   // Tighter for 5
+        else -> Pair(18f, 42f)              // Tightest for 6+
+    }
+    
+    // Random position in a cloud-like area
+    val angle = (index.toFloat() / totalCount) * 2f * kotlin.math.PI.toFloat() + (xSeed / 255f) * 0.6f
+    val radius = minRadius + (ySeed / 255f) * (maxRadius - minRadius)
+    
+    val offsetX = kotlin.math.cos(angle) * radius
+    val offsetY = kotlin.math.sin(angle) * radius * 0.55f // Squish vertically for cloud shape
+    
+    // Random rotation between -18 and +18 degrees
+    val rotation = (rotSeed / 255f) * 36f - 18f
+    
+    // Z-index: larger avatars in front, with some randomness
+    val zIndex = (sizeSeed / 25f) + index.toFloat()
+    
+    return RandomAvatarProps(
+        size = baseSize.dp,
+        offsetX = offsetX,
+        offsetY = offsetY,
+        rotation = rotation,
+        zIndex = zIndex
+    )
+}
+
+/**
+ * Generate COLLAPSED state avatar properties - Messenger-style stacked row
+ */
+private fun generateCollapsedAvatarProps(
+    index: Int,
+    totalCount: Int
+): RandomAvatarProps {
+    // Messenger-style: stacked overlapping circles in a row
+    // Size based on member count
+    val size = when {
+        totalCount <= 2 -> 42.dp
+        totalCount <= 3 -> 40.dp
+        else -> 36.dp
+    }
+    
+    val overlap = when {
+        totalCount <= 2 -> 20f
+        totalCount <= 3 -> 18f
+        else -> 16f
+    }
+    
+    // Position avatars in a row, last avatar on top (highest z-index)
+    val offsetX = (index * overlap) - ((totalCount - 1) * overlap / 2f)
+    val offsetY = 0f
+    val rotation = 0f  // No rotation in collapsed mode
+    val zIndex = index.toFloat()  // Later avatars on top
+    
+    return RandomAvatarProps(
+        size = size,
+        offsetX = offsetX,
+        offsetY = offsetY,
+        rotation = rotation,
+        zIndex = zIndex
+    )
+}
+
+// Random shape selection based on user hash
+private fun getRandomShape(hash: Int): Shape {
+    val absHash = kotlin.math.abs(hash)
+    val shapeSeed = absHash % 100
+    
+    // Random rotation for the shape (0-360 degrees)
+    val shapeRotation = ((absHash shr 12) and 0xFF) / 255f * 360f
+    
+    return when {
+        shapeSeed < 30 -> CircleShape
+        shapeSeed < 50 -> SquircleShape(cornerRadiusPercent = 30f + (absHash % 15))
+        shapeSeed < 70 -> ScallopShape(
+            lobes = 6 + (absHash % 4),  // 6-9 lobes
+            innerRadiusRatio = 0.86f + (absHash % 8) / 100f,
+            rotationDegrees = shapeRotation
+        )
+        shapeSeed < 85 -> ScallopShape(
+            lobes = 4 + (absHash % 2),  // 4-5 lobes (flower-like)
+            innerRadiusRatio = 0.82f + (absHash % 10) / 100f,
+            rotationDegrees = shapeRotation
+        )
+        else -> SquircleShape(cornerRadiusPercent = 40f + (absHash % 12))
+    }
+}
+
+// Avatar colors for users without profile pictures
+@Composable
+fun getAvatarColor(index: Int): Color {
+    val colors = listOf(
+        Color(0xFF6366F1), // Indigo
+        Color(0xFFF43F5E), // Rose  
+        Color(0xFF10B981), // Emerald
+        Color(0xFFF59E0B), // Amber
+        Color(0xFF8B5CF6), // Violet
+        Color(0xFF06B6D4), // Cyan
+        Color(0xFFEC4899), // Pink
+        Color(0xFF14B8A6), // Teal
+    )
+    return colors[index % colors.size]
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupMessageBubble(
@@ -319,7 +767,7 @@ fun GroupMessageBubble(
     var showTime by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
-    // Swipe to Reply Logic
+    // Swipe to Reply
     val density = LocalDensity.current
     val swipeThreshold = with(density) { 60.dp.toPx() }
     val maxSwipe = with(density) { 120.dp.toPx() }
@@ -375,7 +823,7 @@ fun GroupMessageBubble(
                 .offset { IntOffset(offsetX.roundToInt(), 0) },
             horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
         ) {
-            // Sender Name (Only for first message in sequence from others)
+            // Sender Name
             if (!isMe && isFirst && senderName != null) {
                 Text(
                     text = senderName,
@@ -417,7 +865,7 @@ fun GroupMessageBubble(
                     Spacer(modifier = Modifier.width(8.dp))
                 }
 
-                // Bubble Content
+                // Bubble
                 Box(
                     modifier = Modifier.padding(bottom = if (message.reactions.isNotEmpty()) 10.dp else 0.dp)
                 ) {
@@ -493,7 +941,7 @@ fun GroupMessageBubble(
                         }
                     }
 
-                    // Grouped Reactions Badge
+                    // Reactions
                     if (message.reactions.isNotEmpty()) {
                         val reactionCounts = message.reactions.values.groupingBy { it }.eachCount()
                         val sortedReactions = reactionCounts.entries.sortedByDescending { it.value }
@@ -520,14 +968,11 @@ fun GroupMessageBubble(
                                         }
                                     }
                                 }
-                                if (sortedReactions.size > 3) {
-                                    Text(text = "+", style = MaterialTheme.typography.labelSmall)
-                                }
                             }
                         }
                     }
 
-                    // Menu (Same as ChatScreen)
+                    // Context Menu
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false },
@@ -540,8 +985,7 @@ fun GroupMessageBubble(
                             horizontalArrangement = Arrangement.SpaceEvenly,
                             modifier = Modifier.fillMaxWidth().padding(16.dp)
                         ) {
-                            val emojis = listOf("❤️", "😂", "😮", "😢", "😠", "👍")
-                            emojis.forEach { emoji ->
+                            listOf("❤️", "😂", "😮", "😢", "😠", "👍").forEach { emoji ->
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
@@ -557,49 +1001,33 @@ fun GroupMessageBubble(
                             }
                         }
                         HorizontalDivider()
-                        // Actions
                         Column {
-                            DropdownMenuItem(icon = Icons.AutoMirrored.Filled.Reply, text = "Reply") { onReply(); showMenu = false }
-                            DropdownMenuItem(icon = Icons.Default.ContentCopy, text = "Copy") { clipboardManager.setText(AnnotatedString(message.text)); showMenu = false }
-                            if (!message.isDeletedForEveryone) {
-                                DropdownMenuItem(icon = Icons.Default.Delete, text = "Delete", color = MaterialTheme.colorScheme.error) { showMenu = false; showDeleteDialog = true }
+                            DropdownMenuItem(Icons.AutoMirrored.Filled.Reply, "Reply") { onReply(); showMenu = false }
+                            DropdownMenuItem(Icons.Default.ContentCopy, "Copy") { 
+                                clipboardManager.setText(AnnotatedString(message.text))
+                                showMenu = false 
                             }
-                        }
-                        
-                        // Delete Dialog (Same logic as ChatScreen)
-                        if (showDeleteDialog) {
-                             AlertDialog(
-                                onDismissRequest = { showDeleteDialog = false },
-                                title = { Text("Delete Message") },
-                                text = { Text(if (isMe) "Choose how to delete" else "Delete for you?") },
-                                confirmButton = {
-                                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                        TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
-                                        TextButton(onClick = { onDelete(false); showDeleteDialog = false }) { Text(if (isMe) "Delete for Me" else "Delete") }
-                                        if (isMe) {
-                                            TextButton(onClick = { onDelete(true); showDeleteDialog = false }) { Text("Delete for Everyone") }
-                                        }
-                                    }
+                            if (!message.isDeletedForEveryone) {
+                                DropdownMenuItem(Icons.Default.Delete, "Delete", MaterialTheme.colorScheme.error) { 
+                                    showMenu = false
+                                    showDeleteDialog = true 
                                 }
-                            )
+                            }
                         }
                     }
                 }
             }
             
-            // Read Receipts (Multiple Avatars)
-            // Show only if this message is the last read message for some users
+            // Read Receipts
             if (readReceiptUsers.isNotEmpty() && isMe && !message.isDeletedForEveryone) {
                 Row(
                     horizontalArrangement = Arrangement.End,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                 ) {
                     readReceiptUsers.forEachIndexed { index, user ->
                         Box(
                             modifier = Modifier
-                                .offset(x = (index * -8).dp) // Overlap effect
+                                .offset(x = (index * -8).dp)
                                 .zIndex(readReceiptUsers.size - index.toFloat())
                         ) {
                             if (user.profileImageUrl.isNotEmpty()) {
@@ -632,13 +1060,13 @@ fun GroupMessageBubble(
                 }
             }
 
-            // Time Indicator (Same as ChatScreen)
+            // Timestamp
             AnimatedVisibility(
                 visible = showTime,
                 enter = androidx.compose.animation.expandVertically() + fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + fadeOut()
             ) {
-                 Text(
+                Text(
                     text = SimpleDateFormat("h:mm a", Locale.getDefault()).format(message.timestamp.toDate()),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -648,10 +1076,37 @@ fun GroupMessageBubble(
             }
         }
     }
+    
+    // Delete Dialog (outside menu)
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Message") },
+            text = { Text(if (isMe) "Choose how to delete" else "Delete for you?") },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                    TextButton(onClick = { onDelete(false); showDeleteDialog = false }) { 
+                        Text(if (isMe) "Delete for Me" else "Delete") 
+                    }
+                    if (isMe) {
+                        TextButton(onClick = { onDelete(true); showDeleteDialog = false }) { 
+                            Text("Delete for Everyone") 
+                        }
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun DropdownMenuItem(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, color: Color = Color.Unspecified, onClick: () -> Unit) {
+private fun DropdownMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    color: Color = Color.Unspecified,
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -659,10 +1114,17 @@ fun DropdownMenuItem(icon: androidx.compose.ui.graphics.vector.ImageVector, text
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = text, tint = if (color == Color.Unspecified) LocalContentColor.current else color, modifier = Modifier.size(20.dp))
+        Icon(
+            icon,
+            contentDescription = text,
+            tint = if (color == Color.Unspecified) LocalContentColor.current else color,
+            modifier = Modifier.size(20.dp)
+        )
         Spacer(modifier = Modifier.width(12.dp))
-        Text(text, style = MaterialTheme.typography.bodyMedium, color = if (color == Color.Unspecified) Color.Unspecified else color)
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (color == Color.Unspecified) Color.Unspecified else color
+        )
     }
 }
-
-

@@ -1,28 +1,41 @@
 package com.mustakim.bokbok.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
-import com.mustakim.bokbok.data.repository.ChatRepository
-import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class GroupChatViewModel(
-    private val chatRepository: ChatRepository,
-    private val userRepository: UserRepository,
+    private val repository: HybridGroupChatRepository,
     private val groupId: String
 ) : ViewModel() {
 
-    private val _messages = MutableStateFlow<List<Message>>(emptyList())
-    val messages: StateFlow<List<Message>> = _messages.asStateFlow()
+    val currentUserId: String = repository.currentUserId
 
-    private val _groupMembers = MutableStateFlow<Map<String, User>>(emptyMap())
-    val groupMembers: StateFlow<Map<String, User>> = _groupMembers.asStateFlow()
+    // Group info from Room (instant)
+    val groupInfo = repository.observeGroup(groupId)
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    // Group name derived from groupInfo
+    private val _groupName = MutableStateFlow("Group")
+    val groupName: StateFlow<String> = _groupName.asStateFlow()
+
+    // Group members from Room (instant)
+    val groupMembers = repository.observeGroupMembers(groupId)
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    // Messages from Room (instant)
+    val messages = repository.getMessages(groupId)
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText.asStateFlow()
@@ -34,18 +47,12 @@ class GroupChatViewModel(
     val showEmojiPicker: StateFlow<Boolean> = _showEmojiPicker.asStateFlow()
 
     init {
-        loadGroupDetails()
-        loadMessages()
-    }
-
-    private fun loadGroupDetails() {
-        _groupMembers.value = chatRepository.getGroupMembers(groupId)
-    }
-
-    private fun loadMessages() {
+        // Observe group info and update name
         viewModelScope.launch {
-            chatRepository.getGroupMessages(groupId).collect {
-                _messages.value = it
+            repository.observeGroup(groupId).collect { group ->
+                group?.let {
+                    _groupName.value = it.name
+                }
             }
         }
     }
@@ -68,19 +75,19 @@ class GroupChatViewModel(
 
     fun reactToMessage(messageId: String, emoji: String) {
         viewModelScope.launch {
-            chatRepository.addGroupReaction(groupId, messageId, emoji, "me")
+            repository.addReaction(groupId, messageId, emoji)
         }
     }
 
     fun removeReaction(messageId: String) {
         viewModelScope.launch {
-            chatRepository.removeGroupReaction(groupId, messageId, "me")
+            repository.removeReaction(groupId, messageId)
         }
     }
 
     fun deleteMessage(messageId: String, forEveryone: Boolean) {
         viewModelScope.launch {
-            chatRepository.deleteGroupMessage(groupId, messageId, forEveryone, "me")
+            repository.deleteMessage(groupId, messageId, forEveryone)
         }
     }
 
@@ -91,7 +98,7 @@ class GroupChatViewModel(
         val replyTo = _replyingTo.value
 
         viewModelScope.launch {
-            chatRepository.sendGroupMessage("me", groupId, text, replyTo)
+            repository.sendMessage(groupId, text, replyTo)
             
             _messageText.value = ""
             _replyingTo.value = null
@@ -100,13 +107,13 @@ class GroupChatViewModel(
     }
 
     class Factory(
-        private val chatRepository: ChatRepository,
-        private val userRepository: UserRepository,
+        private val context: Context,
         private val groupId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return GroupChatViewModel(chatRepository, userRepository, groupId) as T
+            val repository = HybridGroupChatRepository(context)
+            return GroupChatViewModel(repository, groupId) as T
         }
     }
 }

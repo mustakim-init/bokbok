@@ -295,8 +295,93 @@ class ChatRepository {
             .catch { emit(emptyList()) }
     }
 
+    // Data class for Group information
+    data class GroupInfo(
+        val id: String = "",
+        val name: String = "",
+        val participants: List<String> = emptyList(),
+        val createdBy: String = "",
+        val createdAt: Timestamp = Timestamp.now(),
+        val imageUrl: String = ""
+    )
+
+    suspend fun getGroup(groupId: String): GroupInfo? {
+        return try {
+            val snapshot = firestore.collection("groups").document(groupId).get().await()
+            if (snapshot.exists()) {
+                GroupInfo(
+                    id = snapshot.id,
+                    name = snapshot.getString("name") ?: "Group",
+                    participants = (snapshot.get("participants") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                    createdBy = snapshot.getString("createdBy") ?: "",
+                    createdAt = snapshot.getTimestamp("createdAt") ?: Timestamp.now(),
+                    imageUrl = snapshot.getString("imageUrl") ?: ""
+                )
+            } else null
+        } catch (e: Exception) {
+            android.util.Log.e("ChatRepository", "Error fetching group", e)
+            null
+        }
+    }
+
+    fun observeGroup(groupId: String): Flow<GroupInfo?> {
+        return firestore.collection("groups").document(groupId)
+            .snapshots()
+            .map { snapshot ->
+                if (snapshot.exists()) {
+                    GroupInfo(
+                        id = snapshot.id,
+                        name = snapshot.getString("name") ?: "Group",
+                        participants = (snapshot.get("participants") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                        createdBy = snapshot.getString("createdBy") ?: "",
+                        createdAt = snapshot.getTimestamp("createdAt") ?: Timestamp.now(),
+                        imageUrl = snapshot.getString("imageUrl") ?: ""
+                    )
+                } else null
+            }
+            .catch { 
+                android.util.Log.e("ChatRepository", "Error observing group", it)
+                emit(null) 
+            }
+    }
+
+    suspend fun getGroupMembersFromFirestore(participantIds: List<String>): Map<String, com.mustakim.bokbok.data.model.User> {
+        if (participantIds.isEmpty()) return emptyMap()
+        
+        val result = mutableMapOf<String, com.mustakim.bokbok.data.model.User>()
+        
+        // Firestore 'in' queries are limited to 30 items at a time
+        participantIds.chunked(30).forEach { chunk ->
+            try {
+                val snapshot = firestore.collection("users")
+                    .whereIn("uid", chunk)
+                    .get()
+                    .await()
+                
+                snapshot.documents.forEach { doc ->
+                    val user = com.mustakim.bokbok.data.model.User(
+                        uid = doc.getString("uid") ?: doc.id,
+                        username = doc.getString("username") ?: "",
+                        email = doc.getString("email") ?: "",
+                        displayName = doc.getString("displayName") ?: "User",
+                        bio = doc.getString("bio") ?: "",
+                        profileImageUrl = doc.getString("profileImageUrl") ?: "",
+                        phoneNumber = doc.getString("phoneNumber") ?: "",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        lastSeen = doc.getLong("lastSeen") ?: 0L
+                    )
+                    result[user.uid] = user
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ChatRepository", "Error fetching group members", e)
+            }
+        }
+        
+        return result
+    }
+
     fun getGroupMembers(groupId: String): Map<String, com.mustakim.bokbok.data.model.User> {
-        // TODO: Fetch real members from Firestore
+        // This is deprecated - use getGroupMembersFromFirestore instead
         return emptyMap()
     }
 

@@ -74,7 +74,9 @@ fun RoomSettingsSheet(
     onUpdateSettings: (Map<String, Any>) -> Unit,
     onRemoveMember: (String) -> Unit,
     onKickParticipant: (String) -> Unit,
-    onAddMember: () -> Unit
+    onAddMember: () -> Unit,
+    onPickImage: () -> Unit,
+    pendingImageUrl: String? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -142,7 +144,7 @@ fun RoomSettingsSheet(
             // Content
             Box(modifier = Modifier.weight(1f)) {
                 when (selectedTab) {
-                    0 -> SettingsTab(room, isHost, onUpdateSettings)
+                    0 -> SettingsTab(room, isHost, onUpdateSettings, onPickImage, pendingImageUrl)
                     1 -> ParticipantsTab(participants, isHost, onKickParticipant)
                     2 -> MembersTab(members, isHost, onRemoveMember, onAddMember)
                     3 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -158,12 +160,14 @@ fun RoomSettingsSheet(
 fun SettingsTab(
     room: VoiceRoom,
     isHost: Boolean,
-    onUpdateSettings: (Map<String, Any>) -> Unit
+    onUpdateSettings: (Map<String, Any>) -> Unit,
+    onPickImage: () -> Unit,
+    pendingImageUrl: String?
 ) {
     var name by remember { mutableStateOf(room.name) }
     var description by remember { mutableStateOf(room.description) }
     var maxParticipants by remember { mutableStateOf(room.maxParticipants.toString()) }
-    var imageUrl by remember { mutableStateOf(room.imageUrl) }
+    var imageUrl by remember(room.imageUrl, pendingImageUrl) { mutableStateOf(pendingImageUrl ?: room.imageUrl) }
     var category by remember { mutableStateOf(room.category) }
     var isPublic by remember { mutableStateOf(room.isPublic) }
     var allowJoinNotifications by remember { mutableStateOf(room.allowJoinNotifications) }
@@ -179,169 +183,178 @@ fun SettingsTab(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // Cover Image
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-            contentAlignment = Alignment.Center
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            if (imageUrl.isNotBlank()) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = "Room Cover",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.Public,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            if (isHost) {
-                IconButton(
-                    onClick = { /* TODO: Image Picker */ },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), CircleShape)
-                ) {
-                    Icon(Icons.Default.Edit, "Edit Image")
+            // Cover Image
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                if (imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = "Room Cover",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Public,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (isHost) {
+                    IconButton(
+                        onClick = onPickImage,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), CircleShape)
+                    ) {
+                        Icon(Icons.Default.Edit, "Edit Image")
+                    }
                 }
             }
-        }
-        
-        if (isHost) {
-             OutlinedTextField(
-                value = imageUrl,
-                onValueChange = { imageUrl = it },
-                label = { Text("Cover Image URL") },
+            
+            if (isHost) {
+                 OutlinedTextField(
+                    value = imageUrl,
+                    onValueChange = { imageUrl = it },
+                    label = { Text("Cover Image URL") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Room Name") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp)
-            )
-        }
-
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Room Name") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = isHost,
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        OutlinedTextField(
-            value = description,
-            onValueChange = { description = it },
-            label = { Text("Description") },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-            enabled = isHost,
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            OutlinedTextField(
-                value = maxParticipants,
-                onValueChange = { if (it.all { char -> char.isDigit() }) maxParticipants = it },
-                label = { Text("Max Users") },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 enabled = isHost,
                 shape = RoundedCornerShape(12.dp)
             )
-            
-            // Category Dropdown (Simplified as Text for now or we can implement a simple selector)
-             // For now, let's just show the current category
-             OutlinedTextField(
-                value = category.displayName,
-                onValueChange = {}, // Read only for now or implement dropdown
-                label = { Text("Category") },
-                modifier = Modifier.weight(1f),
-                readOnly = true,
-                enabled = false, // TODO: Implement Category Picker
+
+            OutlinedTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = { Text("Description") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+                enabled = isHost,
                 shape = RoundedCornerShape(12.dp)
             )
-        }
 
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-
-        // Toggles
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Public Room", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Anyone can see and join this room",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                OutlinedTextField(
+                    value = maxParticipants,
+                    onValueChange = { if (it.all { char -> char.isDigit() }) maxParticipants = it },
+                    label = { Text("Max Users") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    enabled = isHost,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                
+                // Category Dropdown (Simplified as Text for now or we can implement a simple selector)
+                 // For now, let's just show the current category
+                 OutlinedTextField(
+                    value = category.displayName,
+                    onValueChange = {}, // Read only for now or implement dropdown
+                    label = { Text("Category") },
+                    modifier = Modifier.weight(1f),
+                    readOnly = true,
+                    enabled = false, // TODO: Implement Category Picker
+                    shape = RoundedCornerShape(12.dp)
                 )
             }
-            Switch(
-                checked = isPublic,
-                onCheckedChange = { isPublic = it },
-                enabled = isHost
-            )
-        }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Join Notifications", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Notify members when someone joins",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+
+            // Toggles
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Public Room", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Anyone can see and join this room",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = isPublic,
+                    onCheckedChange = { isPublic = it },
+                    enabled = isHost
                 )
             }
-            Switch(
-                checked = allowJoinNotifications,
-                onCheckedChange = { allowJoinNotifications = it },
-                enabled = isHost
-            )
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Join Notifications", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Notify members when someone joins",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = allowJoinNotifications,
+                    onCheckedChange = { allowJoinNotifications = it },
+                    enabled = isHost
+                )
+            }
+        }
 
         if (isHost && hasChanges) {
-            Button(
-                onClick = {
-                    onUpdateSettings(
-                        mapOf(
-                            "name" to name,
-                            "description" to description,
-                            "maxParticipants" to (maxParticipants.toIntOrNull() ?: 10),
-                            "imageUrl" to imageUrl,
-                            "isPublic" to isPublic,
-                            "allowJoinNotifications" to allowJoinNotifications
-                            // "category" to category.name // If we added picker
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
             ) {
-                Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Save Changes")
+                Button(
+                    onClick = {
+                        onUpdateSettings(
+                            mapOf(
+                                "name" to name,
+                                "description" to description,
+                                "maxParticipants" to (maxParticipants.toIntOrNull() ?: 10),
+                                "imageUrl" to imageUrl,
+                                "isPublic" to isPublic,
+                                "allowJoinNotifications" to allowJoinNotifications
+                                // "category" to category.name // If we added picker
+                            )
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Save Changes")
+                }
             }
         }
     }

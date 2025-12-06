@@ -66,6 +66,7 @@ import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.ParticipantCard
 import com.mustakim.bokbok.ui.components.ParticipantOptionsSheet
+import com.mustakim.bokbok.ui.components.RoomSettingsSheet
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 
@@ -80,6 +81,16 @@ fun VoiceRoomScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val friends by viewModel.friends.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    
+    val pickMedia = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.uploadRoomImage(uri, context)
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -264,7 +275,8 @@ fun VoiceRoomScreen(
             onConfirm = { userIds ->
                 viewModel.inviteUsers(userIds)
                 showAddUserDialog = false
-            }
+            },
+            viewModel = viewModel
         )
     }
 
@@ -275,20 +287,26 @@ fun VoiceRoomScreen(
             onConfirm = { userIds ->
                 viewModel.addMembers(userIds)
                 showAddMemberDialog = false
-            }
+            },
+            viewModel = viewModel
         )
     }
     
     if (showSettingsSheet && uiState.room != null) {
-        com.mustakim.bokbok.ui.components.RoomSettingsSheet(
+        // Fix: Pass original room and separate pending URL to ensure diff detection logic works
+        RoomSettingsSheet(
             room = uiState.room!!,
             isHost = uiState.room!!.hostId == viewModel.currentUserId,
             participants = uiState.participants,
             members = uiState.members,
-            onDismiss = { showSettingsSheet = false },
+            onDismiss = { 
+                showSettingsSheet = false
+                viewModel.consumeUploadedCoverUrl() 
+            },
             onUpdateSettings = { updates ->
                 viewModel.updateRoomSettings(updates)
                 showSettingsSheet = false
+                viewModel.consumeUploadedCoverUrl()
             },
             onRemoveMember = { userId ->
                 viewModel.removeMember(userId)
@@ -296,19 +314,34 @@ fun VoiceRoomScreen(
             onKickParticipant = { userId ->
                 viewModel.kickParticipant(userId)
             },
-            onAddMember = { showAddMemberDialog = true }
+            onAddMember = { showAddMemberDialog = true },
+            onPickImage = {
+                pickMedia.launch(androidx.activity.result.PickVisualMediaRequest(
+                    ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+            pendingImageUrl = uiState.uploadedCoverUrl
         )
     }
     if (selectedParticipant != null) {
         ParticipantOptionsSheet(
             participant = selectedParticipant!!,
             isAmHost = uiState.room?.hostId == viewModel.currentUserId,
+            isFriend = (selectedParticipant!!.id == viewModel.currentUserId) || viewModel.isFriend(selectedParticipant!!.id),
+            isMember = viewModel.isMember(selectedParticipant!!.id),
             volume = uiState.participantVolumes[selectedParticipant!!.id] ?: 1f,
             onVolumeChange = { vol ->
                 viewModel.setParticipantVolume(selectedParticipant!!.id, vol)
             },
             onKick = {
                 viewModel.kickParticipant(selectedParticipant!!.id)
+                selectedParticipant = null
+            },
+            onAddFriend = {
+                viewModel.addFriend(selectedParticipant!!.id)
+                selectedParticipant = null
+            },
+            onAddMember = {
+                viewModel.addMembers(listOf(selectedParticipant!!.id))
                 selectedParticipant = null
             },
             onDismiss = { selectedParticipant = null }
@@ -517,20 +550,34 @@ private fun FiveOrMoreParticipantLayout(participants: List<VoiceRoomParticipant>
 private fun AddParticipantsDialog(
     friends: List<com.mustakim.bokbok.data.model.FriendWithUser>,
     onDismiss: () -> Unit,
-    onConfirm: (List<String>) -> Unit
+    onConfirm: (List<String>) -> Unit,
+    viewModel: VoiceRoomViewModel = viewModel() // Add ViewModel for search
 ) {
     var selectedTab by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    var manualUserId by remember { mutableStateOf("") }
-    val selectedFriendIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val selectedUserIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var searchQuery by remember { mutableStateOf("") }
+    
+    // Global Search State
+    val globalSearchResults by viewModel.searchResults.collectAsState()
+    val isSearching by viewModel.isSearching.collectAsState()
 
+    // Friend filter logic
     val filteredFriends = remember(friends, searchQuery) {
-        if (searchQuery.isBlank()) friends
-        else friends.filter {
-            it.user.username.contains(searchQuery, ignoreCase = true) ||
-                    (it.user.displayName.contains(searchQuery, ignoreCase = true))
+        if (selectedTab == 0 && searchQuery.isNotBlank()) {
+             friends.filter {
+                it.user.username.contains(searchQuery, ignoreCase = true) ||
+                        (it.user.displayName.contains(searchQuery, ignoreCase = true))
+            }
+        } else friends
+    }
+
+    // Trigger global search when tab is 1
+    LaunchedEffect(searchQuery, selectedTab) {
+        if (selectedTab == 1) {
+            viewModel.searchUsers(searchQuery)
         }
     }
+
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(28.dp),
@@ -564,100 +611,84 @@ private fun AddParticipantsDialog(
                 ) {
                     androidx.compose.material3.Tab(
                         selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
+                        onClick = { selectedTab = 0; searchQuery = "" },
                         text = { Text("Friends") }
                     )
                     androidx.compose.material3.Tab(
                         selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = { Text("By ID") }
+                        onClick = { selectedTab = 1; searchQuery = "" },
+                        text = { Text("Global Search") }
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+                
+                // Search Bar
+                androidx.compose.material3.OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text(if (selectedTab == 0) "Search friends..." else "Search by username...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Box(modifier = Modifier.weight(1f, fill = false)) {
                     if (selectedTab == 0) {
-                        Column {
-                            androidx.compose.material3.OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = { Text("Search friends...") },
-                                leadingIcon = { Icon(Icons.Default.Search, null) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                singleLine = true
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            if (friends.isEmpty()) {
-                                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                                    Text("No friends found", style = MaterialTheme.typography.bodyMedium)
-                                }
-                            } else {
-                                androidx.compose.foundation.lazy.LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(filteredFriends) { friend ->
-                                        val isSelected = selectedFriendIds.contains(friend.user.uid)
-                                        androidx.compose.material3.ListItem(
-                                            headlineContent = { Text(friend.user.displayName.ifBlank { friend.user.username }) },
-                                            supportingContent = { Text("@${friend.user.username}") },
-                                            leadingContent = {
-                                                val imageModifier = Modifier.size(40.dp).clip(CircleShape)
-                                                if (friend.user.profileImageUrl.isNotBlank()) {
-                                                    coil.compose.AsyncImage(
-                                                        model = friend.user.profileImageUrl,
-                                                        contentDescription = null,
-                                                        modifier = imageModifier,
-                                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                                    )
-                                                } else {
-                                                    Box(
-                                                        modifier = imageModifier.background(MaterialTheme.colorScheme.primaryContainer),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(friend.user.username.take(1).uppercase())
-                                                    }
-                                                }
-                                            },
-                                            trailingContent = {
-                                                androidx.compose.material3.Checkbox(
-                                                    checked = isSelected,
-                                                    onCheckedChange = { checked ->
-                                                        if (checked) selectedFriendIds.add(friend.user.uid)
-                                                        else selectedFriendIds.remove(friend.user.uid)
-                                                    }
-                                                )
-                                            },
-                                            colors = androidx.compose.material3.ListItemDefaults.colors(
-                                                containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
-                                            ),
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .clickable {
-                                                    if (isSelected) selectedFriendIds.remove(friend.user.uid)
-                                                    else selectedFriendIds.add(friend.user.uid)
-                                                }
-                                        )
-                                    }
+                        // FRIENDS LIST
+                        if (friends.isEmpty()) {
+                             Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                Text("No friends found", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else {
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(filteredFriends) { friend ->
+                                    val isSelected = selectedUserIds.contains(friend.user.uid)
+                                    UserListItem(
+                                        user = friend.user,
+                                        isSelected = isSelected,
+                                        onClick = {
+                                            if (isSelected) selectedUserIds.remove(friend.user.uid)
+                                            else selectedUserIds.add(friend.user.uid)
+                                        }
+                                    )
                                 }
                             }
                         }
                     } else {
-                        Column(verticalArrangement = Arrangement.Center) {
-                            Text(
-                                text = "Enter the User ID to add them to this room.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            androidx.compose.material3.OutlinedTextField(
-                                value = manualUserId,
-                                onValueChange = { manualUserId = it },
-                                label = { Text("User ID") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                        // GLOBAL SEARCH LIST
+                        if (isSearching) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                androidx.compose.material3.CircularProgressIndicator()
+                            }
+                        } else if (globalSearchResults.isEmpty() && searchQuery.isNotBlank()) {
+                             Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                Text("No users found", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else if (searchQuery.isBlank()) {
+                             Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                Text("Type to search...", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        } else {
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(globalSearchResults) { user ->
+                                    val isSelected = selectedUserIds.contains(user.uid)
+                                    UserListItem(
+                                        user = user,
+                                        isSelected = isSelected,
+                                        onClick = {
+                                            if (isSelected) selectedUserIds.remove(user.uid)
+                                            else selectedUserIds.add(user.uid)
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -669,20 +700,56 @@ private fun AddParticipantsDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     androidx.compose.material3.Button(
                         onClick = {
-                            if (selectedTab == 0) {
-                                onConfirm(selectedFriendIds.toList())
-                            } else {
-                                if (manualUserId.isNotBlank()) {
-                                    onConfirm(listOf(manualUserId))
-                                }
-                            }
+                             onConfirm(selectedUserIds.toList())
                         },
-                        enabled = (selectedTab == 0 && selectedFriendIds.isNotEmpty()) || (selectedTab == 1 && manualUserId.isNotBlank())
+                        enabled = selectedUserIds.isNotEmpty()
                     ) {
-                        Text(if (selectedTab == 0) "Add Selected (${selectedFriendIds.size})" else "Add User")
+                        Text("Add (${selectedUserIds.size})")
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun UserListItem(
+    user: com.mustakim.bokbok.data.model.User,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    androidx.compose.material3.ListItem(
+        headlineContent = { Text(user.displayName.ifBlank { user.username }) },
+        supportingContent = { Text("@${user.username}") },
+        leadingContent = {
+            val imageModifier = Modifier.size(40.dp).clip(CircleShape)
+            if (user.profileImageUrl.isNotBlank()) {
+                coil.compose.AsyncImage(
+                    model = user.profileImageUrl,
+                    contentDescription = null,
+                    modifier = imageModifier,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = imageModifier.background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(user.username.take(1).uppercase())
+                }
+            }
+        },
+        trailingContent = {
+            androidx.compose.material3.Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onClick() }
+            )
+        },
+        colors = androidx.compose.material3.ListItemDefaults.colors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
+        ),
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+    )
 }

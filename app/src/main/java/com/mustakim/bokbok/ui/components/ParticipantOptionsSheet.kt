@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
@@ -38,9 +40,13 @@ import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 fun ParticipantOptionsSheet(
     participant: VoiceRoomParticipant,
     isAmHost: Boolean, // Am I the host?
+    isFriend: Boolean,
+    isMember: Boolean,
     volume: Float,
     onVolumeChange: (Float) -> Unit,
     onKick: () -> Unit,
+    onAddFriend: () -> Unit,
+    onAddMember: () -> Unit,
     onDismiss: () -> Unit
 ) {
     ModalBottomSheet(
@@ -115,27 +121,61 @@ fun ParticipantOptionsSheet(
                 )
             }
 
-            // 3. Kick Button (Only if we are host and target is not us)
-            // We assume the caller passes isAmHost = true only if the current user is the host.
-            // We also check !participant.isHost to prevent kicking the host (which shouldn't happen anyway if logic is correct).
-            if (isAmHost && !participant.isHost) {
-                 Button(
-                    onClick = onKick,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PersonRemove,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Remove from room")
+            // 3. Actions
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Add Friend Button
+                if (!isFriend) {
+                    Button(
+                        onClick = onAddFriend,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PersonAdd, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add Friend")
+                    }
+                }
+
+                // Add Member Button (Only host can add members)
+                if (isAmHost && !isMember) {
+                    Button(
+                        onClick = onAddMember,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.GroupAdd, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add as Member")
+                    }
+                }
+
+                // Kick Button
+                if (isAmHost && !participant.isHost) {
+                     Button(
+                        onClick = onKick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonRemove,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Remove from room")
+                    }
                 }
             }
         }
     }
 }
+

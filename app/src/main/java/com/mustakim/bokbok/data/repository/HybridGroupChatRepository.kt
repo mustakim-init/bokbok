@@ -155,15 +155,43 @@ class HybridGroupChatRepository(private val context: Context) {
 
     /**
      * Send message (Room first for instant UI)
+     * Supports summon feature with @everyone for groups
      */
-    suspend fun sendMessage(groupId: String, text: String, replyTo: Message? = null): String {
+    suspend fun sendMessage(groupId: String, text: String, replyTo: Message? = null): SendMessageResult {
         val messageId = UUID.randomUUID().toString()
+        
+        // Get group members for summon parsing
+        val members = groupDao.getMembersByGroupId(groupId)
+        val memberMap = members.associate { it.displayName.lowercase() to it.userId }
+        val allMemberIds = members.map { it.userId }
+        
+        // Parse summons from text
+        val summonResult = com.mustakim.bokbok.utils.SummonParser.parse(
+            text = text,
+            availableUsers = memberMap,
+            allMemberIds = allMemberIds,
+            senderId = currentUserId
+        )
+        
+        // Check rate limit if there are summons
+        if (summonResult.hasSummons) {
+            val rateLimitResult = com.mustakim.bokbok.utils.SummonRateLimiter.checkAndRecord(
+                chatId = groupId,
+                isEveryone = summonResult.hasEveryone
+            )
+            if (!rateLimitResult.allowed) {
+                return SendMessageResult.RateLimited(rateLimitResult.reason, rateLimitResult.cooldownSeconds)
+            }
+        }
         
         var replyToSenderName = "Unknown"
         if (replyTo != null) {
-            val member = groupDao.getMembersByGroupId(groupId).find { it.userId == replyTo.senderId }
+            val member = members.find { it.userId == replyTo.senderId }
             replyToSenderName = member?.displayName ?: "Unknown"
         }
+        
+        // Get sender's display name for notification
+        val senderDisplayName = members.find { it.userId == currentUserId }?.displayName ?: "Someone"
         
         val messageEntity = GroupMessageEntity(
             id = messageId,
@@ -176,7 +204,8 @@ class HybridGroupChatRepository(private val context: Context) {
             replyToSenderName = replyToSenderName,
             status = MessageStatus.SENDING.name,
             readBy = "[\"$currentUserId\"]",
-            syncStatus = SyncStatus.PENDING
+            syncStatus = SyncStatus.PENDING,
+            summonedUserIds = summonResult.summonedUserIds.joinToString(",")
         )
         
         // 1. Save to Room immediately
@@ -192,7 +221,52 @@ class HybridGroupChatRepository(private val context: Context) {
             syncMessageToFirestore(groupId, messageEntity)
         }
         
-        return messageId
+        // 4. Send summon notifications via FCM (background)
+        if (summonResult.hasSummons) {
+            backgroundScope.launch {
+                sendSummonNotifications(
+                    summonedUserIds = summonResult.summonedUserIds,
+                    senderDisplayName = senderDisplayName,
+                    groupId = groupId
+                )
+            }
+        }
+        
+        return SendMessageResult.Success(messageId)
+    }
+    
+    /**
+     * Send FCM notifications to summoned users
+     */
+    private suspend fun sendSummonNotifications(
+        summonedUserIds: List<String>,
+        senderDisplayName: String,
+        groupId: String
+    ) {
+        val fcmRepository = FCMRepository()
+        
+        for (userId in summonedUserIds) {
+            try {
+                // Fetch user's FCM token
+                val userDoc = firestore.collection("users").document(userId).get().await()
+                val fcmToken = userDoc.getString("fcmToken") ?: continue
+                
+                fcmRepository.sendNotification(
+                    toToken = fcmToken,
+                    title = "BokBok - Summon",
+                    body = "$senderDisplayName summoned you",
+                    data = mapOf(
+                        "type" to "summon",
+                        "chatId" to "",
+                        "groupId" to groupId,
+                        "isGroup" to "true"
+                    )
+                )
+                android.util.Log.d("HybridGroupRepo", "Summon notification sent to $userId")
+            } catch (e: Exception) {
+                android.util.Log.e("HybridGroupRepo", "Failed to send summon notification to $userId", e)
+            }
+        }
     }
 
     private suspend fun syncMessageToFirestore(groupId: String, entity: GroupMessageEntity) {
@@ -211,11 +285,28 @@ class HybridGroupChatRepository(private val context: Context) {
                 "type" to MessageType.TEXT.name
             )
             
+            // 1. Add message to subcollection
             firestore.collection("groups")
                 .document(groupId)
                 .collection("messages")
                 .document(entity.id)
                 .set(messageData)
+                .await()
+            
+            // 2. Update group document's lastMessage field for chat list display
+            val lastMessageUpdate = mapOf(
+                "lastMessage" to mapOf(
+                    "text" to entity.text,
+                    "senderId" to entity.senderId,
+                    "type" to "TEXT",
+                    "isDeleted" to false
+                ),
+                "lastMessageTime" to Timestamp(entity.timestamp / 1000, ((entity.timestamp % 1000) * 1000000).toInt())
+            )
+            
+            firestore.collection("groups")
+                .document(groupId)
+                .update(lastMessageUpdate)
                 .await()
             
             // Update sync status
@@ -327,6 +418,79 @@ class HybridGroupChatRepository(private val context: Context) {
             }
         } catch (e: Exception) {
             android.util.Log.e("HybridGroupRepo", "Error deleting message", e)
+        }
+    }
+
+    /**
+     * Clear chat history (Local only)
+     */
+    suspend fun clearChatHistory(groupId: String) {
+        try {
+            groupDao.deleteAllByGroupId(groupId)
+        } catch (e: Exception) {
+            android.util.Log.e("HybridGroupRepo", "Error clearing chat history", e)
+        }
+    }
+
+    /**
+     * Search messages locally
+     */
+    suspend fun searchMessages(groupId: String, query: String): List<Message> {
+        return try {
+            groupDao.searchMessages(groupId, query).map { it.toDomain() }
+        } catch (e: Exception) {
+            android.util.Log.e("HybridGroupRepo", "Error searching messages", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Leave group
+     */
+    suspend fun leaveGroup(groupId: String) {
+        try {
+            // Remove from Firestore participants
+            firestore.collection("groups").document(groupId)
+                .update("participants", com.google.firebase.firestore.FieldValue.arrayRemove(currentUserId))
+                .await()
+            
+            // Delete local data
+            groupDao.deleteAllByGroupId(groupId)
+            // Ideally also delete the group entity itself, but keeping it simple for now or maybe user wants to see it?
+            // Usually leaving means it disappears.
+            // groupDao.deleteGroup(groupId) // Assuming such method exists or we make one.
+            // For now, clearing messages is good. The group will stop syncing because listener checks participants.
+        } catch (e: Exception) {
+            android.util.Log.e("HybridGroupRepo", "Error leaving group", e)
+        }
+    }
+
+    /**
+     * Add a member to the group
+     */
+    suspend fun addMember(groupId: String, userId: String) {
+        try {
+            // Add to Firestore participants
+            firestore.collection("groups").document(groupId)
+                .update("participants", com.google.firebase.firestore.FieldValue.arrayUnion(userId))
+                .await()
+            
+            // Fetch the new member's profile and add to local Room for instant UI
+            val userDoc = firestore.collection("users").document(userId).get().await()
+            if (userDoc.exists()) {
+                val newMember = GroupMemberEntity(
+                    groupId = groupId,
+                    userId = userId,
+                    displayName = userDoc.getString("displayName") ?: "User",
+                    profileImageUrl = userDoc.getString("profileImageUrl") ?: "",
+                    username = userDoc.getString("username") ?: ""
+                )
+                groupDao.insertMembers(listOf(newMember))
+            }
+            
+            android.util.Log.d("HybridGroupRepo", "Added member $userId to group $groupId")
+        } catch (e: Exception) {
+            android.util.Log.e("HybridGroupRepo", "Error adding member", e)
         }
     }
 

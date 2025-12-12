@@ -59,7 +59,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.VideoCall
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DividerDefaults
@@ -125,7 +125,7 @@ fun ChatScreen(
     val isFriendOnline by viewModel.isFriendOnline.collectAsState()
     val messageText by viewModel.messageText.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
-    
+
     // Filter out messages deleted by current user (Optimized with derivedStateOf)
     val messages by remember {
         derivedStateOf {
@@ -133,10 +133,16 @@ fun ChatScreen(
         }
     }
     val showEmojiPicker by viewModel.showEmojiPicker.collectAsState()
-    
+
     val listState = rememberLazyListState()
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val scope = rememberCoroutineScope()
+
+    val isSearching by viewModel.isSearching.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    var showSearchBar by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedMessageForReactions by remember { mutableStateOf<Message?>(null) }
 
     // Handle Back Press to close Emoji Picker
     BackHandler(enabled = showEmojiPicker) {
@@ -155,7 +161,12 @@ fun ChatScreen(
             CenterAlignedTopAppBar(
                 title = {
                     val user = friendUser
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable {
+                            navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.ChatDetails.createRoute(viewModel.friendId, false))
+                        }
+                    ) {
                         if (user != null) {
                             if (user.profileImageUrl.isNotEmpty()) {
                                 AsyncImage(
@@ -208,8 +219,19 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        showSearchBar = !showSearchBar
+                        if (!showSearchBar) {
+                            searchQuery = ""
+                            viewModel.clearSearch()
+                        }
+                    }) {
+                        Icon(
+                            imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
+                            contentDescription = "Search"
+                        )
+                    }
                     IconButton(onClick = { }) { Icon(Icons.Default.Call, "Call") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.VideoCall, "Video") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -223,19 +245,37 @@ fun ChatScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.surface)
         ) {
+            if (showSearchBar) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = {
+                        searchQuery = it
+                        viewModel.searchMessages(it)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    placeholder = { Text("Search in chat") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        { IconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
+                    } else null,
+                    singleLine = true
+                )
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .pointerInput(Unit) {
                         detectTapGestures(
-                            onTap = { 
+                            onTap = {
                                 focusManager.clearFocus()
                                 viewModel.setShowEmojiPicker(false)
                             }
                         )
                     }
             ) {
-                val currentMessages = messages
+                val currentMessages = if (isSearching) searchResults else messages
                 // Show empty state only if messages are loaded and empty (not null)
                 // null means still loading, don't show empty state to prevent flicker
                 if (currentMessages != null && currentMessages.isEmpty()) {
@@ -262,20 +302,13 @@ fun ChatScreen(
                             val isMe = message.senderId == viewModel.currentUserId
                             val nextMessage = currentMessages.getOrNull(index - 1)
                             val prevMessage = currentMessages.getOrNull(index + 1)
-                            
+
                             val isLastInSequence = nextMessage?.senderId != message.senderId
                             val isFirstInSequence = prevMessage?.senderId != message.senderId
-                            
+
                             // Find the last read message from me (for read receipt)
                             val lastReadMessage = currentMessages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
                             val isLastReadMessage = message.id == lastReadMessage?.id
-
-                            // Date Header Logic
-                            val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
-                            if (showDateHeader) {
-                                DateHeader(date = message.timestamp.toDate())
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
 
                             MessageBubble(
                                 message = message,
@@ -289,7 +322,7 @@ fun ChatScreen(
                                 onReply = { viewModel.setReplyingTo(message) },
                                 onReact = { emoji -> viewModel.reactToMessage(message.id, emoji) },
                                 onDelete = { forEveryone -> viewModel.deleteMessage(message.id, forEveryone) },
-                                onRemoveReaction = { viewModel.removeReaction(message.id) },
+                                onRemoveReaction = { selectedMessageForReactions = message },
                                 onReplyClick = { replyToId ->
                                     val replyIndex = currentMessages.indexOfFirst { it.id == replyToId }
                                     if (replyIndex != -1) {
@@ -299,9 +332,17 @@ fun ChatScreen(
                                     }
                                 }
                             )
-                            
+
                             if (isFirstInSequence) {
                                 Spacer(modifier = Modifier.height(12.dp))
+                            }
+
+                            // Date Header Logic - show AFTER message (appears ABOVE in reverseLayout)
+                            // Show when this is the oldest message of the day (next older message is from a different day)
+                            val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
+                            if (showDateHeader) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                DateHeader(date = message.timestamp.toDate())
                             }
                         }
                     }
@@ -316,6 +357,14 @@ fun ChatScreen(
                     .navigationBarsPadding() // Handle nav bar padding
                     .imePadding() // Handle keyboard padding
             ) {
+                // Summon Autocomplete (for 1:1 chat - only friend available)
+                com.mustakim.bokbok.ui.components.SummonAutocomplete(
+                    text = messageText,
+                    availableUsers = listOfNotNull(friendUser),
+                    isGroup = false,
+                    onSuggestionSelected = { viewModel.onMessageChange(it) }
+                )
+                
                 ChatInputBar(
                     text = messageText,
                     onTextChange = viewModel::onMessageChange,
@@ -341,6 +390,20 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    if (selectedMessageForReactions != null) {
+        val message = selectedMessageForReactions!!
+        ReactionSummarySheet(
+            reactions = message.reactions,
+            currentUserId = viewModel.currentUserId,
+            userMap = mapOf(
+                viewModel.currentUserId to (com.mustakim.bokbok.data.model.User(uid = viewModel.currentUserId, displayName = "You")),
+                (friendUser?.uid ?: "") to (friendUser ?: com.mustakim.bokbok.data.model.User())
+            ),
+            onDismiss = { selectedMessageForReactions = null },
+            onRemoveReaction = { viewModel.removeReaction(message.id) }
+        )
     }
 }
 
@@ -397,7 +460,7 @@ fun MessageBubble(
                         onReply()
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     }
-                    
+
                     androidx.compose.animation.core.animate(
                         initialValue = offsetX,
                         targetValue = 0f,
@@ -551,15 +614,21 @@ fun MessageBubble(
                                 }
                             }
 
-                            Text(
+                            // Message text with summon highlighting
+                            val highlightedText = com.mustakim.bokbok.utils.SummonHighlighter.formatForDisplay(
                                 text = message.text,
+                                highlightColor = MaterialTheme.colorScheme.primary,
+                                showCommand = false
+                            )
+                            Text(
+                                text = highlightedText,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = contentColor
                             )
                         }
                     }
 
-                    // Reactions Badge - adjusted X position only
+                    // Reactions Badge - Clickable to show sheet
                     if (message.reactions.isNotEmpty()) {
                         Box(
                             modifier = Modifier
@@ -567,6 +636,8 @@ fun MessageBubble(
                                 .offset(x = if (isMe) 12.dp else (-12).dp, y = 10.dp)
                                 .background(MaterialTheme.colorScheme.surface, CircleShape)
                                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                .clip(CircleShape)
+                                .clickable { onRemoveReaction() } // Opens sheet
                                 .padding(4.dp)
                         ) {
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -819,7 +890,7 @@ fun MessageBubble(
         }
     }
 
-    
+
     // Delete Dialog - placed outside DropdownMenu to fix UI issues
     if (showDeleteDialog) {
         AlertDialog(
@@ -901,7 +972,7 @@ fun ChatInputBar(
     onFocus: () -> Unit = {}
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    
+
     // Derive visibility states to prevent unnecessary recompositions
     val showActionIcons = remember(isFocused, text) { !isFocused && text.isEmpty() }
     val showSendButton = remember(isFocused, text) { text.isNotBlank() || isFocused }
@@ -938,7 +1009,7 @@ fun ChatInputBar(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp) 
+                .padding(16.dp)
         ) {
             Row(
                 modifier = Modifier
@@ -994,15 +1065,15 @@ fun ChatInputBar(
                             maxLines = 5,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .onFocusChanged { focusState -> 
-                                    isFocused = focusState.isFocused 
+                                .onFocusChanged { focusState ->
+                                    isFocused = focusState.isFocused
                                     if (focusState.isFocused) {
                                         onFocus()
                                     }
                                 }
                         )
                     }
-                    
+
                     // Emoji Button (Inside Text Field Container)
                     IconButton(
                         onClick = onEmojiClick,

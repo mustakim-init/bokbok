@@ -485,4 +485,12 @@ class ChatRepository {
         firestore.collection("groups").document(groupId).set(groupData).await()
         return groupId
     }
+
+    suspend fun leaveGroup(groupId: String) {
+        val currentUserId = auth.currentUser?.uid ?: return
+        
+        firestore.collection("groups").document(groupId)
+            .update("participants", com.google.firebase.firestore.FieldValue.arrayRemove(currentUserId))
+            .await()
+    }
 }

@@ -102,6 +102,16 @@ class FriendsRepository(
         }
     }
 
+    suspend fun removeFriendByUserId(friendId: String): Result<Unit> {
+        return try {
+            val currentUserId = auth.currentUser?.uid ?: return Result.failure(Exception("Not logged in"))
+            val friendshipId = getFriendshipId(currentUserId, friendId)
+            removeFriendship(friendshipId)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun blockUser(targetUserId: String): Result<Unit> {
         return try {
             val currentUserId = auth.currentUser?.uid ?: return Result.failure(Exception("Not logged in"))

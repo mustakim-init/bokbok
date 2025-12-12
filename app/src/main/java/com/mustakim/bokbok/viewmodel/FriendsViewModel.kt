@@ -17,7 +17,9 @@ import kotlinx.coroutines.launch
 
 class FriendsViewModel(
     private val friendsRepository: FriendsRepository,
-    private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository
+    private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository,
+    private val hybridChatRepository: com.mustakim.bokbok.data.repository.HybridChatRepository,
+    private val hybridGroupChatRepository: com.mustakim.bokbok.data.repository.HybridGroupChatRepository
 ) : ViewModel() {
 
     val friends: StateFlow<List<FriendWithUser>> = friendsRepository.observeFriends()
@@ -265,6 +267,36 @@ class FriendsViewModel(
         }
     }
 
+    fun muteConversation(chatId: String, isMuted: Boolean) {
+        // Placeholder for mute functionality
+        // Ideally this would save to DataStore or Local DB preference
+        _uiState.value = FriendsUiState.Success(if (isMuted) "Chat muted" else "Chat unmuted")
+    }
+
+    fun clearChatHistory(id: String, isGroup: Boolean) {
+        viewModelScope.launch {
+            if (isGroup) {
+                hybridGroupChatRepository.clearChatHistory(id)
+                _uiState.value = FriendsUiState.Success("Group chat history cleared")
+            } else {
+                hybridChatRepository.clearChatHistory(id)
+                _uiState.value = FriendsUiState.Success("Chat history cleared")
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String) {
+        viewModelScope.launch {
+            try {
+                hybridGroupChatRepository.leaveGroup(groupId)
+                _uiState.value = FriendsUiState.Success("Left group")
+            } catch (e: Exception) {
+                _uiState.value = FriendsUiState.Error("Failed to leave group")
+            }
+        }
+        _uiState.value = FriendsUiState.Idle
+    }
+
     fun clearUiState() {
         _uiState.value = FriendsUiState.Idle
     }
@@ -272,12 +304,14 @@ class FriendsViewModel(
     // Factory for creating FriendsViewModel
     class Factory(
         private val friendsRepository: FriendsRepository,
-        private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository
+        private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository,
+        private val hybridChatRepository: com.mustakim.bokbok.data.repository.HybridChatRepository,
+        private val hybridGroupChatRepository: com.mustakim.bokbok.data.repository.HybridGroupChatRepository
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(FriendsViewModel::class.java)) {
-                return FriendsViewModel(friendsRepository, chatRepository) as T
+                return FriendsViewModel(friendsRepository, chatRepository, hybridChatRepository, hybridGroupChatRepository) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

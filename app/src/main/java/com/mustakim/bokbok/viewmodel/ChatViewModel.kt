@@ -17,7 +17,7 @@ class ChatViewModel(
     private val chatRepository: HybridChatRepository,
     private val userRepository: UserRepository,
     private val friendsRepository: FriendsRepository,
-    private val friendId: String
+    val friendId: String
 ) : ViewModel() {
 
     private val _messages = MutableStateFlow<List<Message>?>(null)
@@ -39,6 +39,20 @@ class ChatViewModel(
 
     private val _showEmojiPicker = MutableStateFlow(false)
     val showEmojiPicker: StateFlow<Boolean> = _showEmojiPicker.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<Message>>(emptyList())
+    val searchResults: StateFlow<List<Message>> = _searchResults.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    // Summon rate limit error message
+    private val _summonError = MutableStateFlow<String?>(null)
+    val summonError: StateFlow<String?> = _summonError.asStateFlow()
+
+    fun clearSummonError() {
+        _summonError.value = null
+    }
 
     init {
         loadFriendDetails()
@@ -114,19 +128,70 @@ class ChatViewModel(
         }
     }
 
+    fun clearChatHistory() {
+        viewModelScope.launch {
+            chatRepository.clearChatHistory(friendId)
+            _messages.value = emptyList() // Clear immediately in UI
+        }
+    }
+
+    fun removeFriend() {
+        viewModelScope.launch {
+            // Remove from friends list using ID
+            friendsRepository.removeFriendByUserId(friendId)
+            // Clear chat history
+            chatRepository.clearChatHistory(friendId)
+        }
+    }
+
+    fun searchMessages(query: String) {
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            _isSearching.value = false
+            return
+        }
+        _isSearching.value = true
+        viewModelScope.launch {
+            val results = chatRepository.searchMessages(friendId, query)
+            _searchResults.value = results
+        }
+    }
+
+    fun clearSearch() {
+        _isSearching.value = false
+        _searchResults.value = emptyList()
+    }
+
     fun sendMessage() {
         val text = _messageText.value
         if (text.isBlank()) return
 
         val replyTo = _replyingTo.value
         val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val friendDisplayName = _friendUser.value?.displayName
 
         viewModelScope.launch {
-            chatRepository.sendMessage(currentUserId, friendId, text, replyTo)
+            val result = chatRepository.sendMessage(
+                senderId = currentUserId,
+                receiverId = friendId,
+                text = text,
+                replyTo = replyTo,
+                friendDisplayName = friendDisplayName
+            )
             
-            _messageText.value = ""
-            _replyingTo.value = null
-            _showEmojiPicker.value = false
+            when (result) {
+                is com.mustakim.bokbok.data.repository.SendMessageResult.Success -> {
+                    _messageText.value = ""
+                    _replyingTo.value = null
+                    _showEmojiPicker.value = false
+                }
+                is com.mustakim.bokbok.data.repository.SendMessageResult.RateLimited -> {
+                    _summonError.value = result.reason
+                }
+                is com.mustakim.bokbok.data.repository.SendMessageResult.Error -> {
+                    _summonError.value = result.message
+                }
+            }
         }
     }
 
@@ -134,7 +199,7 @@ class ChatViewModel(
         private val chatRepository: HybridChatRepository,
         private val userRepository: UserRepository,
         private val friendsRepository: FriendsRepository,
-        private val friendId: String
+        val friendId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

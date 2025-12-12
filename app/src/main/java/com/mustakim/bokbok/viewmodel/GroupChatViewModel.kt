@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 
 class GroupChatViewModel(
     private val repository: HybridGroupChatRepository,
-    private val groupId: String
+    val groupId: String
 ) : ViewModel() {
 
     val currentUserId: String = repository.currentUserId
@@ -45,6 +45,20 @@ class GroupChatViewModel(
 
     private val _showEmojiPicker = MutableStateFlow(false)
     val showEmojiPicker: StateFlow<Boolean> = _showEmojiPicker.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<Message>>(emptyList())
+    val searchResults: StateFlow<List<Message>> = _searchResults.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    // Summon rate limit error message
+    private val _summonError = MutableStateFlow<String?>(null)
+    val summonError: StateFlow<String?> = _summonError.asStateFlow()
+
+    fun clearSummonError() {
+        _summonError.value = null
+    }
 
     init {
         // Observe group info and update name
@@ -91,6 +105,41 @@ class GroupChatViewModel(
         }
     }
 
+    fun searchMessages(query: String) {
+        if (query.isBlank()) {
+            _isSearching.value = false
+            _searchResults.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            _isSearching.value = true
+            _searchResults.value = repository.searchMessages(groupId, query)
+        }
+    }
+
+    fun clearSearch() {
+        _isSearching.value = false
+        _searchResults.value = emptyList()
+    }
+
+    fun clearChatHistory() {
+        viewModelScope.launch {
+            repository.clearChatHistory(groupId)
+        }
+    }
+
+    fun leaveGroup() {
+        viewModelScope.launch {
+            repository.leaveGroup(groupId)
+        }
+    }
+
+    fun addMemberToGroup(userId: String) {
+        viewModelScope.launch {
+            repository.addMember(groupId, userId)
+        }
+    }
+
     fun sendMessage() {
         val text = _messageText.value
         if (text.isBlank()) return
@@ -98,17 +147,27 @@ class GroupChatViewModel(
         val replyTo = _replyingTo.value
 
         viewModelScope.launch {
-            repository.sendMessage(groupId, text, replyTo)
+            val result = repository.sendMessage(groupId, text, replyTo)
             
-            _messageText.value = ""
-            _replyingTo.value = null
-            _showEmojiPicker.value = false
+            when (result) {
+                is com.mustakim.bokbok.data.repository.SendMessageResult.Success -> {
+                    _messageText.value = ""
+                    _replyingTo.value = null
+                    _showEmojiPicker.value = false
+                }
+                is com.mustakim.bokbok.data.repository.SendMessageResult.RateLimited -> {
+                    _summonError.value = result.reason
+                }
+                is com.mustakim.bokbok.data.repository.SendMessageResult.Error -> {
+                    _summonError.value = result.message
+                }
+            }
         }
     }
 
     class Factory(
         private val context: Context,
-        private val groupId: String
+        val groupId: String
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

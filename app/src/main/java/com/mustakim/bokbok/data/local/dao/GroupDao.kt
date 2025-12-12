@@ -91,6 +91,16 @@ interface GroupDao {
         WHERE group_id = :groupId AND sender_id != :currentUserId
     """)
     suspend fun markAllAsRead(groupId: String, currentUserId: String, readBy: String)
+
+    @Query("""
+        SELECT * FROM group_messages 
+        WHERE group_id = :groupId AND text LIKE '%' || :query || '%'
+        ORDER BY timestamp DESC
+    """)
+    suspend fun searchMessages(groupId: String, query: String): List<GroupMessageEntity>
+
+    @Query("DELETE FROM group_messages WHERE group_id = :groupId")
+    suspend fun deleteAllByGroupId(groupId: String)
     
     // ============= TRANSACTION OPERATIONS =============
     

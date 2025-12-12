@@ -47,10 +47,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.VideoCall
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
@@ -135,6 +136,12 @@ fun GroupChatScreen(
         }
     }
 
+    val isSearching by viewModel.isSearching.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    var showSearchBar by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedMessageForReactions by remember { mutableStateOf<Message?>(null) }
+
     // Handle Back Press to close Emoji Picker
     BackHandler(enabled = showEmojiPicker) {
         viewModel.setShowEmojiPicker(false)
@@ -177,8 +184,37 @@ fun GroupChatScreen(
                 groupName = groupName,
                 members = groupMembers,
                 isExpanded = isAtBottom,
-                onBackClick = { navController.navigateUp() }
+                onBackClick = { navController.navigateUp() },
+                onSearchClick = { 
+                    showSearchBar = !showSearchBar
+                    if (!showSearchBar) {
+                        searchQuery = ""
+                        viewModel.clearSearch()
+                    }
+                },
+                onDetailsClick = {
+                     navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.ChatDetails.createRoute(viewModel.groupId, true))
+                }
             )
+            
+            if (showSearchBar) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { 
+                        searchQuery = it
+                        viewModel.searchMessages(it)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    placeholder = { Text("Search in chat") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        { IconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
+                    } else null,
+                    singleLine = true
+                )
+            }
             
             // ========== CHAT MESSAGES (Separate from header) ==========
             // Rounded top corners create the curved inward effect
@@ -203,8 +239,9 @@ fun GroupChatScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    val currentMessages = if (isSearching) searchResults else messages
                     itemsIndexed(
-                        items = messages,
+                        items = currentMessages,
                         key = { _, message -> message.id }
                     ) { index, message ->
                         val isMe = message.senderId == currentUserId
@@ -216,13 +253,6 @@ fun GroupChatScreen(
                         
                         val sender = groupMembersMap[message.senderId]
                         
-                        // Date Header
-                        val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
-                        if (showDateHeader) {
-                            DateHeader(date = message.timestamp.toDate())
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-
                         GroupMessageBubble(
                             message = message,
                             isMe = isMe,
@@ -235,7 +265,7 @@ fun GroupChatScreen(
                             onReply = { viewModel.setReplyingTo(message) },
                             onReact = { emoji -> viewModel.reactToMessage(message.id, emoji) },
                             onDelete = { forEveryone -> viewModel.deleteMessage(message.id, forEveryone) },
-                            onRemoveReaction = { viewModel.removeReaction(message.id) },
+                            onRemoveReaction = { selectedMessageForReactions = message },
                             onReplyClick = { replyToId ->
                                 val replyIndex = messages.indexOfFirst { it.id == replyToId }
                                 if (replyIndex != -1) {
@@ -246,6 +276,14 @@ fun GroupChatScreen(
                         
                         if (isFirstInSequence) {
                             Spacer(modifier = Modifier.height(12.dp))
+                        }
+
+                        // Date Header - show AFTER message (appears ABOVE in reverseLayout)
+                        // Show when this is the oldest message of the day (next older message is from a different day)
+                        val showDateHeader = prevMessage == null || !isSameDay(message.timestamp.toDate(), prevMessage.timestamp.toDate())
+                        if (showDateHeader) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            DateHeader(date = message.timestamp.toDate())
                         }
                     }
                 }
@@ -259,6 +297,14 @@ fun GroupChatScreen(
                     .navigationBarsPadding()
                     .imePadding()
             ) {
+                // Summon Autocomplete (for group chat - all members + @everyone)
+                com.mustakim.bokbok.ui.components.SummonAutocomplete(
+                    text = messageText,
+                    availableUsers = groupMembers,
+                    isGroup = true,
+                    onSuggestionSelected = { viewModel.onMessageChange(it) }
+                )
+                
                 ChatInputBar(
                     text = messageText,
                     onTextChange = viewModel::onMessageChange,
@@ -284,6 +330,21 @@ fun GroupChatScreen(
             }
         }
     }
+
+    if (selectedMessageForReactions != null) {
+        val message = selectedMessageForReactions!!
+        ReactionSummarySheet(
+            reactions = message.reactions,
+            currentUserId = viewModel.currentUserId, // Assuming currentUserId is exposed in GroupChatViewModel
+            userMap = mapOf(
+                 // Create a map from group members.
+                 viewModel.currentUserId to (groupMembersMap[viewModel.currentUserId] ?: com.mustakim.bokbok.data.model.User(uid = viewModel.currentUserId, displayName = "You")),
+                 *(groupMembers.map { it.uid to it }.toTypedArray())
+            ),
+            onDismiss = { selectedMessageForReactions = null },
+            onRemoveReaction = { viewModel.removeReaction(message.id) }
+        )
+    }
 }
 
 /**
@@ -295,7 +356,9 @@ fun GroupChatHeader(
     groupName: String,
     members: List<User>,
     isExpanded: Boolean,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onSearchClick: () -> Unit,
+    onDetailsClick: () -> Unit
 ) {
     // Animate header height - collapsed needs enough for avatars + group name
     val headerHeight by animateDpAsState(
@@ -330,17 +393,17 @@ fun GroupChatHeader(
                 )
             }
             
-            // Action buttons - Video call and Voice call only (like reference)
+            // Action buttons - Search and Voice call
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(end = 4.dp, top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                IconButton(onClick = { }) {
+                IconButton(onClick = onSearchClick) {
                     Icon(
-                        Icons.Default.VideoCall, 
-                        "Video Call",
+                        Icons.Default.Search,
+                        "Search",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -376,7 +439,11 @@ fun GroupChatHeader(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.padding(horizontal = 8.dp)
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onDetailsClick() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = groupName,
@@ -933,8 +1000,14 @@ fun GroupMessageBubble(
                                 }
                             }
 
-                            Text(
+                            // Message text with summon highlighting
+                            val highlightedText = com.mustakim.bokbok.utils.SummonHighlighter.formatForDisplay(
                                 text = message.text,
+                                highlightColor = MaterialTheme.colorScheme.primary,
+                                showCommand = false
+                            )
+                            Text(
+                                text = highlightedText,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = contentColor
                             )
@@ -952,6 +1025,9 @@ fun GroupMessageBubble(
                                 .offset(x = if (isMe) 12.dp else (-12).dp, y = 10.dp)
                                 .background(MaterialTheme.colorScheme.surface, CircleShape)
                                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                .clip(CircleShape)
+                                .clickable { onRemoveReaction() }
                                 .padding(4.dp)
                         ) {
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {

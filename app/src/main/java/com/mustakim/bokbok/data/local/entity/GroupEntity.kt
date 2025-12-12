@@ -127,7 +127,10 @@ data class GroupMessageEntity(
     val syncStatus: SyncStatus = SyncStatus.SYNCED,
     
     @ColumnInfo(name = "retry_count")
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+    
+    @ColumnInfo(name = "summoned_user_ids")
+    val summonedUserIds: String = "" // Comma-separated user IDs
 )
 
 // Extension functions

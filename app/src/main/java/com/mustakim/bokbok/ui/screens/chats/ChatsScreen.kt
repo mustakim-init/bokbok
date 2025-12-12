@@ -12,6 +12,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,13 +34,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
@@ -68,13 +76,17 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -82,6 +94,8 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.repository.ChatRepository
 import com.mustakim.bokbok.data.repository.FriendsRepository
+import com.mustakim.bokbok.data.repository.HybridChatRepository
+import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.ChatUiModel
@@ -92,19 +106,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import androidx.compose.ui.layout.positionInWindow
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatsScreen(
     friendsRepository: FriendsRepository,
     chatRepository: ChatRepository,
+    hybridChatRepository: HybridChatRepository,
+    hybridGroupChatRepository: HybridGroupChatRepository,
     isMinimized: Boolean = RoomStateManager.isMinimized.value,
     onFriendClick: (String) -> Unit,
     navController: NavHostController,
     userViewModel: UserViewModel
 ) {
     val viewModel: FriendsViewModel = viewModel(
-        factory = FriendsViewModel.Factory(friendsRepository, chatRepository)
+        factory = FriendsViewModel.Factory(
+            friendsRepository,
+            chatRepository,
+            hybridChatRepository,
+            hybridGroupChatRepository
+        )
     )
 
     val chatList by viewModel.chats.collectAsState()
@@ -115,10 +137,14 @@ fun ChatsScreen(
     var isFabMenuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Local search state
     var searchQuery by remember { mutableStateOf("") }
 
-    // Filtered list based on search query
+    var selectedChatForMenu by remember { mutableStateOf<ChatUiModel?>(null) }
+    var isMuted by remember { mutableStateOf(false) }
+
+    // New state: store the anchor position (in window px) for the dropdown menu
+    var menuAnchor by remember { mutableStateOf(IntOffset.Zero) }
+
     val filteredChats = remember(chatList, searchQuery) {
         if (searchQuery.isBlank()) {
             chatList
@@ -136,17 +162,18 @@ fun ChatsScreen(
                 snackbarHostState.showSnackbar((uiState as FriendsUiState.Success).message)
                 viewModel.clearUiState()
             }
+
             is FriendsUiState.Error -> {
                 snackbarHostState.showSnackbar((uiState as FriendsUiState.Error).message)
                 viewModel.clearUiState()
             }
+
             else -> {}
         }
     }
 
     val listState = rememberLazyListState()
 
-    // Search Bar Scroll Logic
     val searchBarHeight = 72.dp
     val searchBarHeightPx = with(LocalDensity.current) { searchBarHeight.toPx() }
     var searchBarOffsetHeightPx by remember { mutableFloatStateOf(0f) }
@@ -169,10 +196,17 @@ fun ChatsScreen(
         notificationCount = 0,
         userViewModel = userViewModel
     ) { paddingValues ->
+        // Track root container position so we can compute offsets relative to it
+        var rootPosition by remember { mutableStateOf(IntOffset.Zero) }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .onGloballyPositioned { coords ->
+                    val pos = coords.positionInWindow()
+                    rootPosition = IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
+                }
                 .nestedScroll(nestedScrollConnection)
         ) {
             if (chatList.isEmpty()) {
@@ -197,7 +231,7 @@ fun ChatsScreen(
                         items(
                             items = filteredChats,
                             key = { chat ->
-                                if (chat.isGroup) "group_${chat.groupId}"
+                                if (chat.isGroup) "group_${"" + chat.groupId}"
                                 else "friend_${chat.friend?.friendship?.id}"
                             }
                         ) { chatItem ->
@@ -217,6 +251,11 @@ fun ChatsScreen(
                                         } else if (chatItem.friend != null) {
                                             onFriendClick(chatItem.friend.user.uid)
                                         }
+                                    },
+                                    // pass back the item's window position so the menu can be anchored near it
+                                    onLongClick = { itemPos ->
+                                        selectedChatForMenu = chatItem
+                                        menuAnchor = itemPos
                                     }
                                 )
                             }
@@ -225,7 +264,6 @@ fun ChatsScreen(
                 }
             }
 
-            // Premium Search Bar
             if (chatList.isNotEmpty()) {
                 PremiumSearchBar(
                     query = searchQuery,
@@ -236,7 +274,6 @@ fun ChatsScreen(
                 )
             }
 
-            // Scrim overlay when menu is expanded
             if (isFabMenuExpanded) {
                 Box(
                     modifier = Modifier
@@ -248,14 +285,12 @@ fun ChatsScreen(
                 )
             }
 
-            // Premium FAB Menu
             val fabRotation by animateFloatAsState(
                 targetValue = if (isFabMenuExpanded) 45f else 0f,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "fabRotation"
             )
 
-            // Animate FAB shape: Squircle (16.dp) -> Circle (50%)
             val fabCornerRadius by animateIntAsState(
                 targetValue = if (isFabMenuExpanded) 50 else 25, // Percentage
                 animationSpec = spring(stiffness = Spring.StiffnessLow),
@@ -272,7 +307,7 @@ fun ChatsScreen(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Menu items
+
                 AnimatedVisibility(
                     visible = isFabMenuExpanded,
                     enter = fadeIn() + expandVertically(),
@@ -282,7 +317,6 @@ fun ChatsScreen(
                         horizontalAlignment = Alignment.End,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Create Group
                         ExtendedFloatingActionButton(
                             onClick = {
                                 isFabMenuExpanded = false
@@ -296,7 +330,6 @@ fun ChatsScreen(
                             modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
                         )
 
-                        // Add Friend
                         ExtendedFloatingActionButton(
                             onClick = {
                                 isFabMenuExpanded = false
@@ -312,7 +345,6 @@ fun ChatsScreen(
                     }
                 }
 
-                // Main FAB with rotation and shape morph
                 FloatingActionButton(
                     onClick = { isFabMenuExpanded = !isFabMenuExpanded },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -338,6 +370,87 @@ fun ChatsScreen(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 80.dp)
             )
+
+            // Compute a DpOffset for the dropdown menu from the saved anchor in px,
+            // but make it relative to the root container so it appears next to the item
+            val dropdownOffset = with(LocalDensity.current) {
+                val relX = (menuAnchor.x - rootPosition.x).coerceAtLeast(0)
+                val relY = (menuAnchor.y - rootPosition.y).coerceAtLeast(0)
+                DpOffset(relX.toDp(), relY.toDp() + 8.dp)
+            }
+
+            DropdownMenu(
+                expanded = selectedChatForMenu != null,
+                onDismissRequest = { selectedChatForMenu = null },
+                offset = dropdownOffset
+            )
+            {
+                DropdownMenuItem(
+                    text = { Text(if (isMuted) "Unmute" else "Mute") },
+                    onClick = {
+                        selectedChatForMenu?.let {
+                            viewModel.muteConversation(it.groupId ?: it.friend?.user?.uid ?: "", !isMuted)
+                            isMuted = !isMuted
+                        }
+                        selectedChatForMenu = null
+                    },
+                    leadingIcon = {
+                        Icon(
+                            if (isMuted) Icons.Default.NotificationsOff else Icons.Default.Notifications,
+                            contentDescription = null
+                        )
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Clear History") },
+                    onClick = {
+                        selectedChatForMenu?.let {
+                            viewModel.clearChatHistory(it.groupId ?: it.friend?.friendship?.id ?: "", it.isGroup)
+                        }
+                        selectedChatForMenu = null
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null
+                        )
+                    }
+                )
+                if (selectedChatForMenu?.isGroup == true) {
+                    DropdownMenuItem(
+                        text = { Text("Leave Group") },
+                        onClick = {
+                            selectedChatForMenu?.groupId?.let {
+                                viewModel.leaveGroup(it)
+                            }
+                            selectedChatForMenu = null
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Logout,
+                                contentDescription = null
+                            )
+                        }
+                    )
+                } else if (selectedChatForMenu?.friend != null) {
+                    DropdownMenuItem(
+                        text = { Text("Remove Friend", color = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            selectedChatForMenu?.friend?.friendship?.id?.let {
+                                viewModel.removeFriend(it)
+                            }
+                            selectedChatForMenu = null
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.PersonRemove, // Need to make sure this icon exists or use Delete
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -424,10 +537,12 @@ fun PremiumSearchBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatListItem(
     chat: ChatUiModel,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (IntOffset) -> Unit
 ) {
     val displayName = if (chat.isGroup) {
         chat.groupName ?: "Group"
@@ -440,10 +555,25 @@ fun ChatListItem(
     val isOnline = chat.friend?.isOnline ?: false
     val currentRoomId = chat.friend?.currentRoomId
     val hasUnread = chat.unreadCount > 0 && chat.lastMessageSender != "You"
+    val haptic = LocalHapticFeedback.current
+
+    // Track this item's position in window coordinates so parent can anchor a menu near it
+    var itemPosition by remember { mutableStateOf(IntOffset.Zero) }
 
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coords ->
+                val pos = coords.positionInWindow()
+                itemPosition = IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
+            }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick(itemPosition)
+                }
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (hasUnread)

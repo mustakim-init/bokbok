@@ -46,4 +46,11 @@ sealed class NavRoutes(val route: String) {
             return "group_chat/$groupId"
         }
     }
+
+    object ChatDetails : NavRoutes("chat_details/{chatId}?isGroup={isGroup}") {
+        fun createRoute(chatId: String, isGroup: Boolean = false): String {
+            require(chatId.isNotBlank()) { "Chat ID cannot be blank" }
+            return "chat_details/$chatId?isGroup=$isGroup"
+        }
+    }
 }

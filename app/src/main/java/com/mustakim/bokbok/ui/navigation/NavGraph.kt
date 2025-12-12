@@ -11,6 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -98,6 +100,7 @@ fun NavGraph(
     val notificationRepository = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
     val chatRepository = remember { com.mustakim.bokbok.data.repository.ChatRepository() }
     val hybridChatRepository = remember(context) { com.mustakim.bokbok.data.repository.HybridChatRepository(context) }
+    val hybridGroupChatRepository = remember(context) { com.mustakim.bokbok.data.repository.HybridGroupChatRepository(context) }
 
     // ✅ Memoize permission check logic
     val hasAllRequiredPermissions = remember(context) {
@@ -194,6 +197,8 @@ fun NavGraph(
             ChatsScreen(
                 friendsRepository = friendsRepository,
                 chatRepository = chatRepository,
+                hybridChatRepository = hybridChatRepository,
+                hybridGroupChatRepository = hybridGroupChatRepository,
                 onFriendClick = { userId ->
                     navController.navigate(NavRoutes.Chat.createRoute(userId))
                 },
@@ -297,6 +302,88 @@ fun NavGraph(
                 navController = navController,
                 viewModel = groupChatViewModel
             )
+        }
+
+        composable(
+            route = NavRoutes.ChatDetails.route,
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType },
+                navArgument("isGroup") { type = NavType.BoolType; defaultValue = false }
+            )
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
+            val isGroup = backStackEntry.arguments?.getBoolean("isGroup") ?: false
+
+            if (isGroup) {
+                val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
+                    factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(context, chatId)
+                )
+                val groupName by viewModel.groupName.collectAsState()
+                val groupMembers by viewModel.groupMembers.collectAsState()
+                
+                // State for add member dialog
+                var showAddMemberDialog by remember { mutableStateOf(false) }
+                
+                com.mustakim.bokbok.ui.screens.chat.ChatDetailsScreen(
+                    user = null,
+                    isGroup = true,
+                    groupName = groupName,
+                    members = groupMembers,
+                    onBackClick = { navController.popBackStack() },
+                    onMuteClick = { /* TODO: Implement mute */ },
+                    onClearHistory = { 
+                        viewModel.clearChatHistory()
+                        navController.popBackStack()
+                    },
+                    onRemoveFriend = { 
+                        viewModel.leaveGroup() 
+                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                    },
+                    onAddMember = { showAddMemberDialog = true }
+                )
+                
+                // Add Member Dialog
+                if (showAddMemberDialog) {
+                    com.mustakim.bokbok.ui.screens.chat.AddMemberDialog(
+                        currentMembers = groupMembers,
+                        friendsRepository = friendsRepository,
+                        onDismiss = { showAddMemberDialog = false },
+                        onAddMembers = { userIds ->
+                            userIds.forEach { userId ->
+                                viewModel.addMemberToGroup(userId)
+                            }
+                            showAddMemberDialog = false
+                        }
+                    )
+                }
+            } else {
+                val viewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = viewModel(
+                    factory = com.mustakim.bokbok.viewmodel.ChatViewModel.Factory(
+                        hybridChatRepository,
+                        userRepository,
+                        friendsRepository,
+                        chatId
+                    )
+                )
+                val friendUser by viewModel.friendUser.collectAsState()
+                
+                com.mustakim.bokbok.ui.screens.chat.ChatDetailsScreen(
+                    user = friendUser,
+                    isGroup = false,
+                    groupName = null,
+                    onBackClick = { navController.popBackStack() },
+                    onMuteClick = { /* TODO */ },
+                    onClearHistory = {
+                        viewModel.clearChatHistory()
+                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                    },
+                    onRemoveFriend = {
+                        viewModel.removeFriend()
+                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                    },
+                    onAddMember = {}
+                )
+            }
         }
     }
 }

@@ -21,9 +21,9 @@ class GroupChatViewModel(
 
     val currentUserId: String = repository.currentUserId
 
-    // Group info from Room (instant)
+    // Group info from Room (instant) - WhileSubscribed ensures updates propagate
     val groupInfo = repository.observeGroup(groupId)
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // Group name derived from groupInfo
     private val _groupName = MutableStateFlow("Group")
@@ -122,21 +122,82 @@ class GroupChatViewModel(
         _searchResults.value = emptyList()
     }
 
-    fun clearChatHistory() {
+    fun clearChatHistory(onSuccess: () -> Unit) {
         viewModelScope.launch {
             repository.clearChatHistory(groupId)
+            onSuccess()
         }
     }
 
-    fun leaveGroup() {
+    fun leaveGroup(onSuccess: () -> Unit) {
         viewModelScope.launch {
-            repository.leaveGroup(groupId)
+            try {
+                repository.leaveGroup(groupId)
+                onSuccess()
+            } catch (e: Exception) {
+                 android.util.Log.e("GroupChatViewModel", "Failed to leave group", e)
+            }
         }
     }
 
     fun addMemberToGroup(userId: String) {
         viewModelScope.launch {
             repository.addMember(groupId, userId)
+        }
+    }
+
+    fun deleteGroup(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                repository.deleteGroup(groupId)
+                onSuccess()
+            } catch (e: Exception) {
+                // Ideally handle error (show toast), but for now we ensure we don't pop if failed, or maybe we do?
+                // If we want to ensure deletion happened, we only call onSuccess if successful.
+                // However, if repository throws, this block catches it? 
+                // Repository rethrows. So we need try-catch here if we want to avoid crash.
+                // But previously it would crash? Or just cancel.
+                // Let's catch and maybe log, or just let it crash if that helps debugging. 
+                // But safer to catch.
+                android.util.Log.e("GroupChatViewModel", "Failed to delete group", e)
+            }
+        }
+    }
+
+    fun removeGroupImage() {
+        viewModelScope.launch {
+            repository.removeGroupImage(groupId)
+        }
+    }
+
+    fun removeMember(userId: String) {
+        viewModelScope.launch {
+            repository.removeMember(groupId, userId)
+        }
+    }
+
+    private val _isUploadingImage = MutableStateFlow(false)
+    val isUploadingImage: StateFlow<Boolean> = _isUploadingImage.asStateFlow()
+
+    private val _uploadError = MutableStateFlow<String?>(null)
+    val uploadError: StateFlow<String?> = _uploadError.asStateFlow()
+
+    fun clearUploadError() {
+        _uploadError.value = null
+    }
+
+    fun updateGroupImage(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _isUploadingImage.value = true
+            _uploadError.value = null
+            try {
+                repository.updateGroupImage(groupId, uri)
+            } catch (e: Exception) {
+                _uploadError.value = "Failed to upload image: ${e.message}"
+                android.util.Log.e("GroupChatViewModel", "Failed to upload image", e)
+            } finally {
+                _isUploadingImage.value = false
+            }
         }
     }
 

@@ -51,9 +51,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
@@ -76,6 +78,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -107,6 +110,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -379,76 +383,92 @@ fun ChatsScreen(
                 DpOffset(relX.toDp(), relY.toDp() + 8.dp)
             }
 
-            DropdownMenu(
-                expanded = selectedChatForMenu != null,
-                onDismissRequest = { selectedChatForMenu = null },
-                offset = dropdownOffset
-            )
-            {
-                DropdownMenuItem(
-                    text = { Text(if (isMuted) "Unmute" else "Mute") },
-                    onClick = {
-                        selectedChatForMenu?.let {
-                            viewModel.muteConversation(it.groupId ?: it.friend?.user?.uid ?: "", !isMuted)
-                            isMuted = !isMuted
-                        }
-                        selectedChatForMenu = null
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (isMuted) Icons.Default.NotificationsOff else Icons.Default.Notifications,
-                            contentDescription = null
-                        )
+            if (selectedChatForMenu != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { selectedChatForMenu = null },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    dragHandle = {
+                       Box(
+                           modifier = Modifier
+                               .padding(top = 16.dp, bottom = 8.dp)
+                               .width(32.dp)
+                               .height(4.dp)
+                               .clip(RoundedCornerShape(2.dp))
+                               .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                       )
                     }
-                )
-                DropdownMenuItem(
-                    text = { Text("Clear History") },
-                    onClick = {
-                        selectedChatForMenu?.let {
-                            viewModel.clearChatHistory(it.groupId ?: it.friend?.friendship?.id ?: "", it.isGroup)
-                        }
-                        selectedChatForMenu = null
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = null
-                        )
-                    }
-                )
-                if (selectedChatForMenu?.isGroup == true) {
-                    DropdownMenuItem(
-                        text = { Text("Leave Group") },
-                        onClick = {
-                            selectedChatForMenu?.groupId?.let {
-                                viewModel.leaveGroup(it)
-                            }
-                            selectedChatForMenu = null
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Logout,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                } else if (selectedChatForMenu?.friend != null) {
-                    DropdownMenuItem(
-                        text = { Text("Remove Friend", color = MaterialTheme.colorScheme.error) },
-                        onClick = {
-                            selectedChatForMenu?.friend?.friendship?.id?.let {
-                                viewModel.removeFriend(it)
-                            }
-                            selectedChatForMenu = null
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.PersonRemove, // Need to make sure this icon exists or use Delete
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    )
+                ) {
+                   Column(
+                       modifier = Modifier
+                           .fillMaxWidth()
+                           .padding(horizontal = 24.dp)
+                           .padding(bottom = 48.dp),
+                       horizontalAlignment = Alignment.CenterHorizontally,
+                       verticalArrangement = Arrangement.spacedBy(16.dp)
+                   ) {
+                       // Header with Chat Name
+                       val chat = selectedChatForMenu!!
+                       val name = if (chat.isGroup) chat.groupName ?: "Group" else chat.friend?.user?.displayName ?: "Unknown"
+                       
+                       Text(
+                           text = name,
+                           style = MaterialTheme.typography.titleLarge,
+                           fontWeight = FontWeight.Bold,
+                           textAlign = TextAlign.Center
+                       )
+                       
+                       HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                       
+                       // Expressive Menu Items
+                       ExpressiveMenuItem(
+                           icon = if (isMuted) Icons.Default.NotificationsOff else Icons.Default.Notifications,
+                           label = if (isMuted) "Unmute notifications" else "Mute notifications",
+                           onClick = {
+                               selectedChatForMenu?.let {
+                                   viewModel.muteConversation(it.groupId ?: it.friend?.user?.uid ?: "", !isMuted)
+                                   isMuted = !isMuted
+                               }
+                               selectedChatForMenu = null
+                           }
+                       )
+                       
+                       ExpressiveMenuItem(
+                           icon = Icons.Default.Delete,
+                           label = "Clear chat history",
+                           onClick = {
+                               selectedChatForMenu?.let {
+                                   viewModel.clearChatHistory(it.groupId ?: it.friend?.friendship?.id ?: "", it.isGroup)
+                               }
+                               selectedChatForMenu = null
+                           }
+                       )
+                       
+                       if (chat.isGroup) {
+                           ExpressiveMenuItem(
+                               icon = Icons.Default.Logout,
+                               label = "Leave group",
+                               color = MaterialTheme.colorScheme.error,
+                               onClick = {
+                                   selectedChatForMenu?.groupId?.let {
+                                       viewModel.leaveGroup(it)
+                                   }
+                                   selectedChatForMenu = null
+                               }
+                           )
+                       } else {
+                           ExpressiveMenuItem(
+                               icon = Icons.Default.PersonRemove,
+                               label = "Remove friend",
+                               color = MaterialTheme.colorScheme.error,
+                               onClick = {
+                                   selectedChatForMenu?.friend?.friendship?.id?.let {
+                                       viewModel.removeFriend(it)
+                                   }
+                                   selectedChatForMenu = null
+                               }
+                           )
+                       }
+                   }
                 }
             }
         }
@@ -468,6 +488,56 @@ fun ChatsScreen(
         )
     }
 }
+
+@Composable
+fun ExpressiveMenuItem(
+    icon: ImageVector,
+    label: String,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(
+                     if (color == MaterialTheme.colorScheme.error) 
+                         MaterialTheme.colorScheme.errorContainer 
+                     else 
+                         MaterialTheme.colorScheme.secondaryContainer, 
+                     CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (color == MaterialTheme.colorScheme.error)
+                        MaterialTheme.colorScheme.onErrorContainer
+                    else
+                        MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        }
+        
+        Spacer(modifier = Modifier.width(16.dp))
+        
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
+            color = color
+        )
+    }
+}
+
 
 @Composable
 fun PremiumSearchBar(
@@ -551,7 +621,8 @@ fun ChatListItem(
     }
 
     val avatarText = displayName.take(1).uppercase()
-    val profileImageUrl = chat.friend?.user?.profileImageUrl ?: ""
+    // For group chats use the group's image if available, otherwise use friend's profile image
+    val profileImageUrl = if (chat.isGroup) chat.groupImageUrl ?: "" else chat.friend?.user?.profileImageUrl ?: ""
     val isOnline = chat.friend?.isOnline ?: false
     val currentRoomId = chat.friend?.currentRoomId
     val hasUnread = chat.unreadCount > 0 && chat.lastMessageSender != "You"

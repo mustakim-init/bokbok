@@ -320,6 +320,13 @@ fun NavGraph(
                 )
                 val groupName by viewModel.groupName.collectAsState()
                 val groupMembers by viewModel.groupMembers.collectAsState()
+                val groupInfo by viewModel.groupInfo.collectAsState()
+                val isUploadingImage by viewModel.isUploadingImage.collectAsState()
+                val uploadError by viewModel.uploadError.collectAsState()
+                
+                val creatorName = remember(groupInfo, groupMembers) {
+                    groupMembers.find { it.uid == groupInfo?.createdBy }?.displayName
+                }
                 
                 // State for add member dialog
                 var showAddMemberDialog by remember { mutableStateOf(false) }
@@ -328,18 +335,37 @@ fun NavGraph(
                     user = null,
                     isGroup = true,
                     groupName = groupName,
+                    groupImageUrl = groupInfo?.imageUrl,
                     members = groupMembers,
+                    creatorName = creatorName,
+                    onUpdateGroupImage = { uri -> viewModel.updateGroupImage(uri) },
+                    isUploadingImage = isUploadingImage,
+                    uploadError = uploadError,
+                    onClearUploadError = { viewModel.clearUploadError() },
                     onBackClick = { navController.popBackStack() },
                     onMuteClick = { /* TODO: Implement mute */ },
                     onClearHistory = { 
-                        viewModel.clearChatHistory()
-                        navController.popBackStack()
+                        viewModel.clearChatHistory {
+                            navController.popBackStack(NavRoutes.Lounge.route, false)
+                        }
                     },
                     onRemoveFriend = { 
-                        viewModel.leaveGroup() 
-                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                        viewModel.leaveGroup {
+                            navController.popBackStack(NavRoutes.Lounge.route, false)
+                        } 
                     },
-                    onAddMember = { showAddMemberDialog = true }
+                    onAddMember = { showAddMemberDialog = true },
+                    onSeeMembers = {
+                        navController.navigate(NavRoutes.ChatMembers.createRoute(chatId))
+                    },
+                    onRemoveGroupImage = { viewModel.removeGroupImage() },
+                    onDeleteGroup = if (groupInfo?.createdBy == viewModel.currentUserId) {
+                        {
+                            viewModel.deleteGroup {
+                                navController.popBackStack(NavRoutes.Lounge.route, false)
+                            }
+                        }
+                    } else null
                 )
                 
                 // Add Member Dialog
@@ -374,16 +400,39 @@ fun NavGraph(
                     onBackClick = { navController.popBackStack() },
                     onMuteClick = { /* TODO */ },
                     onClearHistory = {
-                        viewModel.clearChatHistory()
-                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                        viewModel.clearChatHistory {
+                            navController.popBackStack(NavRoutes.Lounge.route, false)
+                        }
                     },
                     onRemoveFriend = {
-                        viewModel.removeFriend()
-                        navController.popBackStack(NavRoutes.Lounge.route, false)
+                        viewModel.removeFriend {
+                            navController.popBackStack(NavRoutes.Lounge.route, false)
+                        }
                     },
-                    onAddMember = {}
+                    onAddMember = {},
+                    onSeeMembers = {}
                 )
             }
+        }
+
+        composable(
+            route = NavRoutes.ChatMembers.route,
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
+            
+            // Reuse GroupChatViewModel or create new one with same groupId
+            // Since we need to manage members (remove), reusing is good.
+            val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
+                factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(context, groupId)
+            )
+
+            com.mustakim.bokbok.ui.screens.chat.ChatMembersScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
         }
     }
 }

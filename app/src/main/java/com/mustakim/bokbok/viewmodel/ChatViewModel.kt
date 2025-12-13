@@ -128,19 +128,21 @@ class ChatViewModel(
         }
     }
 
-    fun clearChatHistory() {
+    fun clearChatHistory(onSuccess: () -> Unit) {
         viewModelScope.launch {
             chatRepository.clearChatHistory(friendId)
             _messages.value = emptyList() // Clear immediately in UI
+            onSuccess()
         }
     }
 
-    fun removeFriend() {
+    fun removeFriend(onSuccess: () -> Unit) {
         viewModelScope.launch {
             // Remove from friends list using ID
             friendsRepository.removeFriendByUserId(friendId)
             // Clear chat history
             chatRepository.clearChatHistory(friendId)
+            onSuccess()
         }
     }
 

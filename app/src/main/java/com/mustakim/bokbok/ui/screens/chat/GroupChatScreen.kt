@@ -100,6 +100,7 @@ import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.ui.components.ScallopShape
 import com.mustakim.bokbok.ui.components.SquircleShape
+import com.mustakim.bokbok.ui.theme.getMorphingShape
 import com.mustakim.bokbok.viewmodel.GroupChatViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -113,6 +114,7 @@ fun GroupChatScreen(
 ) {
     val allMessages by viewModel.messages.collectAsState()
     val groupMembers by viewModel.groupMembers.collectAsState()
+    val groupInfo by viewModel.groupInfo.collectAsState()
     val groupName by viewModel.groupName.collectAsState()
     val messageText by viewModel.messageText.collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
@@ -182,6 +184,7 @@ fun GroupChatScreen(
             // This is completely outside the LazyColumn - NO LAG
             GroupChatHeader(
                 groupName = groupName,
+                groupImageUrl = groupInfo?.imageUrl,
                 members = groupMembers,
                 isExpanded = isAtBottom,
                 onBackClick = { navController.navigateUp() },
@@ -354,6 +357,7 @@ fun GroupChatScreen(
 @Composable
 fun GroupChatHeader(
     groupName: String,
+    groupImageUrl: String? = null,
     members: List<User>,
     isExpanded: Boolean,
     onBackClick: () -> Unit,
@@ -365,6 +369,23 @@ fun GroupChatHeader(
         targetValue = if (isExpanded) 200.dp else 110.dp,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "headerHeight"
+    )
+
+    // Morph progress: 0f = Puffy (Expanded), 1f = Circle (Collapsed)
+    val morphProgress by animateFloatAsState(
+        targetValue = if (isExpanded) 0f else 1f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        label = "morphProgress"
+    )
+    
+    val imageShape = remember(morphProgress) { getMorphingShape(morphProgress) }
+    
+    // Image size: Large (e.g. 120dp) -> Small (40dp for collapsed, but here we use cloud size logic)
+    // Cloud uses dynamic sizes. Let's pick standard sizes for the single image.
+    val imageSize by animateDpAsState(
+        targetValue = if (isExpanded) 120.dp else 48.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+        label = "imageSize"
     )
 
     Surface(
@@ -416,7 +437,7 @@ fun GroupChatHeader(
                 }
             }
 
-            // Center content - Avatar Cloud + Group Name (always visible)
+            // Center content - Avatar Cloud OR Group Image + Group Name (always visible)
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -425,8 +446,29 @@ fun GroupChatHeader(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Avatar Cloud (constrained width)
-                if (members.isNotEmpty()) {
+                // Image or Avatar Cloud
+                if (!groupImageUrl.isNullOrEmpty()) {
+                    // Show Single Group Image with Morphing Shape
+                    Box(
+                        modifier = Modifier
+                             .size(imageSize)
+                             .clip(imageShape)
+                             .border(
+                                 width = 2.dp,
+                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                 shape = imageShape
+                             ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = groupImageUrl,
+                            contentDescription = groupName,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else if (members.isNotEmpty()) {
+                    // Fallback to Avatar Cloud
                     OverlappingAvatarCloud(
                         members = members,
                         isExpanded = isExpanded

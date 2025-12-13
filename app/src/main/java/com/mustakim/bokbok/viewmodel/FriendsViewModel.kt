@@ -107,8 +107,11 @@ class FriendsViewModel(
                     .snapshots()
                     .map { snapshot ->
                         snapshot.documents.mapNotNull { doc ->
-                            val groupId = doc.getString("id") ?: return@mapNotNull null
+                            // Use document id as the canonical group id
+                            val groupId = doc.id
                             val groupName = doc.getString("name") ?: return@mapNotNull null
+                            // Be tolerant: some records may use imageUrl or image_url
+                            val imageUrl = doc.getString("imageUrl") ?: doc.getString("image_url") ?: ""
                             val lastMsgMap = doc.get("lastMessage") as? Map<*, *>
 
                             val lastMessageText = when {
@@ -131,6 +134,7 @@ class FriendsViewModel(
                             ChatUiModel(
                                 groupId = groupId,
                                 groupName = groupName,
+                                groupImageUrl = imageUrl,
                                 isGroup = true,
                                 lastMessage = lastMessageText,
                                 lastMessageSender = senderName,
@@ -323,6 +327,7 @@ data class ChatUiModel(
     val friend: FriendWithUser? = null, // null for group chats
     val groupId: String? = null, // null for individual chats
     val groupName: String? = null, // null for individual chats
+    val groupImageUrl: String? = null, // image url for group avatars
     val isGroup: Boolean = false,
     val lastMessage: String,
     val lastMessageSender: String? = null,

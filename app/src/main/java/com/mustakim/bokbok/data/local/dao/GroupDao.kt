@@ -33,6 +33,9 @@ interface GroupDao {
     
     @Query("UPDATE chat_groups SET last_message_text = :text, last_message_time = :time WHERE id = :groupId")
     suspend fun updateLastMessage(groupId: String, text: String, time: Long)
+
+    @Query("DELETE FROM chat_groups WHERE id = :groupId")
+    suspend fun deleteGroup(groupId: String)
     
     // ============= GROUP MEMBER OPERATIONS =============
     

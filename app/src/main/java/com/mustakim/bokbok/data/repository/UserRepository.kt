@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Base64
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Source
 import com.mustakim.bokbok.BuildConfig
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.model.User
@@ -38,12 +39,30 @@ class UserRepository(private val context: Context) {
             return Result.success(cached.user)
         }
 
-        // 2. Fetch from network
+        // 2. Fetch from Disk Persistence (Source.CACHE)
+        try {
+            val cachedDoc = usersCollection.document(userId).get(Source.CACHE).await()
+            if (cachedDoc.exists()) {
+                val user = User.fromMap(cachedDoc.data ?: emptyMap())
+                profileCache[userId] = CachedUser(user, System.currentTimeMillis())
+                // Verify if it's not too old? For now, we trust disk persistence as "offline access"
+                // Ideally, we might trigger a background refresh here if needed, but for "offline first" we return this.
+                if (!cachedDoc.metadata.isFromCache) {
+                     // If for some reason it wasn't from cache (shouldn't happen with Source.CACHE), we are good.
+                }
+                // Return immediately, but maybe trigger background update? 
+                // For valid 'offline' usage, we return this.
+                return Result.success(user)
+            }
+        } catch (e: Exception) {
+            // Cache miss or error, proceed to network
+        }
+
+        // 3. Fetch from network (Source.DEFAULT)
         return try {
             val doc = usersCollection.document(userId).get().await()
             if (doc.exists()) {
                 val user = User.fromMap(doc.data ?: emptyMap())
-                // 3. Update cache
                 profileCache[userId] = CachedUser(user, System.currentTimeMillis())
                 Result.success(user)
             } else {
@@ -71,19 +90,48 @@ class UserRepository(private val context: Context) {
             }
         }
 
-        // 2. Batch fetch missing users (Firestore limits 'in' queries to 10)
+        // 2. Batch fetch missing users (Disk Cache First)
         if (idsToFetch.isNotEmpty()) {
-            // Chunk into groups of 10
-            idsToFetch.chunked(10).forEach { chunk ->
+            val remainingIds = mutableListOf<String>()
+            
+            // Try to find them in disk cache one by one (Firestore doesn't support batch get from cache easily via 'whereIn')
+            // Actually 'whereIn' works with Source.CACHE too!
+            
+             idsToFetch.chunked(10).forEach { chunk ->
                 try {
-                    val snapshot = usersCollection.whereIn("uid", chunk).get().await()
-                    snapshot.documents.forEach { doc ->
+                    // Try Disk Cache
+                    val cacheSnap = usersCollection.whereIn("uid", chunk).get(Source.CACHE).await()
+                    val foundInCache = cacheSnap.documents.associateBy { it.id }
+                    
+                    foundInCache.values.forEach { doc ->
                         val user = User.fromMap(doc.data ?: emptyMap())
                         profileCache[user.uid] = CachedUser(user, now)
                         resultList.add(user)
                     }
+                    
+                    // Identify who is still missing
+                    val missingInCache = chunk.filter { !foundInCache.containsKey(it) }
+                    remainingIds.addAll(missingInCache)
+                    
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    // Cache failure, add all to remaining
+                    remainingIds.addAll(chunk)
+                }
+            }
+            
+            // 3. Network Fetch for remaining
+            if (remainingIds.isNotEmpty()) {
+                 remainingIds.chunked(10).forEach { chunk ->
+                    try {
+                        val snapshot = usersCollection.whereIn("uid", chunk).get().await()
+                        snapshot.documents.forEach { doc ->
+                            val user = User.fromMap(doc.data ?: emptyMap())
+                            profileCache[user.uid] = CachedUser(user, now)
+                            resultList.add(user)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
         }

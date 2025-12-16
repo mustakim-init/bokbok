@@ -491,7 +491,7 @@ class WebRTCClient(
 
         val factory = peerConnectionFactory ?: return null
         
-        val iceServers = turnServerManager.getIceServersForCurrentTier()
+        val iceServers = turnServerManager.getIceServers()
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             iceTransportsType = PeerConnection.IceTransportsType.ALL
@@ -502,7 +502,7 @@ class WebRTCClient(
             keyType = PeerConnection.KeyType.ECDSA
         }
 
-        Log.d(tag, "Creating PC for $remoteUserId (Tier ${turnServerManager.getCurrentTier()})")
+        Log.d(tag, "Creating PC for $remoteUserId (Standard ICE)")
 
         val observer = object : PeerConnection.Observer {
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
@@ -559,51 +559,12 @@ class WebRTCClient(
 
     private fun handleIceConnectionChange(remoteId: String, state: PeerConnection.IceConnectionState?) {
         when (state) {
-            PeerConnection.IceConnectionState.NEW -> {
-                val timeoutMs = when (turnServerManager.getCurrentTier()) {
-                    1 -> 6000L
-                    2 -> 10000L
-                    3 -> 8000L
-                    else -> 8000L
-                }
-                scheduleStateCheck(remoteId, PeerConnection.IceConnectionState.NEW, timeoutMs) {
-                    Log.w(tag, "NEW timeout for $remoteId")
-                    turnServerManager.reportConnectionFailure()
-                }
-            }
-            PeerConnection.IceConnectionState.CHECKING -> {
-                val tier = turnServerManager.getCurrentTier()
-
-                // Timeout for all tiers
-                val timeoutMs = when (tier) {
-                    1 -> 8000L
-                    2 -> 10000L  // 10s timeout for tier 2
-                    3 -> 10000L
-                    else -> 10000L
-                }
-
-                scheduleStateCheck(remoteId, PeerConnection.IceConnectionState.CHECKING, timeoutMs) {
-                    Log.w(tag, "CHECKING timeout for $remoteId")
-
-                    if (tier == 2) {
-                        // Retry same TURN first
-                        restartIceConnection(remoteId)
-                        // If still failing, escalate to next TURN
-                        turnServerManager.reportConnectionFailure()
-                    } else if (tier == 1) {
-                        turnServerManager.reportConnectionFailure()
-                    } else {
-                        restartIceConnection(remoteId)
-                    }
-                }
-            }
             PeerConnection.IceConnectionState.CONNECTED,
             PeerConnection.IceConnectionState.COMPLETED -> {
                 stableConnections[remoteId] = true
                 connectionStartTimes.remove(remoteId)
                 connectedPeersCount.incrementAndGet()
-                turnServerManager.reportConnectionSuccess()
-                connectionRetryCounts.remove(remoteId)
+                connectionRetryCounts.remove(remoteId) // Clear retry count
                 
                 onPeerConnectionStateChanged?.invoke(remoteId, true)
                 
@@ -613,39 +574,19 @@ class WebRTCClient(
             }
             PeerConnection.IceConnectionState.FAILED,
             PeerConnection.IceConnectionState.DISCONNECTED -> {
-                if (!isStableConnection(remoteId)) {
-                    connectionStartTimes.remove(remoteId)
-                    stableConnections.remove(remoteId)
-                    turnServerManager.reportConnectionFailure()
-                    retryConnectionWithNewTier(remoteId)
-                } else {
-                    // If stable, wait a bit before declaring dead
-                    if (state == PeerConnection.IceConnectionState.FAILED) {
-                        Handler(Looper.getMainLooper()).postDelayed({
-                            if (peerConnections[remoteId]?.iceConnectionState() == PeerConnection.IceConnectionState.FAILED) {
-                                Log.w(tag, "Stable connection $remoteId permanently FAILED")
-                                stableConnections.remove(remoteId)
-                                turnServerManager.reportConnectionFailure()
-                                retryConnectionWithNewTier(remoteId)
-                            }
-                        }, 3000)
-                    }
+                Log.w(tag, "Connection state changed to $state for $remoteId")
+                
+                if (stableConnections[remoteId] == true) {
+                     Log.w(tag, "Stable connection to $remoteId lost. Attempting ICE restart...")
+                     restartIceConnection(remoteId)
                 }
+                
+                stableConnections.remove(remoteId)
+                connectionStartTimes.remove(remoteId)
                 onPeerConnectionStateChanged?.invoke(remoteId, false)
             }
             else -> {}
         }
-    }
-
-    private fun scheduleStateCheck(remoteId: String, expectedState: PeerConnection.IceConnectionState, delayMs: Long, action: () -> Unit) {
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (!isStableConnection(remoteId)) {
-                val currentState = try { peerConnections[remoteId]?.iceConnectionState() } catch (_: Exception) { null }
-                if (currentState == expectedState) {
-                    action()
-                }
-            }
-        }, delayMs)
     }
 
     private fun isStableConnection(remoteId: String): Boolean {
@@ -710,38 +651,8 @@ class WebRTCClient(
         }
     }
 
-    private fun retryConnectionWithNewTier(remoteId: String) {
-        if (isShuttingDown.get()) return
-        
-        val retryCount = connectionRetryCounts.getOrDefault(remoteId, 0)
-        val maxRetries = if (turnServerManager.getCurrentTier() == 2) 3 else 2
-        
-        if (retryCount >= maxRetries) {
-            Log.w(tag, "Max retries reached for $remoteId")
-            return
-        }
-        
-        connectionRetryCounts[remoteId] = retryCount + 1
-        val backoffMs = 1000L * (1 shl retryCount)
-        
-        Log.d(tag, "Scheduling retry for $remoteId in ${backoffMs}ms")
-        
-        scheduler.schedule({
-            executeTask {
-                try {
-                    peerConnections[remoteId]?.close()
-                    peerConnections.remove(remoteId)
-                    remoteAudioTracks.remove(remoteId)
-                    stableConnections.remove(remoteId)
-                    pendingRemoteCandidates.remove(remoteId)
-                    
-                    createConnectionTo(remoteId)
-                } catch (e: Exception) {
-                    Log.e(tag, "Retry error: ${e.message}")
-                }
-            }
-        }, backoffMs, TimeUnit.MILLISECONDS)
-    }
+    // retryConnectionWithNewTier REMOVED by standard ICE implementation
+
 
     private fun createOfferWithRetry(pc: PeerConnection, remoteId: String, attempt: Int = 0) {
         pc.createOffer(object : SimpleSdpObserver() {
@@ -861,11 +772,8 @@ class WebRTCClient(
                             if (state == PeerConnection.IceConnectionState.CLOSED) {
                                 disconnectFrom(remoteId)
                             } else if (state == PeerConnection.IceConnectionState.FAILED) {
-                                if (!remoteAudioTracks.containsKey(remoteId)) {
-                                    Log.w(tag, "Health check: $remoteId FAILED with no audio, forcing escalation")
-                                    turnServerManager.forceEscalateToNextTier()
-                                    retryConnectionWithNewTier(remoteId)
-                                }
+                                Log.w(tag, "Health check: $remoteId FAILED")
+                                // Standard ICE restart is handled in handleIceConnectionChange
                             }
                         } catch (e: Exception) {
                             Log.w(tag, "Health check error: ${e.message}")

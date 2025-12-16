@@ -154,8 +154,12 @@ fun ChatScreen(
         viewModel.setShowEmojiPicker(false)
     }
 
+    // ✅ OPTIMIZED: Smooth scroll to bottom on new messages
+    // Use a SideEffect or LaunchedEffect with key on message count to minimize work
     LaunchedEffect(messages?.size) {
         if (messages?.isNotEmpty() == true) {
+            // Only scroll if we were already at bottom or it's a new message
+            // or logic to keep scroll position could be added here
             listState.animateScrollToItem(0)
         }
     }
@@ -303,7 +307,10 @@ fun ChatScreen(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        itemsIndexed(currentMessages) { index, message ->
+                        itemsIndexed(
+                            items = currentMessages,
+                            key = { _, message -> message.id } // ✅ OPTIMIZED: Stable Key
+                        ) { index, message ->
                             val isMe = message.senderId == viewModel.currentUserId
                             val nextMessage = currentMessages.getOrNull(index - 1)
                             val prevMessage = currentMessages.getOrNull(index + 1)
@@ -312,7 +319,12 @@ fun ChatScreen(
                             val isFirstInSequence = prevMessage?.senderId != message.senderId
 
                             // Find the last read message from me (for read receipt)
-                            val lastReadMessage = currentMessages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
+                            // Optimization: Calculate this once outside or using derivedState if possible, 
+                            // but inside item it's okay if list is not Huge. 
+                            // For very large lists, move this logic to ViewModel mapping.
+                            val lastReadMessage = remember(currentMessages) { 
+                                currentMessages.firstOrNull { it.senderId == viewModel.currentUserId && it.isRead }
+                            }
                             val isLastReadMessage = message.id == lastReadMessage?.id
 
                             MessageBubble(

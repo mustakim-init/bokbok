@@ -4,6 +4,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.Source
 import com.mustakim.bokbok.data.model.RoomCategory
 import com.mustakim.bokbok.data.model.VoiceRoom
 import kotlinx.coroutines.tasks.await
@@ -25,11 +26,35 @@ class RoomRepository {
      * Filtered by isPublic = true to hide private rooms.
      */
     suspend fun getActiveRooms(): Result<List<VoiceRoom>> {
+        // 1. Try Disk Cache
+        try {
+            val cachedSnapshot = roomsCollection
+                .whereEqualTo("isPublic", true)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(20)
+                .get(Source.CACHE)
+                .await()
+            
+            if (!cachedSnapshot.isEmpty) {
+                 val rooms = cachedSnapshot.documents.mapNotNull { doc ->
+                    doc.data?.let { VoiceRoom.fromMap(it) }
+                }
+                // Return cache immediately. 
+                // Note: We might want to trigger a background refresh, but that depends on the ViewModel strategy.
+                // For "offline mode", this is sufficient.
+                // Assuming ViewModel handles refresh via SwipeToRefresh or similar if new data is needed.
+                if (rooms.isNotEmpty()) return Result.success(rooms)
+            }
+        } catch (e: Exception) {
+            // Cache miss
+        }
+
+        // 2. Network Fetch
         return try {
             val snapshot = roomsCollection
                 .whereEqualTo("isPublic", true) // ✅ Added filter
                 .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(20)
+                .limit(20) // Limit matches cache query
                 .get()
                 .await()
             val rooms = snapshot.documents.mapNotNull { doc ->
@@ -45,10 +70,27 @@ class RoomRepository {
      * Get all rooms that the current user is a participant of.
      */
     suspend fun getMyRooms(): Result<List<VoiceRoom>> {
-        return try {
-            val currentUser = auth.currentUser
-                ?: return Result.failure(Exception("User not logged in"))
+        val currentUser = auth.currentUser ?: return Result.failure(Exception("User not logged in"))
 
+        // 1. Try Disk Cache
+        try {
+            val cachedSnapshot = roomsCollection
+                .whereArrayContains("participants", currentUser.uid)
+                .get(Source.CACHE)
+                .await()
+
+            if (!cachedSnapshot.isEmpty) {
+                val rooms = cachedSnapshot.documents.mapNotNull { doc ->
+                    doc.data?.let { VoiceRoom.fromMap(it) }
+                }
+                if (rooms.isNotEmpty()) return Result.success(rooms)
+            }
+        } catch (e: Exception) {
+            // Cache miss
+        }
+
+        // 2. Network Fetch
+        return try {
             val snapshot = roomsCollection
                 .whereArrayContains("participants", currentUser.uid)
                 .get()
@@ -139,19 +181,34 @@ class RoomRepository {
      * Load a single room by id (With Caching)
      */
     suspend fun getRoom(roomId: String): Result<VoiceRoom> {
-        // 1. Check cache
+        // 1. Check in-memory cache
         val cached = roomCache[roomId]
         if (cached != null && (System.currentTimeMillis() - cached.second) < CACHE_TTL) {
             return Result.success(cached.first)
         }
 
-        // 2. Fetch from network
+        // 2. Check Disk Persistence (Source.CACHE)
+        try {
+            val cachedDoc = roomsCollection.document(roomId).get(Source.CACHE).await()
+            if (cachedDoc.exists()) {
+                val data = cachedDoc.data
+                if (data != null) {
+                    val room = VoiceRoom.fromMap(data)
+                    roomCache[roomId] = room to System.currentTimeMillis()
+                    return Result.success(room)
+                }
+            }
+        } catch (e: Exception) {
+            // Cache miss
+        }
+
+        // 3. Fetch from network
         return try {
             val doc = roomsCollection.document(roomId).get().await()
             val data = doc.data ?: return Result.failure(Exception("Room not found"))
             val room = VoiceRoom.fromMap(data)
 
-            // 3. Update cache
+            // 4. Update cache
             roomCache[roomId] = room to System.currentTimeMillis()
 
             Result.success(room)

@@ -25,6 +25,7 @@ import com.mustakim.bokbok.data.webrtc.VoiceService
 import com.mustakim.bokbok.state.ConnectionStateManager
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.state.SpeakingStateManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 
 
 data class VoiceRoomUiState(
@@ -114,13 +116,16 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
         _searchQuery.value = query
         if (query.isBlank()) {
             _searchResults.value = emptyList()
+            _isSearching.value = false
             return
         }
-        viewModelScope.launch {
-            _isSearching.value = true
+        _isSearching.value = true
+        viewModelScope.launch(Dispatchers.IO) {
             val result = userRepository.searchUsers(query)
-            _searchResults.value = result.getOrDefault(emptyList())
-            _isSearching.value = false
+            withContext(Dispatchers.Main) {
+                _searchResults.value = result.getOrDefault(emptyList())
+                _isSearching.value = false
+            }
         }
     }
 
@@ -216,24 +221,17 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun uploadRoomImage(uri: android.net.Uri, context: android.content.Context) {
-        viewModelScope.launch {
-            _isSearching.value = true // Reuse loading state or add specific one
+        _isSearching.value = true // Reuse loading state or add specific one
+        viewModelScope.launch(Dispatchers.IO) {
             val url = roomRepository.uploadRoomImage(context, uri)
-            if (url != null) {
-                // Determine logic: Do we auto-update the room? Or just return the URL?
-                // The prompt implies "preview" or "update". Let's assume we update the room directly if it exists,
-                // or we could expose it via a state flow. 
-                // However, the RoomSettingsSheet seems to hold local state until "Save" is clicked.
-                // But the user said "ask me if I want to upload... image preview".
-                // Let's expose the uploaded URL via a SharedFlow or State so the UI can grab it.
-                // For simplicity in this architecture, let's treat it as a state update that the UI observes,
-                // OR better, we can just return it? No, VM functions shouldn't return values to UI directly.
-                // We'll update a temporary state `_uploadedCoverUrl`.
-                _uiState.update { it.copy(uploadedCoverUrl = url) } 
-            } else {
-                 _uiState.update { it.copy(error = "Failed to upload image") }
+            withContext(Dispatchers.Main) {
+                if (url != null) {
+                    _uiState.update { it.copy(uploadedCoverUrl = url) } 
+                } else {
+                    _uiState.update { it.copy(error = "Failed to upload image") }
+                }
+                _isSearching.value = false
             }
-             _isSearching.value = false
         }
     }
 

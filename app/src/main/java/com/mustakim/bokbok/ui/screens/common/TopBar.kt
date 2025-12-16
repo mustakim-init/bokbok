@@ -36,8 +36,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import com.mustakim.bokbok.ui.theme.RobotoFlex
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +55,7 @@ fun TopBar(
     val currentUser by userViewModel.currentUser.collectAsState()
 
     TopAppBar(
-        modifier = Modifier.height(110.dp),
+        modifier = Modifier.height(100.dp),
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically
@@ -61,7 +63,12 @@ fun TopBar(
                 // App Logo/Brand Text with gradient effect
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontFamily = RobotoFlex,
+                        fontSize = 28.sp, // Matching Tomato's size
+                        letterSpacing = 0.sp,
+                        lineHeight = 30.sp
+                    ),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )

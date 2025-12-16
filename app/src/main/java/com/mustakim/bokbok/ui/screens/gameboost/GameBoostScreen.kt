@@ -19,7 +19,7 @@ fun GameBoostScreen(
 ) {
     MainScaffold(
         navController = navController,
-        title = "Game Boost",
+        title = "Optimizer",
         showBottomBar = true,
         userViewModel = userViewModel
     ) { paddingValues ->

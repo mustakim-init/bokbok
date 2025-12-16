@@ -10,9 +10,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,6 +54,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -65,6 +73,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -112,7 +122,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.style.TextAlign
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ChatsScreen(
     friendsRepository: FriendsRepository,
@@ -289,81 +299,51 @@ fun ChatsScreen(
                 )
             }
 
-            val fabRotation by animateFloatAsState(
-                targetValue = if (isFabMenuExpanded) 45f else 0f,
-                animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                label = "fabRotation"
-            )
-
-            val fabCornerRadius by animateIntAsState(
-                targetValue = if (isFabMenuExpanded) 50 else 25, // Percentage
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
-                label = "fabShape"
-            )
-
-            Column(
+            // FAB Menu using Material 3 Expressive Components
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(
-                        end = 32.dp, // Match LoungeScreen padding
-                        bottom = if (isMinimized) 120.dp else 36.dp // Match LoungeScreen padding
-                    ),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                        end = 16.dp,
+                        bottom = if (isMinimized) 100.dp else 20.dp
+                    )
             ) {
-
-                AnimatedVisibility(
-                    visible = isFabMenuExpanded,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ExtendedFloatingActionButton(
-                            onClick = {
-                                isFabMenuExpanded = false
-                                showCreateGroupDialog = true
-                            },
-                            icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
-                            text = { Text("New Group", fontWeight = FontWeight.Medium) },
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                            expanded = true,
-                            modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
-                        )
-
-                        ExtendedFloatingActionButton(
-                            onClick = {
-                                isFabMenuExpanded = false
-                                showAddFriendDialog = true
-                            },
-                            icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
-                            text = { Text("Add Friend", fontWeight = FontWeight.Medium) },
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            expanded = true,
-                            modifier = Modifier.shadow(8.dp, RoundedCornerShape(16.dp))
-                        )
+                FloatingActionButtonMenu(
+                    expanded = isFabMenuExpanded,
+                    button = {
+                        ToggleFloatingActionButton(
+                            checked = isFabMenuExpanded,
+                            onCheckedChange = { isFabMenuExpanded = !isFabMenuExpanded }
+                        ) {
+                            val imageVector by remember {
+                                derivedStateOf {
+                                    if (checkedProgress > 0.5f) Icons.Default.Close else Icons.Default.Add
+                                }
+                            }
+                            Icon(
+                                imageVector = imageVector,
+                                contentDescription = if (isFabMenuExpanded) "Close Menu" else "Open Menu",
+                                modifier = Modifier.rotate(checkedProgress * 135f) // Optional: Add rotation effect
+                            )
+                        }
                     }
-                }
-
-                FloatingActionButton(
-                    onClick = { isFabMenuExpanded = !isFabMenuExpanded },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    shape = RoundedCornerShape(fabCornerRadius),
-                    modifier = Modifier
-                        .size(56.dp)
-                        .shadow(6.dp, RoundedCornerShape(fabCornerRadius))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = if (isFabMenuExpanded) "Close" else "Menu",
-                        modifier = Modifier
-                            .size(24.dp)
-                            .rotate(fabRotation)
+                    FloatingActionButtonMenuItem(
+                        onClick = {
+                            isFabMenuExpanded = false
+                            showCreateGroupDialog = true
+                        },
+                        icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
+                        text = { Text("New Group") }
+                    )
+
+                    FloatingActionButtonMenuItem(
+                        onClick = {
+                            isFabMenuExpanded = false
+                            showAddFriendDialog = true
+                        },
+                        icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
+                        text = { Text("Add Friend") }
                     )
                 }
             }
@@ -496,11 +476,20 @@ fun ExpressiveMenuItem(
     color: Color = MaterialTheme.colorScheme.onSurface,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1f, label = "scale")
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .scale(scale)
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                onClick = onClick
+            )
             .background(MaterialTheme.colorScheme.surface)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -631,34 +620,42 @@ fun ChatListItem(
     // Track this item's position in window coordinates so parent can anchor a menu near it
     var itemPosition by remember { mutableStateOf(IntOffset.Zero) }
 
+    // Expressive Animations
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1f, label = "scale")
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(scale)
             .onGloballyPositioned { coords ->
                 val pos = coords.positionInWindow()
                 itemPosition = IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
             }
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
                 onClick = onClick,
                 onLongClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onLongClick(itemPosition)
                 }
             ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (hasUnread)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                MaterialTheme.colorScheme.surfaceContainerHigh
             else
                 MaterialTheme.colorScheme.surfaceContainerLow
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (hasUnread) 2.dp else 0.dp
+            defaultElevation = if (hasUnread) 4.dp else 1.dp
         )
     ) {
         Row(
             modifier = Modifier
-                .padding(12.dp)
+                .padding(16.dp)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -670,14 +667,14 @@ fun ChatListItem(
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp)),
+                            .clip(CircleShape),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp))
+                            .clip(CircleShape)
                             .background(
                                 brush = Brush.linearGradient(
                                     colors = listOf(
@@ -728,7 +725,7 @@ fun ChatListItem(
                 }
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(

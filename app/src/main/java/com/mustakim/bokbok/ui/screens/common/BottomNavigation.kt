@@ -36,7 +36,7 @@ sealed class BottomNavItem(
 ) {
     object Lounge : BottomNavItem("lounge", Icons.Filled.Home, Icons.Outlined.Home, "Lounge")
     object Chats : BottomNavItem("chats", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat, "Chats")
-    object GameBoost : BottomNavItem("game_boost", Icons.Filled.Gamepad, Icons.Outlined.Gamepad, "Game Boost")
+    object GameBoost : BottomNavItem("game_boost", Icons.Filled.Gamepad, Icons.Outlined.Gamepad, "Optimizer")
 }
 
 @Composable
@@ -72,7 +72,7 @@ fun BottomNavigationBar(
                         )
                         // Bounce up
                         scale.animateTo(
-                            targetValue = 1.2f,
+                            targetValue = 1.1f,
                             animationSpec = spring(
                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                 stiffness = Spring.StiffnessLow

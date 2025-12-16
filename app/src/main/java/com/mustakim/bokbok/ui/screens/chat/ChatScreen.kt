@@ -144,6 +144,11 @@ fun ChatScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedMessageForReactions by remember { mutableStateOf<Message?>(null) }
 
+    // ✅ OPTIMIZED: Trigger lazy initialization when screen becomes visible
+    LaunchedEffect(Unit) {
+        viewModel.onScreenVisible()
+    }
+
     // Handle Back Press to close Emoji Picker
     BackHandler(enabled = showEmojiPicker) {
         viewModel.setShowEmojiPicker(false)

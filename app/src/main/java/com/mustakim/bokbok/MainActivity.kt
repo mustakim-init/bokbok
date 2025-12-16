@@ -86,11 +86,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
                     
-                    // Handle Notification Navigation
+                    // ✅ OPTIMIZED: Repositories for notification handling are now lazy
+                    // Only created when a notification intent is actually received
                     val context = androidx.compose.ui.platform.LocalContext.current
-                    val roomRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.RoomRepository() }
-                    val notificationRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
-                    val userRepository = androidx.compose.runtime.remember { com.mustakim.bokbok.data.repository.UserRepository(context) }
                     
                     // Observe the intent state
                     val currentIntent by _intentState
@@ -98,11 +96,16 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.runtime.LaunchedEffect(currentIntent) {
                         val intent = currentIntent
                         if (intent?.getBooleanExtra("navigate_to_room", false) == true) {
+                            // ✅ OPTIMIZED: Create repositories only when needed
+                            val roomRepository = com.mustakim.bokbok.data.repository.RoomRepository()
+                            val notificationRepository = com.mustakim.bokbok.data.repository.NotificationRepository()
+                            val userRepository = com.mustakim.bokbok.data.repository.UserRepository(context)
+                            
                             val roomId = intent.getStringExtra("roomId")
                             val notificationDocId = intent.getStringExtra("notificationDocId")
                             val isAcceptAction = intent.getBooleanExtra("action_accept", false)
 
-                            // ✅ FIX: Delete notification if this was an "Accept" action
+                            // Delete notification if this was an "Accept" action
                             if (isAcceptAction && notificationDocId != null) {
                                 launch(kotlinx.coroutines.Dispatchers.IO) {
                                     val userId = userRepository.getCurrentUserId()

@@ -17,6 +17,7 @@ import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.PresenceRepository
 import com.mustakim.bokbok.data.repository.RoomRepository
 import com.mustakim.bokbok.data.repository.UserRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 data class LoungeUiState(
@@ -33,8 +35,8 @@ data class LoungeUiState(
     val totalActiveRooms: Int = 0,
     val totalOnlineUsers: Int = 0,
     val isLoading: Boolean = false,
-    val isRefreshing: Boolean = false,  // ✅ Add refresh state
-    val isRefreshingPublicRooms: Boolean = false,  // ✅ Add this
+    val isRefreshing: Boolean = false,
+    val isRefreshingPublicRooms: Boolean = false,
     val error: String? = null
 )
 
@@ -44,18 +46,18 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
 
     private val presenceRepository = PresenceRepository()
 
-    // ✅ NEW: real friends + status
-    private val friendsRepository = FriendsRepository(
-        UserRepository(getApplication<Application>().applicationContext)
-    )
-
-
+    // ✅ NEW: real friends + status (lazy init)
+    private val friendsRepository by lazy {
+        FriendsRepository(
+            UserRepository(getApplication<Application>().applicationContext)
+        )
+    }
 
     private val _uiState = MutableStateFlow(
         LoungeUiState(
             friends = emptyList(),
             myRooms = emptyList(),
-            publicRooms = emptyList(),      // start empty, will be filled from Firestore
+            publicRooms = emptyList(),
             totalActiveRooms = 0,
             totalOnlineUsers = 0,
             isLoading = false
@@ -67,8 +69,10 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     // Track if initial data has been loaded
     private var hasLoadedInitialData = false
     
+    // Track if friends observer is started
+    private var isFriendsObserverStarted = false
+    
     // Track if we should show skeleton (only on first ever load)
-    // Use mutableStateOf so Compose can observe changes
     var shouldShowSkeleton by mutableStateOf(true)
         private set
     
@@ -87,12 +91,9 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
-        // Only start the lightweight friend observer
-        // Actual data loading happens when screen appears
-        observeFriends()
-        
-        // Lifecycle logging to verify proper scoping
-        android.util.Log.d("LoungeViewModel", "✅ Created: ${System.identityHashCode(this)}")
+        // ✅ OPTIMIZED: Do NOT start firebase observers in init
+        // They will be started lazily when loadInitialData() is called
+        android.util.Log.d("LoungeViewModel", "✅ Created (deferred init): ${System.identityHashCode(this)}")
     }
     
     override fun onCleared() {
@@ -349,6 +350,13 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         if (hasLoadedInitialData) return
         
         hasLoadedInitialData = true
+        
+        // ✅ OPTIMIZED: Start friends observer lazily (not in init)
+        if (!isFriendsObserverStarted) {
+            isFriendsObserverStarted = true
+            observeFriends()
+        }
+        
         viewModelScope.launch {
             // Load rooms in parallel for faster startup
             launch { loadPublicRoomsFromFirestore() }

@@ -8,11 +8,21 @@ import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.HybridChatRepository
 import com.mustakim.bokbok.data.repository.UserRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * ChatViewModel - Optimized with lazy initialization
+ *
+ * Performance optimizations:
+ * 1. init{} does NOT start Firebase listeners
+ * 2. Call onScreenVisible() when chat screen appears
+ * 3. Network calls run on Dispatchers.IO
+ */
 class ChatViewModel(
     private val chatRepository: HybridChatRepository,
     private val userRepository: UserRepository,
@@ -50,26 +60,44 @@ class ChatViewModel(
     private val _summonError = MutableStateFlow<String?>(null)
     val summonError: StateFlow<String?> = _summonError.asStateFlow()
 
+    // Track if we've already started listeners
+    private var isInitialized = false
+
     fun clearSummonError() {
         _summonError.value = null
     }
 
     init {
+        // ✅ OPTIMIZED: Only load friend details in init (lightweight, cached)
+        // Firebase listeners start when onScreenVisible() is called
         loadFriendDetails()
+    }
+
+    /**
+     * Call this when the screen becomes visible.
+     * Starts Firebase listeners lazily.
+     */
+    fun onScreenVisible() {
+        if (isInitialized) return
+        isInitialized = true
+
+        // Now start the heavier operations
         loadMessages()
         markMessagesAsRead()
         observeFriendOnlineStatus()
     }
 
     private fun markMessagesAsRead() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             chatRepository.markMessagesAsRead(friendId)
         }
     }
 
     private fun loadFriendDetails() {
         viewModelScope.launch {
-            userRepository.getUserProfile(friendId).onSuccess { user ->
+            withContext(Dispatchers.IO) {
+                userRepository.getUserProfile(friendId)
+            }.onSuccess { user ->
                 _friendUser.value = user
             }
         }
@@ -109,40 +137,42 @@ class ChatViewModel(
 
     fun reactToMessage(messageId: String, emoji: String) {
         val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             chatRepository.addReaction(messageId, emoji, currentUserId, friendId)
         }
     }
 
     fun removeReaction(messageId: String) {
         val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             chatRepository.removeReaction(messageId, currentUserId, friendId)
         }
     }
 
     fun deleteMessage(messageId: String, forEveryone: Boolean) {
         val currentUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             chatRepository.deleteMessage(messageId, forEveryone, currentUserId, friendId)
         }
     }
 
     fun clearChatHistory(onSuccess: () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             chatRepository.clearChatHistory(friendId)
-            _messages.value = emptyList() // Clear immediately in UI
-            onSuccess()
+            withContext(Dispatchers.Main) {
+                _messages.value = emptyList()
+                onSuccess()
+            }
         }
     }
 
     fun removeFriend(onSuccess: () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             // Remove from friends list using ID
             friendsRepository.removeFriendByUserId(friendId)
             // Clear chat history
             chatRepository.clearChatHistory(friendId)
-            onSuccess()
+            withContext(Dispatchers.Main) { onSuccess() }
         }
     }
 
@@ -153,9 +183,11 @@ class ChatViewModel(
             return
         }
         _isSearching.value = true
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val results = chatRepository.searchMessages(friendId, query)
-            _searchResults.value = results
+            withContext(Dispatchers.Main) {
+                _searchResults.value = results
+            }
         }
     }
 

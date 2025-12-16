@@ -13,10 +13,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.data.model.PermissionsList
 import com.mustakim.bokbok.data.repository.AuthRepository
+import com.mustakim.bokbok.startup.StartupManager
 import kotlinx.coroutines.delay
-import com.mustakim.bokbok.data.repository.PresenceRepository
 
-
+/**
+ * SplashScreen - Optimized for fast startup
+ *
+ * Performance optimizations:
+ * 1. NO network calls - only cached auth check
+ * 2. NO Firebase listeners started here
+ * 3. Presence update is deferred via StartupManager
+ * 4. Minimal delay before navigation
+ */
 @Composable
 fun SplashScreen(
     onNavigateToLogin: () -> Unit,
@@ -24,20 +32,22 @@ fun SplashScreen(
 ) {
     val context = LocalContext.current
     val authRepository = remember { AuthRepository(context) }
-    val presenceRepository = remember { PresenceRepository() }
 
     LaunchedEffect(Unit) {
+        // ✅ OPTIMIZED: Mark UI as ready for StartupManager
+        StartupManager.markUiReady()
+        
+        // Minimal delay - just enough to show splash
         delay(100)
 
-        // Check if user is logged in
+        // ✅ OPTIMIZED: Only check cached auth status (synchronous, no network)
         if (authRepository.isUserLoggedIn()) {
-            // Mark user as online in RTDB with onDisconnect handler
-            presenceRepository.setUserOnline()
+            // ✅ REMOVED: presenceRepository.setUserOnline()
+            // This is now handled by StartupManager deferred tasks
 
-            // Check if ALL required permissions are already granted
+            // Check permissions (synchronous, in-memory check)
             val requiredPermissions = PermissionsList.getRequiredPermissions()
             val allRequiredGranted = requiredPermissions.all { permission ->
-                // Handle Android 13+ notification permission separately
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     permission.permission == android.Manifest.permission.POST_NOTIFICATIONS) {
                     ContextCompat.checkSelfPermission(
@@ -54,17 +64,16 @@ fun SplashScreen(
 
             // Navigate based on permission status
             if (allRequiredGranted) {
-                onNavigateToLounge()  // Go straight to lounge ✅
+                onNavigateToLounge()
             } else {
-                // Still need permissions, handled by NavGraph
-                onNavigateToLounge()  // Will be intercepted by NavGraph
+                onNavigateToLounge() // Will be intercepted by NavGraph for permissions
             }
         } else {
-            onNavigateToLogin() // Not logged in, go to login
+            onNavigateToLogin()
         }
     }
 
-    // Splash UI
+    // Splash UI - simple and fast
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -75,3 +84,4 @@ fun SplashScreen(
         )
     }
 }
+

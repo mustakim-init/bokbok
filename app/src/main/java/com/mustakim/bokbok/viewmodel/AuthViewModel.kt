@@ -6,10 +6,12 @@ import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.repository.AuthRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.google.firebase.auth.FirebaseUser
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.PresenceRepository

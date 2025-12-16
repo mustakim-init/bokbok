@@ -92,17 +92,17 @@ fun LoungeScreen(
         }
     }
 
-    // Load data and manage skeleton
+    // ✅ OPTIMIZED: Reduced skeleton timer and integrated StartupManager
     LaunchedEffect(Unit) {
         android.util.Log.d("LoungeScreen", "LaunchedEffect started, shouldShowSkeleton=${loungeViewModel.shouldShowSkeleton}")
         
-        // Start minimum display timer
+        // Start minimum display timer (reduced from 2s to 1.5s for faster perceived startup)
         if (loungeViewModel.shouldShowSkeleton) {
             launch {
-                android.util.Log.d("LoungeScreen", "Starting 2s timer")
-                delay(2000)
+                android.util.Log.d("LoungeScreen", "Starting skeleton timer")
+                delay(1500) // Reduced from 2000ms
                 loungeViewModel.markMinTimeElapsed()
-                android.util.Log.d("LoungeScreen", "2s timer completed, minTimeElapsed=true")
+                android.util.Log.d("LoungeScreen", "Skeleton timer completed")
             }
         }
         
@@ -118,9 +118,16 @@ fun LoungeScreen(
                     if (state.publicRooms.isNotEmpty() || state.myRooms.isNotEmpty()) {
                         android.util.Log.d("LoungeScreen", "Data loaded! Hiding skeleton")
                         loungeViewModel.hideSkeleton()
+                        
+                        // ✅ OPTIMIZED: Trigger Stage 2 initialization
+                        // This starts deferred tasks (FCM, presence, etc.) after first frame
+                        com.mustakim.bokbok.startup.StartupManager.markDataReady()
                     }
                 }
             }
+        } else {
+            // Already loaded - still mark data ready in case it wasn't
+            com.mustakim.bokbok.startup.StartupManager.markDataReady()
         }
     }
 

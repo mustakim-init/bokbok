@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +15,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/**
+ * GroupChatViewModel - Optimized with lazy initialization
+ *
+ * Performance optimizations:
+ * 1. Uses SharingStarted.Lazily for message flows
+ * 2. Heavy operations use Dispatchers.IO
+ */
 class GroupChatViewModel(
     private val repository: HybridGroupChatRepository,
     val groupId: String
@@ -88,19 +96,19 @@ class GroupChatViewModel(
     }
 
     fun reactToMessage(messageId: String, emoji: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.addReaction(groupId, messageId, emoji)
         }
     }
 
     fun removeReaction(messageId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.removeReaction(groupId, messageId)
         }
     }
 
     fun deleteMessage(messageId: String, forEveryone: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.deleteMessage(groupId, messageId, forEveryone)
         }
     }
@@ -111,9 +119,10 @@ class GroupChatViewModel(
             _searchResults.value = emptyList()
             return
         }
-        viewModelScope.launch {
-            _isSearching.value = true
-            _searchResults.value = repository.searchMessages(groupId, query)
+        _isSearching.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val results = repository.searchMessages(groupId, query)
+            _searchResults.value = results
         }
     }
 
@@ -123,17 +132,17 @@ class GroupChatViewModel(
     }
 
     fun clearChatHistory(onSuccess: () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.clearChatHistory(groupId)
-            onSuccess()
+            kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
         }
     }
 
     fun leaveGroup(onSuccess: () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.leaveGroup(groupId)
-                onSuccess()
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
             } catch (e: Exception) {
                  android.util.Log.e("GroupChatViewModel", "Failed to leave group", e)
             }
@@ -141,37 +150,30 @@ class GroupChatViewModel(
     }
 
     fun addMemberToGroup(userId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.addMember(groupId, userId)
         }
     }
 
     fun deleteGroup(onSuccess: () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteGroup(groupId)
-                onSuccess()
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
             } catch (e: Exception) {
-                // Ideally handle error (show toast), but for now we ensure we don't pop if failed, or maybe we do?
-                // If we want to ensure deletion happened, we only call onSuccess if successful.
-                // However, if repository throws, this block catches it? 
-                // Repository rethrows. So we need try-catch here if we want to avoid crash.
-                // But previously it would crash? Or just cancel.
-                // Let's catch and maybe log, or just let it crash if that helps debugging. 
-                // But safer to catch.
                 android.util.Log.e("GroupChatViewModel", "Failed to delete group", e)
             }
         }
     }
 
     fun removeGroupImage() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.removeGroupImage(groupId)
         }
     }
 
     fun removeMember(userId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             repository.removeMember(groupId, userId)
         }
     }
@@ -187,9 +189,9 @@ class GroupChatViewModel(
     }
 
     fun updateGroupImage(uri: android.net.Uri) {
-        viewModelScope.launch {
-            _isUploadingImage.value = true
-            _uploadError.value = null
+        _isUploadingImage.value = true
+        _uploadError.value = null
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.updateGroupImage(groupId, uri)
             } catch (e: Exception) {

@@ -6,12 +6,25 @@ import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.UserRepository
 import com.mustakim.bokbok.data.repository.PresenceRepository
+import com.mustakim.bokbok.startup.StartupManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Stable
 
+/**
+ * UserViewModel - Manages user state with deferred initialization
+ * 
+ * Performance optimizations:
+ * 1. init{} only loads cached/minimal data
+ * 2. FCM token refresh is deferred to Stage 2
+ * 3. Presence updates are deferred to Stage 2
+ * 4. Network calls run on Dispatchers.IO
+ */
 @Stable
 class UserViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = UserRepository(application.applicationContext)
@@ -21,38 +34,37 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Track if heavy initialization is done
+    private var isHeavyInitDone = false
 
     init {
-        loadCurrentUser()
+        // ✅ OPTIMIZED: Only load user profile, defer heavy work
+        loadCurrentUserLightweight()
     }
 
-    fun loadCurrentUser() {
+    /**
+     * Lightweight user load - only fetches user profile (uses cache)
+     * FCM and presence are deferred to Stage 2
+     */
+    private fun loadCurrentUserLightweight() {
         viewModelScope.launch {
             _isLoading.value = true
             val userId = repository.getCurrentUserId()
 
             if (userId != null) {
-                repository.getUserProfile(userId).fold(
+                // Run on IO thread to avoid blocking main thread
+                withContext(Dispatchers.IO) {
+                    repository.getUserProfile(userId)
+                }.fold(
                     onSuccess = { user ->
                         _currentUser.value = user
                         _isLoading.value = false
                         
-                        // ✅ FIX: Set user online when profile loads successfully
-                        try {
-                            presenceRepository.setUserOnline()
-                        } catch (e: Exception) {
-                            // Ignore errors, presence is not critical for app functionality
-                            android.util.Log.w("UserViewModel", "Failed to set user online: ${e.message}")
-                        }
-
-                        // ✅ FIX: Ensure FCM token is up-to-date in Firestore
-                        com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-                            if (!token.isNullOrBlank() && token != user.fcmToken) {
-                                viewModelScope.launch {
-                                    repository.updateFcmToken(token)
-                                }
-                            }
+                        // ✅ OPTIMIZED: Register heavy work for Stage 2
+                        if (!isHeavyInitDone) {
+                            registerDeferredTasks(user)
                         }
                     },
                     onFailure = {
@@ -65,25 +77,69 @@ class UserViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Register FCM and presence tasks for deferred execution
+     */
+    private fun registerDeferredTasks(user: User) {
+        isHeavyInitDone = true
+        
+        // Task 1: Set user online (deferred)
+        StartupManager.registerDeferredTask {
+            try {
+                presenceRepository.setUserOnline()
+                android.util.Log.d("UserViewModel", "✅ Deferred: User online status set")
+            } catch (e: Exception) {
+                android.util.Log.w("UserViewModel", "Failed to set user online: ${e.message}")
+            }
+        }
+        
+        // Task 2: Update FCM token (deferred)
+        StartupManager.registerDeferredTask {
+            try {
+                // Use the proper .await() extension function from kotlinx.coroutines.tasks
+                val token = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                if (token.isNotBlank() && token != user.fcmToken) {
+                    repository.updateFcmToken(token)
+                    android.util.Log.d("UserViewModel", "✅ Deferred: FCM token updated")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("UserViewModel", "Failed to update FCM token: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Full user reload - used for pull-to-refresh or manual refresh
+     */
+    fun loadCurrentUser() {
+        loadCurrentUserLightweight()
+    }
+
     fun setCurrentUser(user: User?) {
         _currentUser.value = user
     }
 
+    /**
+     * Set user online - called from lifecycle observer
+     * Only executes if past Stage 2, otherwise ignored (will be handled by deferred task)
+     */
     fun setOnline() {
-        try {
-            presenceRepository.setUserOnline()
-        } catch (e: Exception) {
-            android.util.Log.e("UserViewModel", "Error setting online", e)
+        if (StartupManager.isAlreadyInitialized()) {
+            try {
+                presenceRepository.setUserOnline()
+            } catch (e: Exception) {
+                android.util.Log.e("UserViewModel", "Error setting online", e)
+            }
         }
+        // If not initialized yet, the deferred task will handle this
     }
 
     override fun onCleared() {
         super.onCleared()
-        // ✅ FIX: Set user offline when ViewModel is cleared
+        // Set user offline when ViewModel is cleared
         try {
             presenceRepository.setUserOffline()
         } catch (e: Exception) {
-            // Best effort, ignore errors
             android.util.Log.w("UserViewModel", "Failed to set user offline: ${e.message}")
         }
     }

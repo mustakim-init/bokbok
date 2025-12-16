@@ -366,7 +366,7 @@ fun GroupChatHeader(
 ) {
     // Animate header height - collapsed needs enough for avatars + group name
     val headerHeight by animateDpAsState(
-        targetValue = if (isExpanded) 200.dp else 110.dp,
+        targetValue = if (isExpanded) 200.dp else 120.dp,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
         label = "headerHeight"
     )

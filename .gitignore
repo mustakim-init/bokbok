@@ -15,10 +15,8 @@
 local.properties
 .apk
 /app/release
-/Ref Project
 *.md
 .agent
 /.md
 .md
 google-services.json
-app/src/main/java/com/mustakim/bokbok/data/webrtc/TurnServerManager.kt

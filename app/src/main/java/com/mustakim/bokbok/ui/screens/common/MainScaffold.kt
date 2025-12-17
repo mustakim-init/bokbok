@@ -45,6 +45,7 @@ fun MainScaffold(
     navController: NavHostController,
     title: String,
     showBottomBar: Boolean = true,
+    showTopBar: Boolean = true, // Added parameter
     notificationCount: Int = 0,
     userViewModel: UserViewModel,
     content: @Composable (PaddingValues) -> Unit
@@ -188,7 +189,7 @@ fun MainScaffold(
         ) {
             Scaffold(
                 topBar = {
-                    if (showBars) {
+                    if (showBars && showTopBar) { // Check showTopBar here
                         AnimatedVisibility(
                             visible = true,
                             enter = fadeIn(tween(200)),

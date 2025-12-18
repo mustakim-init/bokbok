@@ -1,24 +1,18 @@
 package com.mustakim.bokbok.ui.screens.gameboost
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -31,26 +25,22 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
-import com.mustakim.bokbok.R
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
 import com.mustakim.bokbok.viewmodel.GameBoostTab
 import com.mustakim.bokbok.viewmodel.GameBoostViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import com.mustakim.bokbok.ui.screens.gameboost.appmanager.AppManagerScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,23 +174,27 @@ fun GameBoostScreen(
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                           Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                               Text(
-                                   text = tab.title,
-                                   style = MaterialTheme.typography.headlineMedium,
-                                   fontWeight = FontWeight.Bold,
-                                   color = MaterialTheme.colorScheme.onSurface
-                               )
-                               Text(
-                                   text = "Feature Coming Soon",
-                                   style = MaterialTheme.typography.bodyMedium,
-                                   color = MaterialTheme.colorScheme.onSurfaceVariant
-                               )
-                           }
+                        if (tab == GameBoostTab.APP_MANAGER) {
+                            AppManagerScreen()
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = tab.title,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Feature Coming Soon",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }

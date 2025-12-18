@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class GameBoostTab(val title: String) {
     APP_MANAGER("App Manager"),
-    RUNNING_SERVICES("Running Services"),
+    DEVICE_MONITOR("Device Monitor"),
     GAME_BOOST("Game Boost"),
     USAGE_STATS("Usage Stats"),
     SCREEN_RECORD("Screen Record");

@@ -41,6 +41,8 @@ import com.mustakim.bokbok.viewmodel.GameBoostTab
 import com.mustakim.bokbok.viewmodel.GameBoostViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import com.mustakim.bokbok.ui.screens.gameboost.appmanager.AppManagerScreen
+import com.mustakim.bokbok.ui.screens.gameboost.usagestats.UsageStatsScreen
+import com.mustakim.bokbok.ui.screens.gameboost.devicemonitor.DeviceMonitorScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -176,6 +178,10 @@ fun GameBoostScreen(
                         val tab = tabs[page]
                         if (tab == GameBoostTab.APP_MANAGER) {
                             AppManagerScreen()
+                        } else if (tab == GameBoostTab.USAGE_STATS) {
+                            UsageStatsScreen()
+                        } else if (tab == GameBoostTab.DEVICE_MONITOR) {
+                            DeviceMonitorScreen()
                         } else {
                             Box(
                                 modifier = Modifier.fillMaxSize(),

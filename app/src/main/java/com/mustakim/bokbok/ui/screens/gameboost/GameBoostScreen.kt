@@ -50,7 +50,10 @@ import kotlinx.coroutines.launch
 fun GameBoostScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
-    viewModel: GameBoostViewModel = viewModel()
+    viewModel: GameBoostViewModel = viewModel(),
+    appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = viewModel(),
+    usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = viewModel(),
+    deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = viewModel()
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val tabs = remember { viewModel.tabs }
@@ -59,7 +62,17 @@ fun GameBoostScreen(
 
     // Sync Pager state with ViewModel state
     LaunchedEffect(pagerState.currentPage) {
+        val selectedTabEnum = tabs[pagerState.currentPage]
         viewModel.onTabSelected(pagerState.currentPage)
+        
+        // Smart Heartbeat: Only monitor when the user is actually looking at the Monitor tab.
+        // For other tabs, we do NOTHING (to prevent the reloads you saw), but for 
+        // Device Monitor, we toggle the start/stop to save battery.
+        if (selectedTabEnum == GameBoostTab.DEVICE_MONITOR) {
+            deviceMonitorViewModel.startMonitoring()
+        } else {
+            deviceMonitorViewModel.stopMonitoring()
+        }
     }
 
     LaunchedEffect(selectedTab) {
@@ -173,15 +186,16 @@ fun GameBoostScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = 16.dp),
+                        beyondViewportPageCount = 2, // Keep all tabs in memory - critical for persistence
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
                         if (tab == GameBoostTab.APP_MANAGER) {
-                            AppManagerScreen()
+                            AppManagerScreen(viewModel = appManagerViewModel)
                         } else if (tab == GameBoostTab.USAGE_STATS) {
-                            UsageStatsScreen()
+                            UsageStatsScreen(viewModel = usageStatsViewModel)
                         } else if (tab == GameBoostTab.DEVICE_MONITOR) {
-                            DeviceMonitorScreen()
+                            DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
                         } else {
                             Box(
                                 modifier = Modifier.fillMaxSize(),

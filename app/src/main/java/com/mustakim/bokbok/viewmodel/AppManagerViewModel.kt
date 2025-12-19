@@ -1,15 +1,16 @@
 package com.mustakim.bokbok.viewmodel
 
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
 import com.mustakim.bokbok.data.repository.AppManagerRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -87,7 +88,8 @@ class AppManagerViewModel(
             bloatwareCount = bloatwareCount,
             safeToRemoveCount = safeToRemoveCount
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
         AppManagerUiState(isLoading = true)
@@ -98,10 +100,8 @@ class AppManagerViewModel(
             // Attempt to grant Usage Stats permission via Shizuku
             repository.grantSelfPermissions()
             
-            // Sync bloatware database (fire and forget, or wait if critical)
-            launch {
-                repository.syncBloatwareDatabase()
-            }
+            // Note: Bloatware DB sync moved to BloatwareSyncWorker (WorkManager)
+            // for non-blocking app startup
 
             // Then load apps
             loadApps()

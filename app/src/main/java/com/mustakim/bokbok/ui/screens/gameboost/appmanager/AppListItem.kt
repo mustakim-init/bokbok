@@ -25,11 +25,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.DecimalFormat
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -85,22 +92,33 @@ fun AppListItem(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // App Icon with selection indicator
+            // App Icon with selection indicator - async loading for performance
             Box {
-                val iconBitmap = app.icon?.toBitmap()?.asImageBitmap()
+                // Load bitmap async to prevent main thread blocking during scroll
+                var iconBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+                LaunchedEffect(app.packageName) {
+                    iconBitmap = withContext(Dispatchers.Default) {
+                        app.icon?.toBitmap()?.asImageBitmap()
+                    }
+                }
+                
                 if (iconBitmap != null) {
                     Image(
-                        bitmap = iconBitmap,
+                        bitmap = iconBitmap!!,
                         contentDescription = null,
                         modifier = Modifier
                             .size(52.dp)
                             .clip(RoundedCornerShape(12.dp))
                     )
                 } else {
-                    Spacer(
+                    // Placeholder while loading
+                    Box(
                         modifier = Modifier
                             .size(52.dp)
-                            .background(Color.Gray, RoundedCornerShape(12.dp))
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                RoundedCornerShape(12.dp)
+                            )
                     )
                 }
                 

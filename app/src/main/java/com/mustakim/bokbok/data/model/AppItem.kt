@@ -1,9 +1,11 @@
 package com.mustakim.bokbok.data.model
 
 import android.graphics.drawable.Drawable
+import androidx.compose.runtime.Stable
 import com.mustakim.bokbok.data.bloatware.DebloatObject
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 
+@Stable
 data class AppItem(
     val packageName: String,
     val label: String,

@@ -278,7 +278,7 @@ class AppManagerRepository @Inject constructor(
         }
     }
 
-    private suspend fun executeShellCommand(command: String) {
+    private suspend fun executeShellCommand(command: String) = withContext(Dispatchers.IO) {
         try {
             var binder = Shizuku.getBinder()
             var retry = 0

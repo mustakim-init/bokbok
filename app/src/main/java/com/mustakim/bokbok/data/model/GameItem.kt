@@ -11,5 +11,7 @@ data class GameItem(
     val isHiddenFromLauncher: Boolean = false,
     val isUserAdded: Boolean = false,
     val installedTime: Long = 0L,
-    val apkSize: Long = 0L
+    val apkSize: Long = 0L,
+    val optimizationProfile: OptimizationProfile = OptimizationProfile.BALANCED,
+    val customSettingsJson: String = "{}"
 )

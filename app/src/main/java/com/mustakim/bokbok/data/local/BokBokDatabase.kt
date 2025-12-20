@@ -19,9 +19,10 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         GroupMessageEntity::class,
         com.mustakim.bokbok.data.local.entity.GameEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
+@androidx.room.TypeConverters(GeneralTypeConverters::class)
 abstract class BokBokDatabase : RoomDatabase() {
     
     abstract fun messageDao(): MessageDao

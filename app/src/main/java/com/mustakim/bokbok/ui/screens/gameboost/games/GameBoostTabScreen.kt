@@ -14,9 +14,8 @@ fun GameBoostTabScreen(
     if (selectedGame != null) {
         GameDetailScreen(
             game = selectedGame!!,
-            onBack = { viewModel.clearSelectedGame() },
-            onLaunch = { viewModel.launchGame(selectedGame!!) },
-            onToggleLauncher = { viewModel.toggleLauncherVisibility(selectedGame!!) }
+            viewModel = viewModel,
+            onBack = { viewModel.clearSelectedGame() }
         )
     } else {
         GameListScreen(viewModel = viewModel)

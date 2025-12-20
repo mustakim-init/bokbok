@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
@@ -120,32 +121,31 @@ fun DeviceMonitorScreen(
             // GPU Overview
             item { GpuCard(uiState.gpuInfo) }
             
-            // CPU Overview (with Top Processes)
+            // CPU Overview (Per-Core & SoC Meta)
             item { 
                 CpuCard(
-                    cpuInfo = uiState.cpuInfo,
-                    topProcesses = uiState.processList.take(5)
+                    cpuInfo = uiState.cpuInfo
                 ) 
             }
             
-            // Battery & Storage Row
-            item {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Box(modifier = Modifier.weight(1f)) { BatteryCard(uiState.batteryInfo) }
-                    Box(modifier = Modifier.weight(1f)) { 
-                        StorageCard(
-                            storageInfo = uiState.storageInfo,
-                            onClick = { 
-                                showStorageSheet = true 
-                                viewModel.refreshStorageBreakdown()
-                            }
-                        ) 
+            // Battery Overview
+            item { 
+                BatteryCard(uiState.batteryInfo) 
+            }
+            
+            // Storage Overview
+            item { 
+                StorageCard(
+                    storageInfo = uiState.storageInfo,
+                    onClick = { 
+                        showStorageSheet = true 
+                        viewModel.refreshStorageBreakdown()
                     }
-                }
+                ) 
             }
 
             // System Info
-            item { SystemInfoCard() }
+            item { SystemInfoCard(uiState.hasUsagePermission) }
             
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }
@@ -309,18 +309,39 @@ fun GpuCard(gpuInfo: GpuInfo) {
                         )
                     }
                 }
+                
                 Text(
                     text = gpuInfo.renderer ?: "Qualcomm Adreno",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1
                 )
-                if (gpuInfo.model != null || gpuInfo.apiVersion != null) {
+                
+                if (gpuInfo.apiVersion != null) {
                     Text(
-                        text = "${gpuInfo.model ?: ""} ${gpuInfo.apiVersion ?: ""}".trim(),
+                        text = gpuInfo.apiVersion!!,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1
                     )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    if (gpuInfo.powerLevel != null) {
+                        Text(
+                            text = "Pwr: ${gpuInfo.powerLevel}/${gpuInfo.maxPowerLevel ?: "?"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (gpuInfo.model != null) {
+                        if (gpuInfo.powerLevel != null) Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = gpuInfo.model!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
@@ -328,65 +349,115 @@ fun GpuCard(gpuInfo: GpuInfo) {
 }
 
 @Composable
-fun CpuCard(cpuInfo: CpuInfo, topProcesses: List<ProcessInfo>) {
+fun CpuCard(cpuInfo: CpuInfo) {
     MonitorCard {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // Left Side: Process List (Matches reference image)
-            Column(modifier = Modifier.weight(1.2f)) {
-                topProcesses.forEach { proc ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Tux icon placeholder or app icon if we had it
-                        Text("🐧", fontSize = 14.sp)
-                        Spacer(Modifier.width(8.dp))
+        Column {
+            // Top Part: Summary & Metric
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                CircularMetric(
+                    progress = cpuInfo.loadPercent / 100f,
+                    label = "CPU",
+                    valueText = "${cpuInfo.loadPercent.roundToInt()}%",
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(100.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = cpuInfo.socName ?: "Qualcomm Technologies, Inc",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = proc.name.takeLast(18),
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f)
+                            text = "Load: ${cpuInfo.loadPercent.roundToInt()}%",
+                            style = MaterialTheme.typography.bodySmall
                         )
+                        if (cpuInfo.temperatureCelsius != null) {
+                            Spacer(Modifier.width(12.dp))
+                            Icon(Icons.Default.Speed, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                text = " ${cpuInfo.temperatureCelsius.roundToInt()}°C",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    if (cpuInfo.architecture != null) {
                         Text(
-                            text = "${proc.cpuUsage.format(1)}%",
+                            text = cpuInfo.architecture!!,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(top = 2.dp)
                         )
                     }
                 }
             }
             
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.height(20.dp))
             
-            // Divider
-            Box(modifier = Modifier.width(1.dp).height(120.dp).background(MaterialTheme.colorScheme.outlineVariant))
-            
-            Spacer(Modifier.width(16.dp))
-            
-            // Right Side: CPU Load Info
-            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${cpuInfo.loadPercent.roundToInt()}%", style = MaterialTheme.typography.titleLarge)
-                Text("CPU", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                
-                Spacer(Modifier.height(12.dp))
-                
-                // Micro bars
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    cpuInfo.coreLoads.take(8).forEach { load ->
-                        Box(
-                            modifier = Modifier
-                                .width(6.dp)
-                                .height(16.dp)
-                                .clip(RoundedCornerShape(1.dp))
-                                .background(if (load > 5) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest)
-                        )
+            // Per-Core Grid (matches VTools / reference)
+            val coresCount = 8 // Standard
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (row in 0 until 4) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        for (col in 0 until 2) {
+                            val coreIdx = row * 2 + col
+                            if (coreIdx < cpuInfo.coreCount) {
+                                CoreMonitoringItem(
+                                    index = coreIdx,
+                                    load = cpuInfo.coreLoads.getOrNull(coreIdx) ?: 0f,
+                                    freq = cpuInfo.frequencies.getOrNull(coreIdx) ?: 0L,
+                                    isOnline = cpuInfo.onlineStatus.getOrNull(coreIdx) ?: true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
                     }
                 }
-                
-                Spacer(Modifier.height(8.dp))
-                Text("Load: ${cpuInfo.loadPercent.roundToInt()}%", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+fun CoreMonitoringItem(
+    index: Int,
+    load: Float,
+    freq: Long,
+    isOnline: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
+            .padding(8.dp)
+    ) {
+        Column {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Core $index", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!isOnline) {
+                    Text("Offline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                } else {
+                    Text("${load.roundToInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = if (isOnline) load / 100f else 0f,
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                color = if (load > 80) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+            )
+            if (isOnline) {
+                Text(
+                    text = if (freq > 0) "${(freq / 1000f).roundToInt()} MHz" else "-- MHz",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.End),
+                    fontSize = 10.sp
+                )
             }
         }
     }
@@ -400,22 +471,81 @@ fun BatteryCard(batteryInfo: BatteryInfo) {
         iconColor = if (batteryInfo.level > 20) Color(0xFF4CAF50) else Color(0xFFF44336)
     ) {
         Column {
-            Text(
-                text = "${batteryInfo.powerW?.format(2) ?: "--"}W",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.BatteryFull, null, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("${batteryInfo.level}%  ${batteryInfo.voltageV.format(2)}V", style = MaterialTheme.typography.bodySmall)
+            // Power Headline
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${batteryInfo.powerW?.format(2) ?: "--"}W",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                // Keep the isCharging status visible in the header if needed, 
+                // but usually the icon handles it. Let's just keep the header simple.
             }
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Speed, null, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("${batteryInfo.temperatureCelsius}°C", style = MaterialTheme.typography.bodySmall)
+            
+            Spacer(Modifier.height(16.dp))
+            
+            // Stats in 3x2 grid
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Level", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${batteryInfo.level}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Voltage", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${batteryInfo.voltageV.format(2)}V", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            
+            Spacer(Modifier.height(12.dp))
+            
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Temp", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${batteryInfo.temperatureCelsius}°C", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Health %", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (batteryInfo.healthPercent != null) "${batteryInfo.healthPercent}%" else "--", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            
+            Spacer(Modifier.height(12.dp))
+            
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Status", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(batteryInfo.health, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Capacity", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val capText = if (batteryInfo.maxCapacityMah != null) "${batteryInfo.maxCapacityMah} mAh" else "--"
+                    Text(capText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            
+            // Deep Sleep bar
+            if (batteryInfo.deepSleepPercent != null) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Deep Sleep", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${batteryInfo.deepSleepPercent}%", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = batteryInfo.deepSleepPercent.toFloat() / 100f,
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
             }
         }
     }
@@ -443,15 +573,17 @@ fun StorageCard(storageInfo: StorageInfo, onClick: () -> Unit) {
 }
 
 @Composable
-fun SystemInfoCard() {
+fun SystemInfoCard(hasUsagePermission: Boolean) {
     MonitorCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            InfoRow("Android ${Build.VERSION.RELEASE}", Icons.Default.Info)
             val uptime = SystemClock.elapsedRealtime()
             val hours = TimeUnit.MILLISECONDS.toHours(uptime)
             val minutes = TimeUnit.MILLISECONDS.toMinutes(uptime) % 60
             val seconds = TimeUnit.MILLISECONDS.toSeconds(uptime) % 60
-            InfoRow("Up time  %02d:%02d:%02d".format(hours, minutes, seconds), Icons.Default.Speed)
+            
+            InfoRow("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})", Icons.Default.Info)
+            InfoRow("Uptime: %02d:%02d:%02d".format(hours, minutes, seconds), Icons.Default.Speed)
+            InfoRow("Device: ${Build.MANUFACTURER} ${Build.MODEL}", Icons.Default.SdStorage)
         }
     }
 }

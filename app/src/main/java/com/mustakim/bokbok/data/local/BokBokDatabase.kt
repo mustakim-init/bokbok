@@ -16,15 +16,17 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         MessageEntity::class,
         GroupEntity::class,
         GroupMemberEntity::class,
-        GroupMessageEntity::class
+        GroupMessageEntity::class,
+        com.mustakim.bokbok.data.local.entity.GameEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class BokBokDatabase : RoomDatabase() {
     
     abstract fun messageDao(): MessageDao
     abstract fun groupDao(): GroupDao
+    abstract fun gameDao(): com.mustakim.bokbok.data.local.dao.GameDao
     
     companion object {
         @Volatile

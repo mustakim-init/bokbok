@@ -51,6 +51,7 @@ fun GameBoostScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
     viewModel: GameBoostViewModel = viewModel(),
+    gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = viewModel(),
     appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = viewModel(),
     usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = viewModel(),
     deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = viewModel()
@@ -190,7 +191,9 @@ fun GameBoostScreen(
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
-                        if (tab == GameBoostTab.APP_MANAGER) {
+                        if (tab == GameBoostTab.GAME_BOOST) {
+                            com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(viewModel = gameSpaceViewModel)
+                        } else if (tab == GameBoostTab.APP_MANAGER) {
                             AppManagerScreen(viewModel = appManagerViewModel)
                         } else if (tab == GameBoostTab.USAGE_STATS) {
                             UsageStatsScreen(viewModel = usageStatsViewModel)

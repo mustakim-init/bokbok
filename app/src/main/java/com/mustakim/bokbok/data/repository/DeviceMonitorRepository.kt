@@ -25,6 +25,7 @@ import android.app.AppOpsManager
 import android.app.usage.StorageStatsManager
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import android.os.storage.StorageManager
 import java.io.BufferedReader
 import java.io.File
@@ -89,19 +90,47 @@ class DeviceMonitorRepository(private val context: Context) {
         val loads = calculateCpuLoad()
         val coreCount = Runtime.getRuntime().availableProcessors()
         val frequencies = mutableListOf<Long>()
+        val maxFrequencies = mutableListOf<Long>()
         val onlineStatus = mutableListOf<Boolean>()
 
         for (i in 0 until coreCount) {
             frequencies.add(readFreq(i))
             onlineStatus.add(isCoreOnline(i))
+            maxFrequencies.add(readMaxFreq(i))
         }
+        
+        // Calculate Clusters (e.g. "1x 3.01GHz, 4x 2.61GHz")
+        val clusters = maxFrequencies.groupingBy { it }.eachCount()
+            .toSortedMap(compareByDescending { it })
+            .entries.joinToString(", ") { (freq, count) ->
+                val freqGhz = "%.2f".format(freq / 1000000f)
+                "${count}x ${freqGhz}GHz"
+            }
+        
+        val soc = getSoCModel()
+        val temp = getCpuTemperature()
 
         CpuInfo(
             loadPercent = loads.first,
+            coreCount = coreCount,
             coreLoads = loads.second,
             frequencies = frequencies,
-            onlineStatus = onlineStatus
+            onlineStatus = onlineStatus,
+            socName = soc,
+            temperatureCelsius = temp,
+            architecture = clusters
         )
+    }
+
+    private suspend fun readMaxFreq(core: Int): Long {
+         val path = "/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq"
+         // Try direct
+         try {
+             val content = File(path).readText().trim()
+             return content.toLongOrNull() ?: 0L
+         } catch (_: Exception) {}
+         // Try shell
+         return readShellCommand("cat $path", 300)?.trim()?.toLongOrNull() ?: 0L
     }
 
     private suspend fun calculateCpuLoad(): Pair<Float, List<Float>> {
@@ -381,7 +410,7 @@ class DeviceMonitorRepository(private val context: Context) {
         val healthInt = intent?.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_UNKNOWN) ?: BatteryManager.BATTERY_HEALTH_UNKNOWN
         
         val health = when (healthInt) {
-            BatteryManager.BATTERY_HEALTH_GOOD -> "Health: Good"
+            BatteryManager.BATTERY_HEALTH_GOOD -> "Good"
             BatteryManager.BATTERY_HEALTH_OVERHEAT -> "Overheat"
             BatteryManager.BATTERY_HEALTH_DEAD -> "Dead"
             BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "Over Voltage"
@@ -391,12 +420,59 @@ class DeviceMonitorRepository(private val context: Context) {
         }
 
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        // Microamps to milliamps. Note: some devices use microamps, some milliamps.
         val currentMicro = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentMa = if (currentMicro > 10000 || currentMicro < -10000) currentMicro / 1000 else currentMicro
-        
-        // Power calculation W = V * I
         val powerW = (voltage * (currentMa.toFloat() / 1000f))
+
+        // --- COMPREHENSIVE HEALTH % LOGIC ---
+        var healthPercent: Int? = null
+
+        // 1. Try Capacity Ratio (Most accurate if available)
+        var designCap = getBatteryDesignCapacity()
+        var maxCap = getBatteryMaxCapacity()
+        if (designCap != null && maxCap != null && designCap > 0) {
+            healthPercent = (maxCap * 100 / designCap).coerceAtMost(100)
+        }
+        
+        // 2. Try Direct Sysfs Health Percentage
+        if (healthPercent == null || healthPercent <= 0) {
+            healthPercent = getBatteryHealthDirect()
+        }
+        
+        // 3. Try Dumpsys Battery Parsing (Essential for ROMs like FuntouchOS/Vivo)
+        if (healthPercent == null || healthPercent <= 0) {
+            healthPercent = getBatteryHealthFromDumpsys()
+        }
+
+        // 4. Try Manufacturer Specific System Properties
+        if (healthPercent == null || healthPercent <= 0) {
+            healthPercent = getBatteryHealthFromSystemProps()
+        }
+        
+        // 5. THE "OTHER WAY": Calculated from Estimated vs Profile Design
+        // If system blocks reading sysfs, it often still tracks estimated capacity in batterystats.
+        if (healthPercent == null || healthPercent <= 0) {
+            val estimatedCap = getEstimatedCapacity()
+            if (estimatedCap != null && estimatedCap > 0) {
+                 // Try getting design capacity from PowerProfile (Internal API)
+                 if (designCap == null || designCap <= 0) {
+                     designCap = getDesignCapacityFromPowerProfile()
+                 }
+                 
+                 // If we have both, calculate
+                 if (designCap != null && designCap > 0) {
+                     healthPercent = (estimatedCap * 100 / designCap).coerceAtMost(100)
+                     maxCap = estimatedCap // Update maxCap so UI shows the estimated value
+                 }
+            }
+        }
+        
+        // Final validation
+        if (healthPercent != null && (healthPercent <= 0 || healthPercent > 100)) {
+            healthPercent = null
+        }
+        
+        val deepSleep = getDeepSleepPercent()
 
         return BatteryInfo(
             level = batteryPct,
@@ -405,7 +481,11 @@ class DeviceMonitorRepository(private val context: Context) {
             currentMa = currentMa,
             voltageV = voltage,
             health = health,
-            powerW = powerW
+            healthPercent = healthPercent,
+            powerW = powerW,
+            designCapacityMah = designCap,
+            maxCapacityMah = maxCap,
+            deepSleepPercent = deepSleep
         )
     }
 
@@ -535,16 +615,49 @@ class DeviceMonitorRepository(private val context: Context) {
             var model = readShellCommand("getprop ro.product.board")?.trim()
             if (model.isNullOrEmpty()) model = readShellCommand("getprop ro.board.platform")?.trim()
             
-            var renderer = readShellCommand("getprop ro.hardware.egl")?.trim()
-            if (renderer.isNullOrEmpty() || renderer == "null") {
-                renderer = readShellCommand("getprop vendor.display.gpu_level")?.trim()
+            // Parse GPU info from SurfaceFlinger - most complete source
+            // Format: "GLES: Qualcomm, Adreno (TM) 735, OpenGL ES 3.2 V@676.0 ..."
+            var renderer: String? = null
+            var apiVersion: String? = null
+            
+            val sfOutput = readShellCommand("dumpsys SurfaceFlinger | grep \"GLES:\"")
+            if (!sfOutput.isNullOrEmpty() && sfOutput.contains("GLES:")) {
+                val glesLine = sfOutput.substringAfter("GLES:").trim()
+                val parts = glesLine.split(",").map { it.trim() }
+                
+                // parts[0] = vendor (Qualcomm), parts[1] = renderer (Adreno 735), parts[2] = version
+                if (parts.size >= 2) {
+                    renderer = parts[1]
+                        .replace("(TM)", "")
+                        .replace("(R)", "")
+                        .trim()
+                }
+                if (parts.size >= 3) {
+                    // Extract just "OpenGL ES 3.2" from "OpenGL ES 3.2 V@676..."
+                    val versionPart = parts[2]
+                    apiVersion = versionPart.substringBefore(" V@").substringBefore(" (").trim()
+                }
             }
             
-            val apiVersion = readShellCommand("getprop ro.opengles.version")?.trim()
-            val vendor = if (renderer?.lowercase()?.contains("adreno") == true) "Qualcomm" else null
+            // Fallbacks 
+            if (renderer.isNullOrEmpty()) {
+                renderer = readShellCommand("getprop ro.hardware.egl")?.trim()
+            }
+            if (apiVersion.isNullOrEmpty()) {
+                val glVersion = readShellCommand("getprop ro.opengles.version")?.trim()?.toIntOrNull()
+                if (glVersion != null) {
+                    val major = (glVersion shr 16) and 0xFF
+                    val minor = glVersion and 0xFF
+                    apiVersion = "OpenGL ES $major.$minor"
+                }
+            }
+            
+            val vendor = if (renderer?.lowercase()?.contains("adreno") == true) "Qualcomm" 
+                         else if (renderer?.lowercase()?.contains("mali") == true) "ARM" 
+                         else null
             
             cachedGpuStaticInfo = GpuStaticInfo(
-                renderer = renderer ?: "Qualcomm Adreno",
+                renderer = renderer ?: "GPU",
                 model = model,
                 vendor = vendor,
                 apiVersion = apiVersion
@@ -555,6 +668,7 @@ class DeviceMonitorRepository(private val context: Context) {
         var gpuTemp: Float? = null
         val tempPaths = listOf(
             "/sys/class/kgsl/kgsl-3d0/temp",
+            "/sys/class/kgsl/kgsl-3d0/temperature",
             "/sys/class/thermal/thermal_zone12/temp",
             "/sys/class/thermal/thermal_zone20/temp",
             "/sys/class/thermal/thermal_zone22/temp"
@@ -596,6 +710,9 @@ class DeviceMonitorRepository(private val context: Context) {
             }
         }
 
+        val pwrLevel = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/cur_pwrlevel")?.trim()?.toIntOrNull()
+        val maxPwrLevel = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull()
+
         val static = cachedGpuStaticInfo!!
         GpuInfo(
             loadPercent = load,
@@ -605,8 +722,241 @@ class DeviceMonitorRepository(private val context: Context) {
             vendor = static.vendor,
             apiVersion = static.apiVersion,
             temperatureCelsius = gpuTemp,
+            powerLevel = pwrLevel,
+            maxPowerLevel = maxPwrLevel,
             available = true
         )
+    }
+
+    private suspend fun getCpuTemperature(): Float? {
+        val tempPaths = listOf(
+            "/sys/class/thermal/thermal_zone0/temp",
+            "/sys/class/thermal/thermal_zone1/temp",
+            "/sys/devices/virtual/thermal/thermal_zone0/temp"
+        )
+        for (path in tempPaths) {
+            try {
+                val content = File(path).readText().trim()
+                val t = content.toFloatOrNull()
+                if (t != null) {
+                    val temp = if (t > 1000) t / 1000f else t
+                    if (temp in 10f..100f) return temp
+                }
+            } catch (_: Exception) {}
+            
+            val shellContent = readShellCommand("cat $path", 300)?.trim()
+            val st = shellContent?.toFloatOrNull()
+            if (st != null) {
+                val temp = if (st > 1000) st / 1000f else st
+                if (temp in 10f..100f) return temp
+            }
+        }
+        return null
+    }
+
+    private suspend fun getSoCModel(): String? = withContext(Dispatchers.IO) {
+        val model = readShellCommand("getprop ro.soc.model")?.trim() ?: ""
+        val hardware = readShellCommand("getprop ro.hardware")?.trim() ?: ""
+        val board = readShellCommand("getprop ro.board.platform")?.trim() ?: ""
+        
+        // Map Snapdragon model numbers (SMxxxx) to marketing names - check MOST SPECIFIC first
+        val modelMappings = mapOf(
+            "SM8635" to "Snapdragon 8s Gen 3",
+            "SM8650" to "Snapdragon 8 Gen 3",
+            "SM8550" to "Snapdragon 8 Gen 2",
+            "SM8475" to "Snapdragon 8+ Gen 1",
+            "SM8450" to "Snapdragon 8 Gen 1",
+            "SM8350" to "Snapdragon 888",
+            "SM8250" to "Snapdragon 865",
+            "SM7675" to "Snapdragon 7+ Gen 3",
+            "SM7550" to "Snapdragon 7 Gen 3",
+            "SM7475" to "Snapdragon 7+ Gen 2",
+            "SM7450" to "Snapdragon 7 Gen 1",
+            "SM6450" to "Snapdragon 6 Gen 1"
+        )
+        
+        // Priority 1: Check exact model number (most accurate)
+        for ((key, value) in modelMappings) {
+            if (model.contains(key, ignoreCase = true)) return@withContext value
+        }
+        
+        // Map board platforms (codenames) if model not found
+        val boardMappings = mapOf(
+            "pineapple" to "Snapdragon 8 Gen 3",
+            "kalama" to "Snapdragon 8 Gen 2",
+            "taro" to "Snapdragon 8 Gen 1",
+            "lahaina" to "Snapdragon 888",
+            "kona" to "Snapdragon 865"
+        )
+        
+        // Priority 2: Check board platform codename
+        for ((key, value) in boardMappings) {
+            if (board.equals(key, ignoreCase = true)) return@withContext value
+        }
+        
+        // Priority 3: Return raw values if no mapping found
+        if (model.isNotEmpty()) return@withContext model
+        if (hardware.isNotEmpty()) return@withContext hardware
+        if (board.isNotEmpty()) return@withContext board
+        
+        return@withContext null
+    }
+
+    private fun getDeepSleepPercent(): Int {
+        val uptime = SystemClock.uptimeMillis()
+        val elapsed = SystemClock.elapsedRealtime()
+        if (elapsed == 0L) return 0
+        val sleep = elapsed - uptime
+        return (sleep * 100 / elapsed).toInt()
+    }
+
+
+    private suspend fun getBatteryDesignCapacity(): Int? {
+        val paths = listOf(
+            "/sys/class/power_supply/battery/charge_full_design",
+            "/sys/class/power_supply/battery/design_capacity",
+            "/sys/class/power_supply/bms/charge_full_design",
+            "/sys/class/power_supply/bms/design_capacity",
+            "/sys/class/power_supply/bq27xxx-battery/charge_full_design",
+            "/sys/class/power_supply/battery/uevent", // Check uevent file
+            "/sys/class/power_supply/bms/uevent"
+        )
+        for (path in paths) {
+            val content = readShellCommand("cat $path", 300)?.trim() ?: continue
+            
+            // If it's a uevent file, parse it
+            if (path.endsWith("uevent")) {
+                val lines = content.split("\n")
+                for (line in lines) {
+                    if (line.contains("POWER_SUPPLY_CHARGE_FULL_DESIGN=")) {
+                        val cap = line.substringAfter("=").toIntOrNull()
+                        if (cap != null && cap > 0) return normalizeCapacity(cap)
+                    }
+                }
+            } else {
+                val cap = content.toIntOrNull()
+                if (cap != null && cap > 0) return normalizeCapacity(cap)
+            }
+        }
+        return null
+    }
+
+    private suspend fun getBatteryMaxCapacity(): Int? {
+        val paths = listOf(
+            "/sys/class/power_supply/battery/charge_full",
+            "/sys/class/power_supply/battery/capacity_full",
+            "/sys/class/power_supply/bms/charge_full",
+            "/sys/class/power_supply/bms/capacity_full",
+            "/sys/class/power_supply/bq27xxx-battery/charge_full",
+            "/sys/class/power_supply/battery/uevent",
+            "/sys/class/power_supply/bms/uevent"
+        )
+        for (path in paths) {
+            val content = readShellCommand("cat $path", 300)?.trim() ?: continue
+            
+            if (path.endsWith("uevent")) {
+                val lines = content.split("\n")
+                for (line in lines) {
+                    if (line.contains("POWER_SUPPLY_CHARGE_FULL=")) {
+                        val cap = line.substringAfter("=").toIntOrNull()
+                        if (cap != null && cap > 0) return normalizeCapacity(cap)
+                    }
+                }
+            } else {
+                val cap = content.toIntOrNull()
+                if (cap != null && cap > 0) return normalizeCapacity(cap)
+            }
+        }
+        return null
+    }
+
+    private fun normalizeCapacity(cap: Int): Int {
+        // Assume uAh if > 100,000, else mAh
+        return if (cap > 100000) cap / 1000 else cap
+    }
+    
+    // Alternative: Get direct health percentage from sysfs
+    private suspend fun getBatteryHealthDirect(): Int? {
+        val paths = listOf(
+            "/sys/class/power_supply/battery/battery_health",
+            "/sys/class/power_supply/bms/battery_health",
+            "/sys/class/power_supply/battery/capacity_level",
+            "/sys/class/power_supply/battery/soh" // State of Health
+        )
+        for (path in paths) {
+            val content = readShellCommand("cat $path", 300)?.trim()
+            val pct = content?.toIntOrNull()
+            if (pct != null && pct in 1..100) {
+                return pct
+            }
+        }
+        return null
+    }
+
+    private suspend fun getBatteryHealthFromDumpsys(): Int? {
+        val output = readShellCommand("dumpsys battery", 500) ?: return null
+        
+        // 1. Look for custom health condition fields (Common in Vivo/OPPO)
+        // Example: "  health condition: 98"
+        val conditionLine = output.lines().find { it.contains("condition", ignoreCase = true) }
+        if (conditionLine != null) {
+            val pct = conditionLine.substringAfter(":").trim().filter { it.isDigit() }.toIntOrNull()
+            if (pct != null && pct in 1..100) return pct
+        }
+
+        // 2. Look for "Charge Full" ratio in dumpsys if available
+        // Example: "  Charge Full: 4500000" and "  Charge Full Design: 5000000"
+        val fullLine = output.lines().find { it.contains("Charge Full", ignoreCase = true) && !it.contains("Design") }
+        val designLine = output.lines().find { it.contains("Charge Full Design", ignoreCase = true) }
+        if (fullLine != null && designLine != null) {
+            val full = fullLine.substringAfter(":").trim().filter { it.isDigit() }.toLongOrNull()
+            val design = designLine.substringAfter(":").trim().filter { it.isDigit() }.toLongOrNull()
+            if (full != null && design != null && design > 0) {
+                return (full * 100 / design).toInt().coerceIn(1, 100)
+            }
+        }
+
+        return null
+    }
+
+    private suspend fun getBatteryHealthFromSystemProps(): Int? {
+        val props = listOf(
+            "persist.sys.vivo.battery_health",
+            "persist.vendor.vivo.battery_health",
+            "sys.battery.health",
+            "persist.sys.battery.health"
+        )
+        for (prop in props) {
+            val value = readShellCommand("getprop $prop")?.trim()?.toIntOrNull()
+            if (value != null && value in 1..100) return value
+        }
+        return null
+    }
+
+    private suspend fun getEstimatedCapacity(): Int? {
+        // Run dumpsys batterystats and look for "Estimated battery capacity: xxxx mAh"
+        val output = readShellCommand("dumpsys batterystats | grep \"Estimated battery capacity\"", 2000) ?: return null
+        
+        // Expected format: "  Estimated battery capacity: 4500 mAh"
+        val match = Regex("Estimated battery capacity:\\s*(\\d+)").find(output)
+        return match?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    private fun getDesignCapacityFromPowerProfile(): Int? {
+        return try {
+            val powerProfileClass = Class.forName("com.android.internal.os.PowerProfile")
+            val constructor = powerProfileClass.getConstructor(Context::class.java)
+            val powerProfile = constructor.newInstance(context)
+            
+            // "battery.capacity" constant value is "battery.capacity"
+            val getAveragePower = powerProfileClass.getMethod("getAveragePower", String::class.java)
+            val capacity = getAveragePower.invoke(powerProfile, "battery.capacity") as Double
+            
+            capacity.toInt()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 
     suspend fun getRunningProcesses(): List<ProcessInfo> = withContext(Dispatchers.IO) {

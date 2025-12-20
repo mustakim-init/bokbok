@@ -100,7 +100,7 @@ fun LoungeScreen(
         if (loungeViewModel.shouldShowSkeleton) {
             launch {
                 android.util.Log.d("LoungeScreen", "Starting skeleton timer")
-                delay(1500) // Reduced from 2000ms
+                delay(1000) // Reduced from 2000ms
                 loungeViewModel.markMinTimeElapsed()
                 android.util.Log.d("LoungeScreen", "Skeleton timer completed")
             }

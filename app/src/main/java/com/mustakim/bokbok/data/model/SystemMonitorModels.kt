@@ -19,9 +19,34 @@ data class DeviceMonitorUiState(
 @Immutable
 data class CpuInfo(
     val loadPercent: Float = 0f,
+    val coreCount: Int = 0,
     val coreLoads: List<Float> = emptyList(),
     val frequencies: List<Long> = emptyList(),  // Per-core frequencies in kHz
-    val onlineStatus: List<Boolean> = emptyList()
+    val onlineStatus: List<Boolean> = emptyList(),
+    val socName: String? = null,
+    val architecture: String? = null,
+    val temperatureCelsius: Float? = null,
+    val clusters: List<CpuClusterInfo> = emptyList()
+)
+
+@Immutable
+data class CpuClusterInfo(
+    val id: Int,
+    val coreRange: IntRange,
+    val governor: String?,
+    val currentFreq: Long,
+    val minFreq: Long,
+    val maxFreq: Long
+)
+
+@Immutable
+data class CpuCoreInfo(
+    val id: Int,
+    val loadRatio: Float,
+    val currentFreq: Long,
+    val isOnline: Boolean,
+    val minFreq: Long = 0,
+    val maxFreq: Long = 0
 )
 
 @Immutable
@@ -41,10 +66,14 @@ data class BatteryInfo(
     val level: Int = 0,
     val temperatureCelsius: Float = 0f,
     val isCharging: Boolean = false,
-    val currentMa: Int? = null,  // Current draw in mA (if available)
+    val currentMa: Int? = null,
     val voltageV: Float = 0f,
     val health: String = "Unknown",
-    val powerW: Float? = null // Power in Watts (Voltage * Current)
+    val healthPercent: Int? = null,
+    val powerW: Float? = null,
+    val designCapacityMah: Int? = null,
+    val maxCapacityMah: Int? = null,
+    val deepSleepPercent: Int? = null
 )
 
 @Immutable
@@ -68,14 +97,16 @@ data class StorageBreakdown(
 
 @Immutable
 data class GpuInfo(
-    val loadPercent: Int? = null,      // null if unavailable
-    val frequencyMhz: Int? = null,     // null if unavailable
+    val loadPercent: Int? = null,
+    val frequencyMhz: Int? = null,
     val renderer: String? = null,
     val vendor: String? = null,
     val apiVersion: String? = null,
     val model: String? = null,
     val clockSpeedMhz: Int? = null,
     val temperatureCelsius: Float? = null,
+    val powerLevel: Int? = null,
+    val maxPowerLevel: Int? = null,
     val available: Boolean = false
 )
 

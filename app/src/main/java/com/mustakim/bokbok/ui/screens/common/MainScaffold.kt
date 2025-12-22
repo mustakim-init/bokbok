@@ -68,13 +68,16 @@ fun MainScaffold(
     }
     val (currentRoom, isMinimized, isMuted) = roomState
 
-    // Scope ViewModel to the current room ID to prevent memory leaks
-    val voiceRoomViewModel: VoiceRoomViewModel = hiltViewModel(
-        key = currentRoom?.let { "room_${it.id}" }
-    )
+    // ✅ OPTIMIZED: Only instantiate VoiceRoomViewModel if we actually have a room
+    // This prevents heavy WebRTC/Presence observation during app startup
+    val voiceRoomViewModel: VoiceRoomViewModel? = if (currentRoom != null) {
+        hiltViewModel(key = "room_${currentRoom.id}")
+    } else {
+        null
+    }
 
-    LaunchedEffect(isMuted) {
-        if (currentRoom != null) {
+    LaunchedEffect(isMuted, voiceRoomViewModel) {
+        if (currentRoom != null && voiceRoomViewModel != null) {
             voiceRoomViewModel.setMutedFromGlobal(isMuted)
         }
     }
@@ -257,7 +260,7 @@ fun MainScaffold(
                                 onToggleMute = { RoomStateManager.toggleMute() },
                                 onLeaveRoom = {
                                     // 1) Stop WebRTC + RealTimeDB presence via ViewModel
-                                    voiceRoomViewModel.leaveRoom()
+                                    voiceRoomViewModel?.leaveRoom()
 
                                     // 2) Clear local room state only
                                     RoomStateManager.leaveRoom()
@@ -299,18 +302,20 @@ fun MainScaffold(
                     )
                 )
             ) {
-                VoiceRoomScreen(
-                    roomId = currentRoom.id,
-                    onMinimize = { isMuted ->
-                        RoomStateManager.minimizeRoom(isMuted)
-                    },
-                    onLeaveRoom = {
-                        // Just clear local room state
-                        RoomStateManager.leaveRoom()
-                    },
-                    viewModel = voiceRoomViewModel
+                if (voiceRoomViewModel != null) {
+                    VoiceRoomScreen(
+                        roomId = currentRoom.id,
+                        onMinimize = { isMuted ->
+                            RoomStateManager.minimizeRoom(isMuted)
+                        },
+                        onLeaveRoom = {
+                            // Just clear local room state
+                            RoomStateManager.leaveRoom()
+                        },
+                        viewModel = voiceRoomViewModel
 
-                )
+                    )
+                }
             }
         }
     }

@@ -50,16 +50,16 @@ import kotlinx.coroutines.launch
 fun GameBoostScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
-    viewModel: GameBoostViewModel = hiltViewModel(),
-    gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(),
-    appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(),
-    usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(),
-    deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel()
+    viewModel: GameBoostViewModel = hiltViewModel()
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val tabs = remember { viewModel.tabs }
     val pagerState = rememberPagerState(initialPage = selectedTab.ordinal) { tabs.size }
     val scope = rememberCoroutineScope()
+
+    // Smart Device Monitor state: only active when on the tab
+    // We instantiate it once at the top level lazily to keep it alive across tab switches
+    val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel()
 
     // Sync Pager state with ViewModel state
     LaunchedEffect(pagerState.currentPage) {
@@ -67,8 +67,6 @@ fun GameBoostScreen(
         viewModel.onTabSelected(pagerState.currentPage)
         
         // Smart Heartbeat: Only monitor when the user is actually looking at the Monitor tab.
-        // For other tabs, we do NOTHING (to prevent the reloads you saw), but for 
-        // Device Monitor, we toggle the start/stop to save battery.
         if (selectedTabEnum == GameBoostTab.DEVICE_MONITOR) {
             deviceMonitorViewModel.startMonitoring()
         } else {
@@ -159,10 +157,10 @@ fun GameBoostScreen(
                             title = tab.title,
                             selectedIndex = pagerState.currentPage,
                             unselectedColor = MaterialTheme.colorScheme.surfaceContainerHighest, // Tonal elevation
-                            onClick = { 
-                                scope.launch { 
-                                    pagerState.animateScrollToPage(index) 
-                                } 
+                            onClick = {
+                                scope.launch {
+                                    pagerState.animateScrollToPage(index)
+                                }
                             }
                         ) {
                             Text(
@@ -187,35 +185,53 @@ fun GameBoostScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = 16.dp),
-                        beyondViewportPageCount = 2, // Keep all tabs in memory - critical for persistence
+                        beyondViewportPageCount = 1, // Reduced to save memory
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
-                        if (tab == GameBoostTab.GAME_BOOST) {
-                            com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(viewModel = gameSpaceViewModel)
-                        } else if (tab == GameBoostTab.APP_MANAGER) {
-                            AppManagerScreen(viewModel = appManagerViewModel)
-                        } else if (tab == GameBoostTab.USAGE_STATS) {
-                            UsageStatsScreen(viewModel = usageStatsViewModel)
-                        } else if (tab == GameBoostTab.DEVICE_MONITOR) {
-                            DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = tab.title,
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Feature Coming Soon",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                        when (tab) {
+                            GameBoostTab.GAME_BOOST -> {
+                                val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel =
+                                    hiltViewModel()
+                                com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(
+                                    viewModel = gameSpaceViewModel
+                                )
+                            }
+
+                            GameBoostTab.APP_MANAGER -> {
+                                val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel =
+                                    hiltViewModel()
+                                AppManagerScreen(viewModel = appManagerViewModel)
+                            }
+
+                            GameBoostTab.USAGE_STATS -> {
+                                val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel =
+                                    hiltViewModel()
+                                UsageStatsScreen(viewModel = usageStatsViewModel)
+                            }
+
+                            GameBoostTab.DEVICE_MONITOR -> {
+                                DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
+                            }
+
+                            else -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = tab.title,
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Feature Coming Soon",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }

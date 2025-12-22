@@ -53,16 +53,8 @@ class MainActivity : ComponentActivity() {
         // Initialize with starting intent
         _intentState.value = intent
 
-        // Request battery optimization exemption to prevent background kills(Gonna remove it in the future)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            val pm = getSystemService(android.os.PowerManager::class.java)
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = "package:$packageName".toUri()
-                }
-                startActivity(intent)
-            }
-        }
+        // Battery optimization request moved to LaunchedEffect (Deferred Stage)
+        // to prevent interrupting the critical cold start path.
 
         setContent {
             // ✅ Hoist both ViewModels using Hilt
@@ -105,15 +97,14 @@ class MainActivity : ComponentActivity() {
                     val currentIntent by _intentState
                     
                     androidx.compose.runtime.LaunchedEffect(currentIntent) {
+                        // Task 1: Handle notification intent
                         val intent = currentIntent
                         if (intent?.getBooleanExtra("navigate_to_room", false) == true) {
-                            // Using injected repositories
-                            
+                            // ... (notification handling) ...
                             val roomId = intent.getStringExtra("roomId")
                             val notificationDocId = intent.getStringExtra("notificationDocId")
                             val isAcceptAction = intent.getBooleanExtra("action_accept", false)
 
-                            // Delete notification if this was an "Accept" action
                             if (isAcceptAction && notificationDocId != null) {
                                 launch(kotlinx.coroutines.Dispatchers.IO) {
                                     val userId = userRepository.getCurrentUserId()
@@ -127,8 +118,25 @@ class MainActivity : ComponentActivity() {
                                 val result = roomRepository.getRoom(roomId)
                                 result.onSuccess { room ->
                                     com.mustakim.bokbok.state.RoomStateManager.joinRoom(room)
-                                    // Clear the extra so we don't rejoin on rotation
                                     intent.removeExtra("navigate_to_room")
+                                }
+                            }
+                        }
+
+                        // Task 2: Defer intrusive system requests (Battery Optimization)
+                        // Wait for UI to stabilize (Stage 2)
+                        launch {
+                            com.mustakim.bokbok.startup.StartupManager.currentStage.collect { stage ->
+                                if (stage == com.mustakim.bokbok.startup.StartupManager.Stage.FULLY_INITIALIZED) {
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                        val pm = getSystemService(android.os.PowerManager::class.java)
+                                        if (pm != null && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                                            val optIntent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                                data = "package:$packageName".toUri()
+                                            }
+                                            startActivity(optIntent)
+                                        }
+                                    }
                                 }
                             }
                         }

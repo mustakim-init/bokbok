@@ -58,9 +58,9 @@ object StartupManager {
         Log.d(TAG, "Stage 1 complete: Data Ready")
         _currentStage.value = Stage.DATA_READY
         
-        // Trigger Stage 2 initialization after a short delay (let UI stabilize)
+        // Trigger Stage 2 initialization after a delay (let UI fully stabilize)
         startupScope.launch {
-            delay(300) // Let first frame fully render
+            delay(1000) // Increased from 300ms to allow all enter animations to finish
             executeStage2Tasks()
         }
     }

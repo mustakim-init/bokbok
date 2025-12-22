@@ -70,6 +70,9 @@ class DeviceMonitorRepository @Inject constructor(
         val apiVersion: String?
     )
     private var cachedGpuStaticInfo: GpuStaticInfo? = null
+    private var cachedSoCModel: String? = null
+    private var cachedMaxPowerLevel: Int? = null
+    private var cachedCpuMaxFreqs = mutableMapOf<Int, Long>()
 
     // Reflection cache for Shizuku
     private object ShizukuReflection {
@@ -112,7 +115,11 @@ class DeviceMonitorRepository @Inject constructor(
                 "${count}x ${freqGhz}GHz"
             }
         
-        val soc = getSoCModel()
+        val soc = if (cachedSoCModel != null) cachedSoCModel else {
+            val s = getSoCModel()
+            cachedSoCModel = s
+            s
+        }
         val temp = getCpuTemperature()
 
         CpuInfo(
@@ -128,14 +135,18 @@ class DeviceMonitorRepository @Inject constructor(
     }
 
     private suspend fun readMaxFreq(core: Int): Long {
+         cachedCpuMaxFreqs[core]?.let { return it }
          val path = "/sys/devices/system/cpu/cpu$core/cpufreq/cpuinfo_max_freq"
          // Try direct
-         try {
+         val freq = try {
              val content = File(path).readText().trim()
-             return content.toLongOrNull() ?: 0L
-         } catch (_: Exception) {}
-         // Try shell
-         return readShellCommand("cat $path", 300)?.trim()?.toLongOrNull() ?: 0L
+             content.toLongOrNull() ?: 0L
+         } catch (_: Exception) {
+             // Try shell
+             readShellCommand("cat $path", 300)?.trim()?.toLongOrNull() ?: 0L
+         }
+         if (freq > 0) cachedCpuMaxFreqs[core] = freq
+         return freq
     }
 
     private suspend fun calculateCpuLoad(): Pair<Float, List<Float>> {
@@ -716,7 +727,11 @@ class DeviceMonitorRepository @Inject constructor(
         }
 
         val pwrLevel = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/cur_pwrlevel")?.trim()?.toIntOrNull()
-        val maxPwrLevel = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull()
+        val maxPwrLevel = if (cachedMaxPowerLevel != null) cachedMaxPowerLevel else {
+            val m = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull()
+            cachedMaxPowerLevel = m
+            m
+        }
 
         val static = cachedGpuStaticInfo!!
         GpuInfo(
@@ -733,19 +748,26 @@ class DeviceMonitorRepository @Inject constructor(
         )
     }
 
+    private var workingCpuTempPath: String? = null
+
     private suspend fun getCpuTemperature(): Float? {
         val tempPaths = listOf(
             "/sys/class/thermal/thermal_zone0/temp",
             "/sys/class/thermal/thermal_zone1/temp",
             "/sys/devices/virtual/thermal/thermal_zone0/temp"
         )
-        for (path in tempPaths) {
+        val pathsToTry = if (workingCpuTempPath != null) listOf(workingCpuTempPath!!) + tempPaths else tempPaths
+
+        for (path in pathsToTry) {
             try {
                 val content = File(path).readText().trim()
                 val t = content.toFloatOrNull()
                 if (t != null) {
                     val temp = if (t > 1000) t / 1000f else t
-                    if (temp in 10f..100f) return temp
+                    if (temp in 10f..100f) {
+                        workingCpuTempPath = path
+                        return temp
+                    }
                 }
             } catch (_: Exception) {}
             
@@ -753,7 +775,10 @@ class DeviceMonitorRepository @Inject constructor(
             val st = shellContent?.toFloatOrNull()
             if (st != null) {
                 val temp = if (st > 1000) st / 1000f else st
-                if (temp in 10f..100f) return temp
+                if (temp in 10f..100f) {
+                    workingCpuTempPath = path
+                    return temp
+                }
             }
         }
         return null

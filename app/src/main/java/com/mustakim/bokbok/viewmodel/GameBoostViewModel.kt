@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
 enum class GameBoostTab(val title: String) {
     APP_MANAGER("App Manager"),
@@ -17,7 +19,10 @@ enum class GameBoostTab(val title: String) {
     }
 }
 
-class GameBoostViewModel : ViewModel() {
+
+
+@HiltViewModel
+class GameBoostViewModel @Inject constructor() : ViewModel() {
 
     private val _selectedTab = MutableStateFlow(GameBoostTab.GAME_BOOST)
     val selectedTab: StateFlow<GameBoostTab> = _selectedTab.asStateFlow()

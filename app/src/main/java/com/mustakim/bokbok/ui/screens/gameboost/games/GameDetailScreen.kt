@@ -45,7 +45,7 @@ fun GameDetailScreen(
     }
     
     var infoTweak by remember { mutableStateOf<TweakDef?>(null) }
-    val tweaksByCategory = remember { TweakCatalog.allTweaks.groupBy { it.category } }
+    val tweaksByCategory = remember { TweakCatalog.getFilteredTweaks().groupBy { it.category } }
     val launchState by viewModel.launchState.collectAsState()
 
     Scaffold(
@@ -361,8 +361,18 @@ fun TweakControl(
                     )
                 }
                 
-                IconButton(onClick = onInfoClick) {
-                    Icon(Icons.Outlined.Info, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (tweak.warning != null) {
+                        Icon(
+                            Icons.Default.Warning, 
+                            null, 
+                            modifier = Modifier.size(18.dp), 
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    IconButton(onClick = onInfoClick) {
+                        Icon(Icons.Outlined.Info, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
 
                 if (tweak.type == TweakType.TOGGLE) {
@@ -422,6 +432,35 @@ fun TweakInfoDialog(tweak: TweakDef, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text(tweak.description)
+                
+                tweak.warning?.let { warning ->
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = warning,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
                 if (tweak.requiresAdb) {
                     Spacer(Modifier.height(12.dp))
                     Text("⚠️ Requires Shizuku permission.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)

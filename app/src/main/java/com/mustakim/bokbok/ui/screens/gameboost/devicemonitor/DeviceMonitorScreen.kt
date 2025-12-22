@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.mustakim.bokbok.data.model.BatteryInfo
 import com.mustakim.bokbok.data.model.CpuInfo
 import com.mustakim.bokbok.data.model.GpuInfo
@@ -73,7 +73,7 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceMonitorScreen(
-    viewModel: DeviceMonitorViewModel = viewModel()
+    viewModel: DeviceMonitorViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current

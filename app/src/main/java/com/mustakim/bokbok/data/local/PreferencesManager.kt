@@ -11,10 +11,16 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.mustakim.bokbok.ui.theme.AppTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
+ 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "bokbok_preferences")
-
-class PreferencesManager(private val context: Context) {
+ 
+@Singleton
+class PreferencesManager @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     companion object {
         private val THEME_KEY = stringPreferencesKey("selected_theme")

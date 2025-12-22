@@ -1,19 +1,19 @@
 package com.mustakim.bokbok.viewmodel
 
 import android.app.Activity
-import android.app.Application
 import android.content.Intent
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.AuthRepository
-import kotlinx.coroutines.Dispatchers
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 import kotlinx.coroutines.withContext
 import com.google.firebase.auth.FirebaseUser
-import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.PresenceRepository
 
 
@@ -32,9 +32,11 @@ data class AuthUiState(
     val successMessage: String? = null
 )
 
-class AuthViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = AuthRepository(application.applicationContext)
-    private val presenceRepository = PresenceRepository()
+@HiltViewModel
+class AuthViewModel @Inject constructor(
+    private val repository: AuthRepository,
+    private val presenceRepository: PresenceRepository
+) : ViewModel() {
     private val _uiState = MutableStateFlow(AuthUiState())
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
 
@@ -299,8 +301,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signOut() {
-        // Mark user offline in RTDB
-        PresenceRepository().setUserOffline()
+        // Mark user offline in RTDB using injected repository
+        presenceRepository.setUserOffline()
         repository.signOut()
         _uiState.value = _uiState.value.copy(
             isLoggedIn = false,

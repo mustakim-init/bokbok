@@ -1,14 +1,8 @@
 package com.mustakim.bokbok.ui.screens.chats
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
@@ -49,16 +43,10 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
-import androidx.compose.material3.ToggleFloatingActionButton
-import androidx.compose.material3.ToggleFloatingActionButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,6 +58,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -84,7 +73,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -95,53 +83,37 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
-import com.mustakim.bokbok.data.repository.ChatRepository
-import com.mustakim.bokbok.data.repository.FriendsRepository
-import com.mustakim.bokbok.data.repository.HybridChatRepository
-import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
-import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.viewmodel.ChatUiModel
 import com.mustakim.bokbok.viewmodel.FriendsUiState
 import com.mustakim.bokbok.viewmodel.FriendsViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
+import com.mustakim.bokbok.state.RoomStateManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
-import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ChatsScreen(
-    friendsRepository: FriendsRepository,
-    chatRepository: ChatRepository,
-    hybridChatRepository: HybridChatRepository,
-    hybridGroupChatRepository: HybridGroupChatRepository,
-    isMinimized: Boolean = RoomStateManager.isMinimized.value,
-    onFriendClick: (String) -> Unit,
     navController: NavHostController,
-    userViewModel: UserViewModel
+    userViewModel: UserViewModel,
+    onFriendClick: (String) -> Unit
 ) {
-    val viewModel: FriendsViewModel = viewModel(
-        factory = FriendsViewModel.Factory(
-            friendsRepository,
-            chatRepository,
-            hybridChatRepository,
-            hybridGroupChatRepository
-        )
-    )
+    val viewModel: FriendsViewModel = hiltViewModel()
 
     val chatList by viewModel.chats.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
@@ -155,6 +127,7 @@ fun ChatsScreen(
 
     var selectedChatForMenu by remember { mutableStateOf<ChatUiModel?>(null) }
     var isMuted by remember { mutableStateOf(false) }
+    val isMinimized by RoomStateManager.isMinimized
 
     // New state: store the anchor position (in window px) for the dropdown menu
     var menuAnchor by remember { mutableStateOf(IntOffset.Zero) }

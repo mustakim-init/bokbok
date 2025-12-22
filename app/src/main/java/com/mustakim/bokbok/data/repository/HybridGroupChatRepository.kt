@@ -24,6 +24,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 /**
  * Hybrid GroupChatRepository: Room as source of truth, Firestore for sync
@@ -34,11 +37,15 @@ import java.util.UUID
  * - Background sync to Firestore
  * - Firestore listeners update Room for incoming data
  */
-class HybridGroupChatRepository(private val context: Context) {
-
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
-    private val database = BokBokDatabase.getInstance(context)
+@Singleton
+class HybridGroupChatRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val database: BokBokDatabase,
+    private val imgBBApi: com.mustakim.bokbok.data.api.ImgBBApi,
+    private val fcmRepository: FCMRepository
+) {
     private val groupDao = database.groupDao()
     
     private val backgroundScope = CoroutineScope(Dispatchers.IO)
@@ -52,8 +59,6 @@ class HybridGroupChatRepository(private val context: Context) {
     }
 
     // ============= GROUP INFO =============
-
-    private val imgBBApi = com.mustakim.bokbok.data.api.ImgBBApi.create()
     
     suspend fun updateGroupImage(groupId: String, imageUri: android.net.Uri) {
         try {
@@ -317,8 +322,6 @@ class HybridGroupChatRepository(private val context: Context) {
         senderDisplayName: String,
         groupId: String
     ) {
-        val fcmRepository = FCMRepository()
-        
         for (userId in summonedUserIds) {
             try {
                 // Fetch user's FCM token

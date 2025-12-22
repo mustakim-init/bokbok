@@ -22,7 +22,12 @@ import java.util.Calendar
 import java.util.Collections
 import java.util.Locale
 
-class UsageStatsRepository(private val context: Context) {
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+
+class UsageStatsRepository @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     private val usageStatsManager: UsageStatsManager by lazy {
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
@@ -131,7 +136,6 @@ class UsageStatsRepository(private val context: Context) {
                         AppUsageInfo(
                             packageName = data.packageName,
                             appLabel = label,
-                            icon = icon,
                             screenTime = data.screenTime,
                             timesOpened = data.timesOpened,
                             lastUsedTime = data.lastUsedTime,

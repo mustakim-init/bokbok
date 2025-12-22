@@ -13,14 +13,17 @@ import androidx.core.app.NotificationCompat
 import com.mustakim.bokbok.MainActivity
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.repository.GameRepository
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import androidx.core.content.edit
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class GameMonitorService : Service() {
+ 
+    @Inject lateinit var repository: GameRepository
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
-    private lateinit var repository: GameRepository
     
     companion object {
         private const val CHANNEL_ID = "game_monitor_channel"
@@ -46,7 +49,6 @@ class GameMonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        repository = GameRepository(applicationContext)
         createNotificationChannel()
     }
 
@@ -66,7 +68,8 @@ class GameMonitorService : Service() {
         }
 
         // Save for restart resilience
-        sharedPrefs.edit { putString("last_pkg", packageName) }
+        // Save for restart resilience
+        sharedPrefs.edit().putString("last_pkg", packageName).apply()
 
         showForegroundNotification(packageName)
         startMonitoring(packageName)
@@ -132,8 +135,28 @@ class GameMonitorService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+    
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // This is called when the user swipes the app away from recents.
+        // We check if the game is still running. If it's not, we revert everything 
+        // immediately as the user likely wants to stop the session.
+        val sharedPrefs = getSharedPreferences("game_monitor_prefs", MODE_PRIVATE)
+        val packageName = sharedPrefs.getString("last_pkg", null)
+        
+        if (packageName != null) {
+            serviceScope.launch {
+                if (!isAppRunning(packageName)) {
+                    repository.revertAllOptimizations()
+                    stopSelf()
+                }
+            }
+        }
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
+        // Final attempt to clean up if the service is being stopped for any reason
+        // But only if we have active snapshots and the job is cancelled.
         serviceJob.cancel()
         super.onDestroy()
     }

@@ -6,7 +6,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.google.services)
-    id("com.google.devtools.ksp") version "2.0.21-1.0.25"
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -165,9 +166,15 @@ dependencies {
     implementation("androidx.emoji2:emoji2-emojipicker:1.4.0")
 
     // Room Database (for local messaging storage)
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    implementation(libs.androidx.animation)
+    ksp(libs.room.compiler)
+
+    // Hilt Dependency Injection
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.hilt.navigation.compose)
 
     // WorkManager (for background sync)
     implementation("androidx.work:work-runtime-ktx:2.9.0")

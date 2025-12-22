@@ -3,13 +3,18 @@ package com.mustakim.bokbok.viewmodel
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.User
+import com.mustakim.bokbok.data.repository.AuthRepository
+import com.mustakim.bokbok.data.repository.NotificationRepository
 import com.mustakim.bokbok.data.repository.UserRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 data class ProfileUiState(
     val user: User? = null,
@@ -20,8 +25,12 @@ data class ProfileUiState(
     val successMessage: String? = null
 )
 
-class ProfileViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = UserRepository(application.applicationContext)
+@HiltViewModel
+class ProfileViewModel @Inject constructor(
+    private val userRepository: UserRepository,
+    private val authRepository: AuthRepository,
+    private val notificationRepository: NotificationRepository
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
@@ -34,9 +43,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            val userId = repository.getCurrentUserId()
+            val userId = userRepository.getCurrentUserId()
             if (userId != null) {
-                repository.getUserProfile(userId).fold(
+                userRepository.getUserProfile(userId).fold(
                     onSuccess = { user ->
                         _uiState.value = _uiState.value.copy(
                             user = user,
@@ -74,7 +83,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            val userId = repository.getCurrentUserId()
+            val userId = userRepository.getCurrentUserId()
             if (userId != null) {
                 val updates = mapOf(
                     "displayName" to displayName,
@@ -82,7 +91,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                     "phoneNumber" to phoneNumber
                 )
 
-                repository.updateUserProfile(userId, updates).fold(
+                userRepository.updateUserProfile(userId, updates).fold(
                     onSuccess = {
                         _uiState.value = _uiState.value.copy(
                             isEditing = false,
@@ -108,9 +117,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
                 error = null
             )
 
-            val userId = repository.getCurrentUserId()
+            val userId = userRepository.getCurrentUserId()
             if (userId != null) {
-                repository.uploadProfileImage(userId, imageUri).fold(
+                userRepository.uploadProfileImage(userId, imageUri).fold(
                     onSuccess = { imageUrl ->
                         _uiState.value = _uiState.value.copy(
                             isUploadingImage = false,
@@ -133,9 +142,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            val userId = repository.getCurrentUserId()
+            val userId = userRepository.getCurrentUserId()
             if (userId != null) {
-                repository.deleteProfileImage(userId).fold(
+                userRepository.deleteProfileImage(userId).fold(
                     onSuccess = {
                         _uiState.value = _uiState.value.copy(
                             successMessage = "Profile picture removed"

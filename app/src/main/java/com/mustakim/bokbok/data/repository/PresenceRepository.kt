@@ -9,14 +9,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class PresenceRepository {
+import javax.inject.Inject
+import javax.inject.Singleton
 
-    private val db = FirebaseDatabase.getInstance()
+@Singleton
+class PresenceRepository @Inject constructor(
+    private val auth: FirebaseAuth,
+    private val db: FirebaseDatabase
+) {
+
     private val presenceRoot = db.getReference("presence")
 
     // ✅ NEW: per-user status node
     private val userStatusRoot = db.getReference("userStatus")
-    private val auth = FirebaseAuth.getInstance()
+    // private val auth = FirebaseAuth.getInstance() // Removed, now constructor injected
 
     // Scope for async work inside this repository
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

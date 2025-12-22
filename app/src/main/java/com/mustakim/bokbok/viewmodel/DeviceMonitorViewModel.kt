@@ -16,9 +16,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class DeviceMonitorViewModel(application: Application) : AndroidViewModel(application) {
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
-    private val repository = DeviceMonitorRepository(application)
+@HiltViewModel
+class DeviceMonitorViewModel @Inject constructor(
+    private val repository: DeviceMonitorRepository
+) : androidx.lifecycle.ViewModel() {
     private val _uiState = MutableStateFlow(DeviceMonitorUiState())
     val uiState: StateFlow<DeviceMonitorUiState> = _uiState.asStateFlow()
 

@@ -1,12 +1,16 @@
 package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.User
-import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.data.repository.AuthRepository // Added AuthRepository import
+import com.mustakim.bokbok.data.repository.ChatRepository
+import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.PresenceRepository
+import com.mustakim.bokbok.data.repository.UserRepository
 import com.mustakim.bokbok.startup.StartupManager
+import dagger.hilt.android.lifecycle.HiltViewModel // Added HiltViewModel import
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,21 +18,23 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import javax.inject.Inject // Added Inject import
 import androidx.compose.runtime.Stable
 
 /**
  * UserViewModel - Manages user state with deferred initialization
- * 
+ *
  * Performance optimizations:
  * 1. init{} only loads cached/minimal data
  * 2. FCM token refresh is deferred to Stage 2
  * 3. Presence updates are deferred to Stage 2
  * 4. Network calls run on Dispatchers.IO
  */
-@Stable
-class UserViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = UserRepository(application.applicationContext)
-    private val presenceRepository = PresenceRepository()
+@HiltViewModel
+class UserViewModel @Inject constructor(
+    private val repository: UserRepository,
+    private val presenceRepository: PresenceRepository
+) : ViewModel() {
 
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()

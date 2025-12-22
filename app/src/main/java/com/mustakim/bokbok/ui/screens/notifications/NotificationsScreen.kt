@@ -44,8 +44,6 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,20 +61,16 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.FriendRequest
 import com.mustakim.bokbok.data.model.Notification
 import com.mustakim.bokbok.data.model.NotificationType
-import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.state.JoinMode
-import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.NotificationFilter
 import com.mustakim.bokbok.viewmodel.NotificationUiItem
 import com.mustakim.bokbok.viewmodel.NotificationViewModel
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -109,13 +103,11 @@ class ExpressiveStarShape(private val points: Int = 12) : Shape {
 @Composable
 fun NotificationsScreen(
     navController: NavHostController,
-    loungeViewModel: LoungeViewModel = viewModel(),
+    loungeViewModel: LoungeViewModel = hiltViewModel(),
     viewModel: NotificationViewModel
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    val roomRepo = remember { RoomRepository() }
-    val scope = rememberCoroutineScope()
 
     // Scroll behavior for LargeTopAppBar
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
@@ -241,16 +233,8 @@ fun NotificationsScreen(
                                                 if (!hasPermissions) {
                                                     navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.Permissions.route)
                                                 } else {
-                                                    scope.launch {
-                                                        val result = roomRepo.getRoom(roomId)
-                                                        result.onSuccess { room ->
-                                                            loungeViewModel.joinRoomSessionOnly(room)
-                                                            RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
-                                                            navController.navigateUp()
-                                                            viewModel.deleteNotification(item.notification.id)
-                                                        }.onFailure {
-                                                            viewModel.deleteNotification(item.notification.id)
-                                                        }
+                                                    viewModel.joinRoom(roomId, loungeViewModel) {
+                                                        navController.navigateUp()
                                                     }
                                                 }
                                             }

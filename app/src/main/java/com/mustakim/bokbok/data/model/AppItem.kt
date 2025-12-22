@@ -1,6 +1,5 @@
 package com.mustakim.bokbok.data.model
 
-import android.graphics.drawable.Drawable
 import androidx.compose.runtime.Stable
 import com.mustakim.bokbok.data.bloatware.DebloatObject
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
@@ -11,7 +10,6 @@ data class AppItem(
     val label: String,
     val versionName: String?,
     val versionCode: Long,
-    val icon: Drawable?,
     val isSystemApp: Boolean,
     val isEnabled: Boolean,
     val isInstalled: Boolean = true,

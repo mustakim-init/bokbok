@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.User
@@ -30,7 +30,7 @@ import com.mustakim.bokbok.viewmodel.ProfileViewModel
 @Composable
 fun ProfileScreen(
     navController: NavHostController,
-    profileViewModel: ProfileViewModel = viewModel()
+    profileViewModel: ProfileViewModel = hiltViewModel()
 ) {
     val uiState by profileViewModel.uiState.collectAsState()
 

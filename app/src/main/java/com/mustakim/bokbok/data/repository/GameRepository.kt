@@ -6,22 +6,27 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import com.mustakim.bokbok.data.local.BokBokDatabase
+import android.os.ParcelFileDescriptor
+import com.mustakim.bokbok.data.local.dao.GameDao
 import com.mustakim.bokbok.data.local.entity.GameEntity
 import com.mustakim.bokbok.data.model.GameItem
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
-import android.os.ParcelFileDescriptor
 import java.io.File
-import androidx.core.content.edit
+import javax.inject.Inject
 
-class GameRepository(private val context: Context) {
+class GameRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val gameDao: GameDao
+) {
     private val packageManager = context.packageManager
-    private val database = BokBokDatabase.getInstance(context)
-    private val gameDao = database.gameDao()
 
     fun getGames(): Flow<List<GameItem>> {
         return gameDao.getAllGames().map { entities ->
@@ -35,7 +40,8 @@ class GameRepository(private val context: Context) {
                 val packageName = packageInfo.packageName
                 val entity = entityMap[packageName]
                 
-                if (entity != null || isGame(packageInfo)) {
+                // Only add if it's NOT manually removed AND (it's in the DB OR it's a naturally detected game)
+                if (entity?.isManuallyRemoved != true && (entity != null || isGame(packageInfo))) {
                     gameItems.add(
                         GameItem(
                             packageName = packageName,
@@ -44,14 +50,16 @@ class GameRepository(private val context: Context) {
                             isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
                             isUserAdded = entity?.isUserAdded ?: false,
                             installedTime = packageInfo.firstInstallTime,
-                            apkSize = File(packageInfo.applicationInfo?.sourceDir ?: "").length(),
+                            apkSize = packageInfo.applicationInfo?.sourceDir?.let { File(it).length() } ?: 0L,
                             optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
                             customSettingsJson = entity?.customSettingsJson ?: "{}"
                         )
                     )
                 }
             }
-            gameItems.sortedBy { it.label }
+            gameItems
+        }.map { items -> 
+            items.sortedBy { it.label } 
         }.flowOn(Dispatchers.IO)
     }
 
@@ -79,7 +87,7 @@ class GameRepository(private val context: Context) {
                     executeShizukuCommand("pm enable --user 0 $packageName")
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("GameRepository", "Failed to launch game $packageName", e)
             }
 
             val intent = packageManager.getLaunchIntentForPackage(packageName)
@@ -101,11 +109,13 @@ class GameRepository(private val context: Context) {
     }
 
     suspend fun addGameManually(packageName: String) {
-        updateGameEntity(packageName) { it.copy(isUserAdded = true) }
+        updateGameEntity(packageName) { it.copy(isUserAdded = true, isManuallyRemoved = false) }
     }
 
     suspend fun removeFromGameList(packageName: String) {
-        gameDao.removeGame(packageName)
+        // If it's naturally detected as a game (isGame), we can't just delete from DB.
+        // We mark it as manually removed instead.
+        updateGameEntity(packageName) { it.copy(isManuallyRemoved = true) }
     }
 
     suspend fun updateGameEntity(packageName: String, update: (GameEntity) -> GameEntity) {
@@ -116,48 +126,142 @@ class GameRepository(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("game_mode_snapshots", Context.MODE_PRIVATE)
 
-    suspend fun applyOptimization(tweakId: String, value: String) {
+    private fun sanitizeCommand(command: String): String {
+        // Basic protection against command injection (e.g. blocking ";", "&", "|", etc. in user-controlled inputs)
+        // Since many of our commands use specific structures, we mostly want to allow spaces, dots, and colons.
+        return command.replace(Regex("[;&|><`]"), "").trim()
+    }
+
+    private suspend fun executeShizukuCommand(command: String) {
+        val sanitized = sanitizeCommand(command)
+        if (sanitized.isEmpty()) return
+        executeShizukuCommandAndGet(sanitized)
+    }
+
+    suspend fun applyOptimization(tweakId: String, value: String, packageName: String? = null) {
+        // Track modified packages for efficient reversion later
+        packageName?.let { pkg ->
+            val set = prefs.getStringSet("affected_packages", emptySet()) ?: emptySet()
+            if (!set.contains(pkg)) {
+                prefs.edit().putStringSet("affected_packages", set + pkg).apply()
+            }
+        }
+
         val command = when (tweakId) {
             "window_animation_scale", "transition_animation_scale", "animator_duration_scale" -> {
-                saveSnapshot(tweakId, "settings get global $tweakId")
+                saveSnapshot("global", tweakId, "settings get global $tweakId")
                 "settings put global $tweakId $value"
             }
+            "disable_window_blurs" -> {
+                saveSnapshot("global", "disable_window_blurs", "settings get global disable_window_blurs")
+                "settings put global disable_window_blurs ${if (value == "true") 1 else 0}"
+            }
             "force_gpu_rendering" -> {
-                saveSnapshot(tweakId, "settings get global force_gpu_rendering")
+                saveSnapshot("global", tweakId, "settings get global force_gpu_rendering")
                 "settings put global force_gpu_rendering ${if (value == "true") 1 else 0}"
             }
             "disable_hw_overlays" -> {
-                // service call SurfaceFlinger 1008 i32 1 (Disable) or 0 (Enable)
                 "service call SurfaceFlinger 1008 i32 ${if (value == "true") 1 else 0}"
             }
             "game_driver_all_apps" -> {
-                saveSnapshot(tweakId, "settings get global game_driver_all_apps")
+                saveSnapshot("global", tweakId, "settings get global game_driver_all_apps")
                 "settings put global game_driver_all_apps ${if (value == "true") 1 else 0}"
             }
             "wifi_scan_always_enabled" -> {
-                saveSnapshot(tweakId, "settings get global wifi_scan_always_enabled")
-                "settings put global wifi_scan_always_enabled ${if (value == "true") 0 else 1}" // Inverted for "Disable"
+                saveSnapshot("global", tweakId, "settings get global wifi_scan_always_enabled")
+                "settings put global wifi_scan_always_enabled ${if (value == "true") 0 else 1}"
+            }
+            "wifi_power_save" -> {
+                saveSnapshot("global", "wifi_power_save", "settings get global wifi_power_save")
+                "settings put global wifi_power_save ${if (value == "true") 0 else 1}"
+            }
+            "cellular_data_throttle" -> {
+                saveSnapshot("global", "cellular_data_throttle", "settings get global cellular_data_throttle")
+                "settings put global cellular_data_throttle ${if (value == "true") 0 else 1}"
+            }
+            "max_phantom_processes" -> {
+                saveSnapshot("config", "activity_manager:max_phantom_processes", "device_config get activity_manager max_phantom_processes")
+                "device_config put activity_manager max_phantom_processes ${if (value == "true") 1024 else 32}"
+            }
+            "native_game_mode" -> {
+                if (packageName != null) "cmd game mode performance $packageName" else null
+            }
+            "game_downscale" -> {
+                if (packageName != null && value != "1.0 (Native)") "cmd game downscale $value $packageName" else null
+            }
+            "long_press_timeout" -> {
+                saveSnapshot("secure", "long_press_timeout", "settings get secure long_press_timeout")
+                if (value == "Default") "settings delete secure long_press_timeout" else "settings put secure long_press_timeout $value"
+            }
+            "tap_duration_threshold" -> {
+                saveSnapshot("secure", "tap_duration_threshold", "settings get secure tap_duration_threshold")
+                "settings put secure tap_duration_threshold ${if (value == "true") 0.0 else 0.1}"
+            }
+            "touch_blocking_period" -> {
+                saveSnapshot("secure", "touch_blocking_period", "settings get secure touch_blocking_period")
+                "settings put secure touch_blocking_period ${if (value == "true") 0.0 else 0.1}"
             }
             "zen_mode" -> {
-                saveSnapshot(tweakId, "settings get global zen_mode")
+                saveSnapshot("global", tweakId, "settings get global zen_mode")
                 "settings put global zen_mode ${if (value == "true") 2 else 0}"
             }
             "low_power_disable" -> {
-                saveSnapshot(tweakId, "settings get global low_power")
+                saveSnapshot("global", "low_power", "settings get global low_power")
                 "settings put global low_power ${if (value == "true") 0 else 1}"
             }
             "wm_size" -> {
-                saveSnapshot(tweakId, "wm size")
-                if (value.isBlank()) "wm size reset" else "wm size $value"
+                if (value.isBlank()) {
+                    "wm size reset"
+                } else {
+                    val parts = value.split("x")
+                    if (parts.size == 2) {
+                        val w = parts[0].toIntOrNull() ?: 0
+                        val h = parts[1].toIntOrNull() ?: 0
+                        if (w >= 320 && h >= 320) {
+                            saveSnapshot("wm", tweakId, "wm size")
+                            "wm size $value"
+                        } else null
+                    } else null
+                }
             }
             "wm_density" -> {
-                saveSnapshot(tweakId, "wm density")
-                if (value.isBlank()) "wm density reset" else "wm density $value"
+                if (value.isBlank()) {
+                    "wm density reset"
+                } else {
+                    val dens = value.toIntOrNull() ?: 0
+                    if (dens in 72..1000) {
+                        saveSnapshot("wm", tweakId, "wm density")
+                        "wm density $value"
+                    } else null
+                }
+            }
+            "peak_refresh_rate" -> {
+                saveSnapshot("system", "peak_refresh_rate", "settings get system peak_refresh_rate")
+                saveSnapshot("system", "min_refresh_rate", "settings get system min_refresh_rate")
+                executeShizukuCommand("settings put system peak_refresh_rate 120.0")
+                "settings put system min_refresh_rate 120.0"
+            }
+            "vulkan_renderer" -> {
+                saveSnapshot("prop", "debug.hwui.renderer", "getprop debug.hwui.renderer")
+                "setprop debug.hwui.renderer skiavk"
+            }
+            "app_standby_active" -> {
+                if (packageName != null) "cmd usage-stats set-state $packageName active" else null
+            }
+            "fixed_performance_mode" -> {
+                saveSnapshot("cmd", "performance_mode", "echo true")
+                "cmd power set-fixed-performance-mode-enabled true"
+            }
+            "adaptive_connectivity" -> {
+                saveSnapshot("global", "adaptive_connectivity_enabled", "settings get global adaptive_connectivity_enabled")
+                "settings put global adaptive_connectivity_enabled 0"
+            }
+            "disable_gos" -> {
+                saveSnapshot("pm", "com.samsung.android.game.gos", "echo disabled")
+                "pm disable-user --user 0 com.samsung.android.game.gos"
             }
             "bg_process_limit" -> {
-                // Settings.Global.MAX_TOTAL_PROCESS_LIMIT is hard to set via shell reliably across versions,
-                // but "activity set-process-limit" is the standard way.
-                saveSnapshot(tweakId, "dumpsys activity settings | grep process_limit") // Rough snapshot
+                saveSnapshot("activity", tweakId, "dumpsys activity settings | grep process_limit")
                 if (value == "Standard") "activity clear-process-limit" else "activity set-process-limit $value"
             }
             else -> null
@@ -174,12 +278,12 @@ class GameRepository(private val context: Context) {
         executeShizukuCommand("am kill-all")
     }
 
-    private suspend fun saveSnapshot(key: String, getCommand: String) {
-        if (!prefs.contains(key)) {
+    private suspend fun saveSnapshot(namespace: String, key: String, getCommand: String) {
+        val compositeKey = "$namespace:$key"
+        if (!prefs.contains(compositeKey)) {
             val current = executeShizukuCommandAndGet(getCommand).trim()
             if (current.isNotEmpty() && !current.contains("Error")) {
-                // Handle complex output from wm size/density if necessary, but keep original string
-                prefs.edit { putString(key, current) }
+                prefs.edit().putString(compositeKey, current).apply()
             }
         }
     }
@@ -188,44 +292,52 @@ class GameRepository(private val context: Context) {
 
     suspend fun revertAllOptimizations() {
         val allSnapshots = prefs.all
-        allSnapshots.forEach { (key, valueObj) ->
+        allSnapshots.forEach { (compositeKey, valueObj) ->
             val value = valueObj.toString()
-            val command = when (key) {
-                "wm_size", "wm_density" -> {
+            val namespace = compositeKey.substringBefore(":")
+            val key = compositeKey.substringAfter(":")
+
+            val command = when (namespace) {
+                "wm" -> {
                     // "wm size" output is "Physical size: 1080x2400"
-                    if (value.contains("Physical")) {
-                        val type = if (key == "wm_size") "size" else "density"
-                        "wm $type reset"
+                    if (value.contains("Physical") || value.contains("Override")) {
+                        "wm ${if(key == "wm_size") "size" else "density"} reset"
                     } else {
-                        val type = if (key == "wm_size") "size" else "density"
-                        "wm $type $value"
+                        "wm ${if(key == "wm_size") "size" else "density"} $value"
                     }
                 }
-                "bg_process_limit" -> "activity clear-process-limit"
-                "disable_hw_overlays" -> "service call SurfaceFlinger 1008 i32 0"
-                else -> {
-                    val namespace = when {
-                        key.contains("refresh_rate") || 
-                        key.contains("pointer_speed") || 
-                        key.contains("accelerometer_rotation") -> "system"
-                        
-                        key.contains("install_non_market_apps") ||
-                        key.contains("location_mode") ||
-                        key.contains("enabled_accessibility_services") -> "secure"
-                        
-                        else -> "global"
-                    }
-                    "settings put $namespace $key $value"
+                "activity" -> {
+                    if (key == "bg_process_limit") "activity clear-process-limit" else null
                 }
+                "config" -> {
+                    "device_config put ${key.substringBefore(":")} ${key.substringAfter(":")} $value"
+                }
+                "prop" -> {
+                    "setprop $key $value"
+                }
+                "cmd" -> {
+                    if (key == "performance_mode") "cmd power set-fixed-performance-mode-enabled false" else null
+                }
+                "pm" -> {
+                    "pm enable --user 0 $key"
+                }
+                else -> "settings put $namespace $key $value"
             }
-            executeShizukuCommand(command)
+            command?.let { executeShizukuCommand(it) }
         }
         
         // Final cleanup for things that might not have a saved value but were forced
-        executeShizukuCommand("service call SurfaceFlinger 1008 i32 0") // Force enable overlays
+        executeShizukuCommand("service call SurfaceFlinger 1008 i32 0") 
         executeShizukuCommand("activity clear-process-limit")
         
-        prefs.edit { clear() }
+        // Efficient cleanup: Reset game mode/downscale ONLY for packages we actually modified
+        val affectedPackages = prefs.getStringSet("affected_packages", emptySet()) ?: emptySet()
+        affectedPackages.forEach { pkg ->
+             executeShizukuCommand("cmd game mode standard $pkg")
+             executeShizukuCommand("cmd game downscale reset $pkg")
+        }
+        
+        prefs.edit().clear().apply()
         
         // Re-enable common bloat that might have been disabled
         val bloat = listOf("com.miui.analytics", "com.miui.msa.global", "com.xiaomi.joyose")
@@ -249,13 +361,10 @@ class GameRepository(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("GameRepository", "Shizuku command failed: $command", e)
             }
             return@withContext ""
         }
     }
 
-    private suspend fun executeShizukuCommand(command: String) {
-        executeShizukuCommandAndGet(command)
-    }
 }

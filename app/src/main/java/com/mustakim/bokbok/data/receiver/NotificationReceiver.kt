@@ -5,21 +5,28 @@ import android.content.Context
 import android.content.Intent
 import android.app.NotificationManager
 import com.mustakim.bokbok.MainActivity
+import com.mustakim.bokbok.data.repository.NotificationRepository
+import com.mustakim.bokbok.data.repository.UserRepository
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class NotificationReceiver : BroadcastReceiver() {
+ 
+    @Inject lateinit var notificationRepository: NotificationRepository
+    @Inject lateinit var userRepository: UserRepository
     override fun onReceive(context: Context, intent: Intent) {
         val notificationId = intent.getIntExtra("notificationId", 0)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(notificationId)
 
-        val repo = com.mustakim.bokbok.data.repository.NotificationRepository()
-        val userRepo = com.mustakim.bokbok.data.repository.UserRepository(context)
+        // Using injected repositories
 
         // Helper to delete notification
         fun deleteNotification() {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                val userId = userRepo.getCurrentUserId()
+                val userId = userRepository.getCurrentUserId()
                 if (userId != null) {
                     // We need the Firestore document ID. 
                     // Ideally, we should pass the document ID in the intent extras.
@@ -27,7 +34,7 @@ class NotificationReceiver : BroadcastReceiver() {
                     // Let's assume we passed 'notificationDocId' in the intent.
                     val docId = intent.getStringExtra("notificationDocId")
                     if (docId != null) {
-                        repo.deleteNotification(userId, docId)
+                        notificationRepository.deleteNotification(userId, docId)
                     }
                 }
             }

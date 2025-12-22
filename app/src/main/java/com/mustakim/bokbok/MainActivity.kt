@@ -1,5 +1,7 @@
 package com.mustakim.bokbok
 
+import com.mustakim.bokbok.viewmodel.ThemeViewModel
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,24 +10,33 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.rememberNavController
-import com.mustakim.bokbok.ui.navigation.NavGraph
-import com.mustakim.bokbok.ui.theme.BokBokTheme
-import com.mustakim.bokbok.viewmodel.ThemeViewModel
-import com.mustakim.bokbok.viewmodel.UserViewModel
-import android.content.Intent
-import kotlinx.coroutines.launch
 import androidx.core.net.toUri
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.compose.rememberNavController
+import com.mustakim.bokbok.data.repository.NotificationRepository
+import com.mustakim.bokbok.data.repository.RoomRepository
+import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.ui.navigation.NavGraph
+import com.mustakim.bokbok.ui.theme.BokBokTheme
+import com.mustakim.bokbok.viewmodel.UserViewModel
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+ 
+    @Inject lateinit var roomRepository: RoomRepository
+    @Inject lateinit var userRepository: UserRepository
+    @Inject lateinit var notificationRepository: NotificationRepository
+ 
     // Use a MutableState to track the latest intent for navigation
     private val _intentState = androidx.compose.runtime.mutableStateOf<Intent?>(null)
 
@@ -54,9 +65,9 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            // ✅ Hoist both ViewModels
-            val themeViewModel: ThemeViewModel = viewModel()
-            val userViewModel: UserViewModel = viewModel()
+            // ✅ Hoist both ViewModels using Hilt
+            val themeViewModel: ThemeViewModel = hiltViewModel()
+            val userViewModel: UserViewModel = hiltViewModel()
 
             // ✅ FIX: Monitor App Lifecycle to set Online Status
             val lifecycleOwner = LocalLifecycleOwner.current
@@ -96,10 +107,7 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.runtime.LaunchedEffect(currentIntent) {
                         val intent = currentIntent
                         if (intent?.getBooleanExtra("navigate_to_room", false) == true) {
-                            // ✅ OPTIMIZED: Create repositories only when needed
-                            val roomRepository = com.mustakim.bokbok.data.repository.RoomRepository()
-                            val notificationRepository = com.mustakim.bokbok.data.repository.NotificationRepository()
-                            val userRepository = com.mustakim.bokbok.data.repository.UserRepository(context)
+                            // Using injected repositories
                             
                             val roomId = intent.getStringExtra("roomId")
                             val notificationDocId = intent.getStringExtra("notificationDocId")
@@ -128,8 +136,7 @@ class MainActivity : ComponentActivity() {
 
                     NavGraph(
                         navController = navController,
-                        themeViewModel = themeViewModel,
-                        userViewModel = userViewModel
+                        themeViewModel = themeViewModel
                     )
                 }
             }

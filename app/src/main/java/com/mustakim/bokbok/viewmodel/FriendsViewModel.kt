@@ -11,12 +11,19 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.snapshots
+import com.mustakim.bokbok.data.repository.AuthRepository
+import com.mustakim.bokbok.data.repository.UserRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-class FriendsViewModel(
+@HiltViewModel
+class FriendsViewModel @Inject constructor(
     private val friendsRepository: FriendsRepository,
+    private val userRepository: UserRepository,
+    private val authRepository: AuthRepository,
     private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository,
     private val hybridChatRepository: com.mustakim.bokbok.data.repository.HybridChatRepository,
     private val hybridGroupChatRepository: com.mustakim.bokbok.data.repository.HybridGroupChatRepository
@@ -305,21 +312,6 @@ class FriendsViewModel(
         _uiState.value = FriendsUiState.Idle
     }
 
-    // Factory for creating FriendsViewModel
-    class Factory(
-        private val friendsRepository: FriendsRepository,
-        private val chatRepository: com.mustakim.bokbok.data.repository.ChatRepository,
-        private val hybridChatRepository: com.mustakim.bokbok.data.repository.HybridChatRepository,
-        private val hybridGroupChatRepository: com.mustakim.bokbok.data.repository.HybridGroupChatRepository
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            if (modelClass.isAssignableFrom(FriendsViewModel::class.java)) {
-                return FriendsViewModel(friendsRepository, chatRepository, hybridChatRepository, hybridGroupChatRepository) as T
-            }
-            throw IllegalArgumentException("Unknown ViewModel class")
-        }
-    }
 }
 
 // Data class for UI representation of a chat item (individual or group)

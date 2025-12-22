@@ -2,22 +2,22 @@ package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
 import android.net.Uri
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.FriendStatus
 import com.mustakim.bokbok.data.model.FriendWithUser
 import com.mustakim.bokbok.data.model.RoomCategory
 import com.mustakim.bokbok.data.model.UserStatus
 import com.mustakim.bokbok.data.model.VoiceRoom
+import com.mustakim.bokbok.data.repository.AuthRepository
 import com.mustakim.bokbok.data.repository.FriendsRepository
+import com.mustakim.bokbok.data.repository.NotificationRepository
 import com.mustakim.bokbok.data.repository.PresenceRepository
 import com.mustakim.bokbok.data.repository.RoomRepository
-import com.mustakim.bokbok.data.repository.UserRepository
-import kotlinx.coroutines.Dispatchers
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,7 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import javax.inject.Inject
 
 
 data class LoungeUiState(
@@ -40,18 +40,15 @@ data class LoungeUiState(
     val error: String? = null
 )
 
-@Stable
-class LoungeViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = RoomRepository()
-
-    private val presenceRepository = PresenceRepository()
-
-    // ✅ NEW: real friends + status (lazy init)
-    private val friendsRepository by lazy {
-        FriendsRepository(
-            UserRepository(getApplication<Application>().applicationContext)
-        )
-    }
+@HiltViewModel
+class LoungeViewModel @Inject constructor(
+    private val authRepository: AuthRepository,
+    private val roomRepository: RoomRepository,
+    private val presenceRepository: PresenceRepository,
+    private val notificationRepository: NotificationRepository,
+    private val friendsRepository: FriendsRepository,
+    private val application: Application
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         LoungeUiState(
@@ -113,7 +110,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
                     error = null
                 )
             }
-            val result = repository.getActiveRooms()
+            val result = roomRepository.getActiveRooms()
             result.fold(
                 onSuccess = { rooms ->
                     viewModelScope.launch {
@@ -150,7 +147,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadMyRoomsFromFirestore() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            val result = repository.getMyRooms()
+            val result = roomRepository.getMyRooms()
             result.fold(
                 onSuccess = { rooms ->
                     // 🎤 CHANGED: Fetch online counts
@@ -229,13 +226,13 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 // 1) Upload image if provided
                 val uploadedImageUrl = if (imageUri != null) {
-                    repository.uploadRoomImage(getApplication(), imageUri) ?: ""
+                    roomRepository.uploadRoomImage(application, imageUri) ?: ""
                 } else {
                     ""
                 }
 
                 // 2) Create room in Firestore with the imageUrl
-                val result = repository.createRoom(
+                val result = roomRepository.createRoom(
                     name = name,
                     description = description,
                     maxParticipants = maxParticipants,
@@ -247,7 +244,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
                 result.fold(
                     onSuccess = { roomId ->
                         // 3) Load the created room and update state
-                        val roomResult = repository.getRoom(roomId)
+                        val roomResult = roomRepository.getRoom(roomId)
                         roomResult.fold(
                             onSuccess = { room ->
                                 _uiState.update {
@@ -398,7 +395,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null) }
 
-            val result = repository.joinRoom(room.id) // Firestore: add to members
+            val result = roomRepository.joinRoom(room.id) // Firestore: add to members
             result.fold(
                 onSuccess = {
                     // Add to My Rooms locally
@@ -419,7 +416,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update { it.copy(error = null) }
 
             // Only remove from permanent members; call-session leave is done in VoiceRoomViewModel
-            val result = repository.leaveRoom(room.id)
+            val result = roomRepository.leaveRoom(room.id)
             result.fold(
                 onSuccess = {
                     _uiState.update { state ->
@@ -438,7 +435,7 @@ class LoungeViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _uiState.update { it.copy(error = null, isLoading = true) }
 
-            val result = repository.deleteRoom(room.id)
+            val result = roomRepository.deleteRoom(room.id)
             result.fold(
                 onSuccess = {
                     _uiState.update { state ->

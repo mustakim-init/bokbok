@@ -1,7 +1,6 @@
 package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.GameItem
 import com.mustakim.bokbok.data.model.OptimizationProfile
@@ -11,19 +10,25 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
 enum class LaunchState {
     NONE, OPTIMIZING, COMPILING, LAUNCHING
 }
 
-class GameSpaceViewModel(application: Application) : AndroidViewModel(application) {
-    val repository = GameRepository(application)
+@HiltViewModel
+class GameSpaceViewModel @Inject constructor(
+    private val repository: GameRepository,
+    private val application: Application // Inject Application context for services
+) : androidx.lifecycle.ViewModel() {
 
     private val _launchState = MutableStateFlow(LaunchState.NONE)
     val launchState: StateFlow<LaunchState> = _launchState.asStateFlow()
@@ -40,6 +45,16 @@ class GameSpaceViewModel(application: Application) : AndroidViewModel(applicatio
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
 
+    init {
+        // Recovery Logic: If the app starts and find snapshots but the service isn't running,
+        // it means we had a "messy" exit previously. Clean up.
+        viewModelScope.launch(Dispatchers.IO) {
+            if (repository.hasActiveSnapshots()) {
+                repository.revertAllOptimizations()
+            }
+        }
+    }
+
     val games: StateFlow<List<GameItem>> = repository.getGames()
         .onEach { _isLoading.value = false }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -54,7 +69,8 @@ class GameSpaceViewModel(application: Application) : AndroidViewModel(applicatio
     val selectedGame: StateFlow<GameItem?> = combine(games, _selectedPackageName) { currentGames, pkgName ->
         if (pkgName == null) null
         else currentGames.find { it.packageName == pkgName }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.onEach { if (it == null) _selectedPackageName.value = null } // Clear if game disappears from list
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
@@ -97,58 +113,68 @@ class GameSpaceViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun launchGameWithOptimizations(game: GameItem) {
         viewModelScope.launch {
-            _launchState.value = LaunchState.OPTIMIZING
-            // 1. Get settings and profile
-            val entity = repository.getGames().first().find { it.packageName == game.packageName }
-            val profile = entity?.optimizationProfile ?: OptimizationProfile.BALANCED
-            val customJson = entity?.customSettingsJson ?: "{}"
-            val json = try { JSONObject(customJson) } catch (_: Exception) { JSONObject() }
+            try {
+                _launchState.value = LaunchState.OPTIMIZING
+                
+                // 1. Get profile and custom JSON
+                val profile = game.optimizationProfile
+                val customJson = game.customSettingsJson
+                val json = try { JSONObject(customJson) } catch (_: Exception) { JSONObject() }
 
-            // 2. Start monitoring service IMMEDIATELY
-            com.mustakim.bokbok.data.service.GameMonitorService.start(getApplication(), game.packageName)
-            delay(500)
+                // 2. Apply Tweaks on IO thread to ensure absolute UI smoothness (Profile Threading)
+                withContext(Dispatchers.IO) {
+                    // Kill background apps first if needed
+                    val shouldKillApps = profile == OptimizationProfile.PERFORMANCE || json.optString("kill_bg_apps") == "true"
+                    if (shouldKillApps) {
+                        repository.killBackgroundApps()
+                    }
 
-            // 3. Kill background apps
-            val shouldKillApps = profile == OptimizationProfile.PERFORMANCE || json.optString("kill_bg_apps") == "true"
-            if (shouldKillApps) {
-                repository.killBackgroundApps()
-            }
-            
-            // 4. Apply Tweaks
-            when (profile) {
-                OptimizationProfile.PERFORMANCE -> {
-                    repository.applyOptimization("window_animation_scale", "0.5")
-                    repository.applyOptimization("transition_animation_scale", "0.5")
-                    repository.applyOptimization("animator_duration_scale", "0.5")
-                    repository.applyOptimization("force_gpu_rendering", "true")
-                    
-                    _launchState.value = LaunchState.COMPILING
-                    repository.compileApp(game.packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
-                }
-                OptimizationProfile.CUSTOM -> {
-                    val keys = json.keys()
-                    while(keys.hasNext()) {
-                        val key = keys.next()
-                        val value = json.getString(key)
-                        if (key == "compile_speed" && value == "true") {
+                    when (profile) {
+                        OptimizationProfile.PERFORMANCE -> {
+                            repository.applyOptimization("window_animation_scale", "0.25", game.packageName)
+                            repository.applyOptimization("transition_animation_scale", "0.25", game.packageName)
+                            repository.applyOptimization("animator_duration_scale", "0.25", game.packageName)
+                            repository.applyOptimization("force_gpu_rendering", "true", game.packageName)
+                            repository.applyOptimization("native_game_mode", "true", game.packageName)
+                            repository.applyOptimization("app_standby_active", "true", game.packageName)
+                            
                             _launchState.value = LaunchState.COMPILING
                             repository.compileApp(game.packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
-                            _launchState.value = LaunchState.OPTIMIZING
-                        } else {
-                            repository.applyOptimization(key, value)
                         }
+                        OptimizationProfile.CUSTOM -> {
+                            val keys = json.keys()
+                            while(keys.hasNext()) {
+                                val key = keys.next()
+                                val value = json.getString(key)
+                                if (key == "compile_speed" && value == "true") {
+                                    _launchState.value = LaunchState.COMPILING
+                                    repository.compileApp(game.packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
+                                    _launchState.value = LaunchState.OPTIMIZING
+                                } else {
+                                    repository.applyOptimization(key, value, game.packageName)
+                                }
+                            }
+                        }
+                        else -> {}
                     }
                 }
-                else -> {}
+                
+                // 3. Final Launch
+                _launchState.value = LaunchState.LAUNCHING
+                repository.launchGame(game.packageName)
+                
+                // 4. Start monitoring service AFTER launch to prevent race conditions
+                com.mustakim.bokbok.data.service.GameMonitorService.start(application, game.packageName)
+            } catch (_: Exception) {
+                // If anything fails during launch, REVERT immediately
+                withContext(Dispatchers.IO) {
+                    repository.revertAllOptimizations()
+                }
+            } finally {
+                // Reset state after a delay to ensure UI reflects launch
+                delay(1000)
+                _launchState.value = LaunchState.NONE
             }
-            
-            // 5. Final Launch
-            _launchState.value = LaunchState.LAUNCHING
-            repository.launchGame(game.packageName)
-            
-            // Reset state after a delay to ensure UI reflects launch
-            delay(1000)
-            _launchState.value = LaunchState.NONE
         }
     }
 

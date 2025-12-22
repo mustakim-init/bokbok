@@ -25,7 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.model.PermissionsList
@@ -38,8 +38,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     navController: NavHostController,
-    authViewModel: AuthViewModel = viewModel(),
-    userViewModel: UserViewModel = viewModel()
+    authViewModel: AuthViewModel = hiltViewModel(),
+    userViewModel: UserViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

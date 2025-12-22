@@ -35,16 +35,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.mustakim.bokbok.utils.AppIconCache
 import java.text.DecimalFormat
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -94,14 +92,13 @@ fun AppListItem(
         ) {
             // App Icon with selection indicator - async loading for performance
             Box {
-                // Load bitmap async to prevent main thread blocking during scroll
-                var iconBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-                LaunchedEffect(app.packageName) {
-                    iconBitmap = withContext(Dispatchers.Default) {
-                        app.icon?.toBitmap()?.asImageBitmap()
-                    }
-                }
+                val context = LocalContext.current
+                var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
                 
+                LaunchedEffect(app.packageName) {
+                    iconBitmap = AppIconCache.getIcon(context, app.packageName)
+                }
+
                 if (iconBitmap != null) {
                     Image(
                         bitmap = iconBitmap!!,
@@ -111,14 +108,11 @@ fun AppListItem(
                             .clip(RoundedCornerShape(12.dp))
                     )
                 } else {
-                    // Placeholder while loading
                     Box(
                         modifier = Modifier
                             .size(52.dp)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest,
-                                RoundedCornerShape(12.dp)
-                            )
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     )
                 }
                 
@@ -187,9 +181,10 @@ fun AppListItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Size
-                    if (app.apkSize > 0) {
-                        MetadataChip(text = formatFileSize(app.apkSize))
+                    // Size (Total: APK + Data + Cache)
+                    val totalSize = app.apkSize + app.dataSize + app.cacheSize
+                    if (totalSize > 0) {
+                        MetadataChip(text = formatFileSize(totalSize))
                     }
                     
                     // Target SDK

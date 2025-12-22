@@ -2,18 +2,19 @@ package com.mustakim.bokbok.viewmodel
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
+import com.mustakim.bokbok.data.repository.AuthRepository
 import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
+import com.mustakim.bokbok.data.repository.SendMessageResult
+import com.mustakim.bokbok.data.repository.UserRepository
+import androidx.lifecycle.SavedStateHandle
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * GroupChatViewModel - Optimized with lazy initialization
@@ -22,10 +23,16 @@ import kotlinx.coroutines.launch
  * 1. Uses SharingStarted.Lazily for message flows
  * 2. Heavy operations use Dispatchers.IO
  */
-class GroupChatViewModel(
+@HiltViewModel
+class GroupChatViewModel @Inject constructor(
     private val repository: HybridGroupChatRepository,
-    val groupId: String
+    private val userRepository: UserRepository,
+    private val authRepository: AuthRepository,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    val groupId: String = savedStateHandle.get<String>("groupId")
+        ?: throw IllegalArgumentException("groupId is required")
 
     val currentUserId: String = repository.currentUserId
 
@@ -228,14 +235,4 @@ class GroupChatViewModel(
         }
     }
 
-    class Factory(
-        private val context: Context,
-        val groupId: String
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val repository = HybridGroupChatRepository(context)
-            return GroupChatViewModel(repository, groupId) as T
-        }
-    }
 }

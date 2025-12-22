@@ -61,7 +61,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.mustakim.bokbok.data.model.VoiceRoomParticipant
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.ParticipantCard
@@ -77,7 +77,7 @@ fun VoiceRoomScreen(
     roomId: String,
     onMinimize: (Boolean) -> Unit,
     onLeaveRoom: () -> Unit,
-    viewModel: VoiceRoomViewModel = viewModel()
+    viewModel: VoiceRoomViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val friends by viewModel.friends.collectAsState()
@@ -551,7 +551,7 @@ private fun AddParticipantsDialog(
     friends: List<com.mustakim.bokbok.data.model.FriendWithUser>,
     onDismiss: () -> Unit,
     onConfirm: (List<String>) -> Unit,
-    viewModel: VoiceRoomViewModel = viewModel() // Add ViewModel for search
+    viewModel: VoiceRoomViewModel = hiltViewModel() // Add ViewModel for search
 ) {
     var selectedTab by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val selectedUserIds = remember { androidx.compose.runtime.mutableStateListOf<String>() }

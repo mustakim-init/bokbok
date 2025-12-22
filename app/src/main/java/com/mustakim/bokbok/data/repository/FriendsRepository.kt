@@ -12,15 +12,17 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.database.*
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class FriendsRepository(
-    private val userRepository: UserRepository
+@Singleton
+class FriendsRepository @Inject constructor(
+    private val userRepository: UserRepository,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val rtdb: FirebaseDatabase
 ) {
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
     private val friendshipsCollection = firestore.collection("friendships")
-
-    private val rtdb: FirebaseDatabase = FirebaseDatabase.getInstance()
     private val userStatusRef: DatabaseReference = rtdb.getReference("userStatus")
 
     private fun getFriendshipId(userId1: String, userId2: String): String {

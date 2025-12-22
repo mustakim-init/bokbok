@@ -18,11 +18,17 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.model.User
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.tasks.await
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class AuthRepository(private val context: Context) {
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
+@Singleton
+class AuthRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore
+) {
 
     private val credentialManager by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

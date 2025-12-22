@@ -41,11 +41,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mustakim.bokbok.viewmodel.AppFilterType
 import com.mustakim.bokbok.viewmodel.AppManagerViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppManagerScreen(
-    viewModel: AppManagerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    viewModel: AppManagerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()

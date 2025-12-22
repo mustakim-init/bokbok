@@ -7,7 +7,9 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.mustakim.bokbok.workers.BloatwareSyncWorker
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class BokBokApp : Application() {
     override fun onCreate() {
         super.onCreate()

@@ -11,5 +11,6 @@ data class GameEntity(
     val isHiddenFromLauncher: Boolean = false,
     val isUserAdded: Boolean = false,
     val optimizationProfile: OptimizationProfile = OptimizationProfile.BALANCED,
-    val customSettingsJson: String = "{}"
+    val customSettingsJson: String = "{}",
+    val isManuallyRemoved: Boolean = false
 )

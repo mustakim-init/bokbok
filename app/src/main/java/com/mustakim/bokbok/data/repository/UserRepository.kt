@@ -11,14 +11,20 @@ import com.google.firebase.firestore.Source
 import com.mustakim.bokbok.BuildConfig
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.model.User
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.tasks.await
 import java.io.ByteArrayOutputStream
+import javax.inject.Inject
+import javax.inject.Singleton
 
 
-class UserRepository(private val context: Context) {
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
-    private val imgBBApi = ImgBBApi.create()
+@Singleton
+class UserRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val imgBBApi: ImgBBApi
+) {
 
     // ✅ NEW: Simple in-memory cache
     private data class CachedUser(

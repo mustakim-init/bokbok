@@ -18,8 +18,13 @@ import com.mustakim.bokbok.R
 import android.net.wifi.WifiManager
 import com.google.firebase.database.ValueEventListener
 import com.mustakim.bokbok.data.repository.PresenceRepository
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class VoiceService : Service() {
+ 
+    @Inject lateinit var presenceRepository: PresenceRepository
 
     companion object {
         const val ACTION_START = "bokbok.voice.START"
@@ -139,8 +144,7 @@ class VoiceService : Service() {
 
     private val remoteVolumes = mutableMapOf<String, Double>()
 
-    // [NEW] Presence Management in Service
-    private val presenceRepository = PresenceRepository()
+    // [NEW] Presence Management in Service - using injected repository
     private var presenceListener: ValueEventListener? = null
     private var previousParticipantIds = emptySet<String>()
 

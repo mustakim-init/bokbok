@@ -16,90 +16,93 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import androidx.core.content.pm.PackageInfoCompat
 import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
 import java.io.File
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 class AppManagerRepository @Inject constructor(
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) {
     private val packageManager: PackageManager = context.packageManager
 
-    fun getInstalledApps(includeSystem: Boolean = true): Flow<List<AppItem>> = flow {
+    private var cachedApps: List<AppItem>? = null
+
+    fun getInstalledApps(includeSystem: Boolean = true, forceRefresh: Boolean = false): Flow<List<AppItem>> = flow {
+        if (cachedApps != null && !forceRefresh) {
+            emit(cachedApps!!)
+            return@flow
+        }
+
         // Pre-load bloatware database
         BloatwareDatabase.load(context)
         
-        val apps = mutableListOf<AppItem>()
         // Use MATCH_UNINSTALLED_PACKAGES to find apps that can be restored (installed for user 0 but not current user)
         val flags = PackageManager.GET_META_DATA or PackageManager.MATCH_UNINSTALLED_PACKAGES
         val packages = packageManager.getInstalledPackages(flags)
 
-        for (packageInfo in packages) {
-            val appInfo = packageInfo.applicationInfo ?: continue
-            
-            // Check if installed for current user
-            val isInstalled = (appInfo.flags and ApplicationInfo.FLAG_INSTALLED) != 0
-            val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-            
-            // Filter logic:
-            // 1. If not installed (restorable), show it.
-            // 2. If installed, respect includeSystem flag.
-            if (isInstalled && !includeSystem && isSystemApp) continue
-
-            // Get bloatware info
-            val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(context, packageInfo.packageName)
-            val isBloatware = bloatwareInfo != null
-            val removalSafety = bloatwareInfo?.getRemovalSafety() ?: RemovalSafety.UNKNOWN
-            
-            // Get min SDK
-            val minSdk =
-                appInfo.minSdkVersion
-
-            // Get app size (try StorageStatsManager first)
-            // If app is not installed (restorable), size will likely be 0 or null, which is fine.
-            val sizeInfo = if (isInstalled) getAppSize(packageInfo.packageName) else null
-            val (apkSize, dataSize, cacheSize) = if (sizeInfo != null) {
-                sizeInfo
-            } else {
-                // Fallback or uninstalled
-                Triple(File(appInfo.sourceDir).length(), 0L, 0L)
-            }
-
-            val appItem = AppItem(
-                packageName = packageInfo.packageName,
-                label = packageManager.getApplicationLabel(appInfo).toString(),
-                versionName = packageInfo.versionName,
-                versionCode = PackageInfoCompat.getLongVersionCode(packageInfo),
-                icon = packageManager.getApplicationIcon(appInfo), // Icon might be default android if uninstalled, but often still cached or accessible if apk exists
-                isSystemApp = isSystemApp,
-                isEnabled = appInfo.enabled,
-                isInstalled = isInstalled, // Important: pass correctly
-                uid = appInfo.uid,
-                targetSdk = appInfo.targetSdkVersion,
-                minSdk = minSdk,
-                firstInstallTime = packageInfo.firstInstallTime,
-                lastUpdateTime = packageInfo.lastUpdateTime,
-                apkSize = apkSize,
-                dataSize = dataSize,
-                cacheSize = cacheSize,
-                hasActivities = packageManager.getLaunchIntentForPackage(packageInfo.packageName) != null,
-                isDebuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
-                // Bloatware fields
-                isBloatware = isBloatware,
-                removalSafety = removalSafety,
-                bloatwareInfo = bloatwareInfo,
-                bloatwareType = bloatwareInfo?.type,
-                bloatwareWarning = bloatwareInfo?.warning,
-                bloatwareDescription = bloatwareInfo?.description,
-                // Paths
-                apkPath = appInfo.sourceDir ?: "",
-                dataPath = appInfo.dataDir ?: ""
-            )
-            apps.add(appItem)
+        val apps = coroutineScope {
+            packages.map { packageInfo ->
+                async {
+                    val appInfo = packageInfo.applicationInfo ?: return@async null
+                    
+                    // Check if installed for current user
+                    val isInstalled = (appInfo.flags and ApplicationInfo.FLAG_INSTALLED) != 0
+                    val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    
+                    if (isInstalled && !includeSystem && isSystemApp) return@async null
+    
+                    // Get bloatware info
+                    val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(context, packageInfo.packageName)
+                    val isBloatware = bloatwareInfo != null
+                    val removalSafety = bloatwareInfo?.getRemovalSafety() ?: RemovalSafety.UNKNOWN
+                    
+                    // Get accurate app size in parallel
+                    val sizeInfo = if (isInstalled) getAppSize(packageInfo.packageName) else null
+                    val (apkSize, dataSize, cacheSize) = sizeInfo ?: Triple(File(appInfo.sourceDir).length(), 0L, 0L)
+                    
+                    // Get min SDK
+                    val minSdk = appInfo.minSdkVersion
+    
+                    AppItem(
+                        packageName = packageInfo.packageName,
+                        label = packageManager.getApplicationLabel(appInfo).toString(),
+                        versionName = packageInfo.versionName,
+                        versionCode = PackageInfoCompat.getLongVersionCode(packageInfo),
+                        isSystemApp = isSystemApp,
+                        isEnabled = appInfo.enabled,
+                        isInstalled = isInstalled,
+                        uid = appInfo.uid,
+                        targetSdk = appInfo.targetSdkVersion,
+                        minSdk = minSdk,
+                        firstInstallTime = packageInfo.firstInstallTime,
+                        lastUpdateTime = packageInfo.lastUpdateTime,
+                        apkSize = apkSize,
+                        dataSize = dataSize,
+                        cacheSize = cacheSize,
+                        hasActivities = true,
+                        isDebuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+                        isBloatware = isBloatware,
+                        removalSafety = removalSafety,
+                        bloatwareInfo = bloatwareInfo,
+                        bloatwareType = bloatwareInfo?.type,
+                        bloatwareWarning = bloatwareInfo?.warning,
+                        bloatwareDescription = bloatwareInfo?.description,
+                        apkPath = appInfo.sourceDir ?: "",
+                        dataPath = appInfo.dataDir ?: ""
+                    )
+                }
+            }.awaitAll().filterNotNull()
         }
-        emit(apps.sortedBy { it.label.lowercase() })
+    
+        val result = apps.sortedBy { it.label.lowercase() }
+        cachedApps = result
+        emit(result)
     }.flowOn(Dispatchers.IO)
 
     fun openAppDetails(packageName: String) {

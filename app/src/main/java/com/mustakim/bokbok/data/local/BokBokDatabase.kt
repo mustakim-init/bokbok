@@ -39,9 +39,7 @@ abstract class BokBokDatabase : RoomDatabase() {
                     context.applicationContext,
                     BokBokDatabase::class.java,
                     "bokbok_database"
-                )
-                    .fallbackToDestructiveMigration() // For development
-                    .build()
+                ).build()
                 INSTANCE = instance
                 instance
             }

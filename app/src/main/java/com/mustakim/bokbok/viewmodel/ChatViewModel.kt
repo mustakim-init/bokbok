@@ -1,19 +1,21 @@
 package com.mustakim.bokbok.viewmodel
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.Message
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.HybridChatRepository
 import com.mustakim.bokbok.data.repository.UserRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import javax.inject.Inject
 
 /**
  * ChatViewModel - Optimized with lazy initialization
@@ -23,12 +25,16 @@ import kotlinx.coroutines.withContext
  * 2. Call onScreenVisible() when chat screen appears
  * 3. Network calls run on Dispatchers.IO
  */
-class ChatViewModel(
+@HiltViewModel
+class ChatViewModel @Inject constructor(
     private val chatRepository: HybridChatRepository,
     private val userRepository: UserRepository,
     private val friendsRepository: FriendsRepository,
-    val friendId: String
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+    
+    val friendId: String = savedStateHandle.get<String>("userId")
+        ?: throw IllegalArgumentException("userId is required")
 
     private val _messages = MutableStateFlow<List<Message>?>(null)
     val messages: StateFlow<List<Message>?> = _messages.asStateFlow()
@@ -229,15 +235,4 @@ class ChatViewModel(
         }
     }
 
-    class Factory(
-        private val chatRepository: HybridChatRepository,
-        private val userRepository: UserRepository,
-        private val friendsRepository: FriendsRepository,
-        val friendId: String
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(chatRepository, userRepository, friendsRepository, friendId) as T
-        }
-    }
 }

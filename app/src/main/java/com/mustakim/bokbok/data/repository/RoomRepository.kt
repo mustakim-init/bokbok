@@ -9,17 +9,20 @@ import com.mustakim.bokbok.data.model.RoomCategory
 import com.mustakim.bokbok.data.model.VoiceRoom
 import kotlinx.coroutines.tasks.await
 import com.mustakim.bokbok.data.model.User
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class RoomRepository {
+@Singleton
+class RoomRepository @Inject constructor(
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val imgBBApi: com.mustakim.bokbok.data.api.ImgBBApi
+) {
 
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
     private val roomsCollection = firestore.collection("rooms")
     // ✅ NEW: Simple in-memory cache
     private val roomCache = java.util.concurrent.ConcurrentHashMap<String, Pair<VoiceRoom, Long>>()
     private val CACHE_TTL = 2 * 60 * 1000L // 2 minutes
-
-    private val imgBBApi = com.mustakim.bokbok.data.api.ImgBBApi.create()
 
     /**
      * Load active rooms from Firestore.

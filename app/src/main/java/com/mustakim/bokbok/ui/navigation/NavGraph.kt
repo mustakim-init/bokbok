@@ -10,20 +10,18 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.mustakim.bokbok.data.model.PermissionsList
-import com.mustakim.bokbok.data.repository.FriendsRepository
-import com.mustakim.bokbok.data.repository.UserRepository
 import com.mustakim.bokbok.ui.screens.auth.GoogleSignupScreen
 import com.mustakim.bokbok.ui.screens.auth.LoginScreen
 import com.mustakim.bokbok.ui.screens.auth.SignupScreen
@@ -89,18 +87,8 @@ private object NavigationAnimations {
 fun NavGraph(
     navController: NavHostController,
     themeViewModel: ThemeViewModel,
-    userViewModel: UserViewModel // ✅ Receive from parent
 ) {
     val context = LocalContext.current
-    val application = context.applicationContext as android.app.Application
-
-    // ✅ Memoize repositories at NavGraph level
-    val userRepository = remember(context) { UserRepository(context) }
-    val friendsRepository = remember(userRepository) { FriendsRepository(userRepository) }
-    val notificationRepository = remember { com.mustakim.bokbok.data.repository.NotificationRepository() }
-    val chatRepository = remember { com.mustakim.bokbok.data.repository.ChatRepository() }
-    val hybridChatRepository = remember(context) { com.mustakim.bokbok.data.repository.HybridChatRepository(context) }
-    val hybridGroupChatRepository = remember(context) { com.mustakim.bokbok.data.repository.HybridGroupChatRepository(context) }
 
     // ✅ Memoize permission check logic
     val hasAllRequiredPermissions = remember(context) {
@@ -144,6 +132,7 @@ fun NavGraph(
         }
 
         composable(NavRoutes.Login.route) {
+            val userViewModel: UserViewModel = hiltViewModel()
             LoginScreen(
                 navController = navController,
                 userViewModel = userViewModel
@@ -151,6 +140,7 @@ fun NavGraph(
         }
 
         composable(NavRoutes.Signup.route) {
+            val userViewModel: UserViewModel = hiltViewModel()
             SignupScreen(
                 navController = navController,
                 userViewModel = userViewModel
@@ -158,6 +148,7 @@ fun NavGraph(
         }
 
         composable(NavRoutes.GoogleSignup.route) {
+            val userViewModel: UserViewModel = hiltViewModel()
             GoogleSignupScreen(
                 navController = navController,
                 userViewModel = userViewModel
@@ -170,17 +161,9 @@ fun NavGraph(
 
         // ============= MAIN APP FLOW =============
         composable(NavRoutes.Lounge.route) {
-            val loungeViewModel = viewModel<LoungeViewModel>()
-
-            // Create NotificationViewModel with Factory
-            val notificationViewModel: NotificationViewModel = viewModel(
-                factory = NotificationViewModel.Factory(
-                    application,
-                    notificationRepository,
-                    friendsRepository,
-                    userRepository
-                )
-            )
+            val loungeViewModel: LoungeViewModel = hiltViewModel()
+            val userViewModel: UserViewModel = hiltViewModel()
+            val notificationViewModel: NotificationViewModel = hiltViewModel()
 
             val notificationCount by notificationViewModel.unreadCount.collectAsState()
 
@@ -193,12 +176,8 @@ fun NavGraph(
         }
 
         composable(NavRoutes.Chats.route) {
-            // ✅ Use memoized repositories from NavGraph
+            val userViewModel: UserViewModel = hiltViewModel()
             ChatsScreen(
-                friendsRepository = friendsRepository,
-                chatRepository = chatRepository,
-                hybridChatRepository = hybridChatRepository,
-                hybridGroupChatRepository = hybridGroupChatRepository,
                 onFriendClick = { userId ->
                     navController.navigate(NavRoutes.Chat.createRoute(userId))
                 },
@@ -208,25 +187,14 @@ fun NavGraph(
         }
 
         composable(NavRoutes.GameBoost.route) {
+            val userViewModel: UserViewModel = hiltViewModel()
             GameBoostScreen(navController, userViewModel)
         }
 
         // ============= SECONDARY SCREENS =============
         composable(NavRoutes.Notifications.route) {
-            // Create NotificationViewModel with Factory (shared instance if scoped correctly, but here it's a new screen)
-            // Ideally we scope it to a navigation graph, but for now we recreate or get existing if scoped.
-            // Since we are in a different composable, `viewModel()` will create a new one unless we scope it.
-            // For notifications, a fresh VM is fine, or we can scope to the Activity.
-
-            val notificationViewModel: NotificationViewModel = viewModel(
-                factory = NotificationViewModel.Factory(
-                    application,
-                    notificationRepository,
-                    friendsRepository,
-                    userRepository
-                )
-            )
-
+            val notificationViewModel: NotificationViewModel = hiltViewModel()
+ 
             NotificationsScreen(
                 navController = navController,
                 viewModel = notificationViewModel
@@ -260,18 +228,8 @@ fun NavGraph(
                     nullable = false
                 }
             )
-        ) { backStackEntry ->
-            val userId = backStackEntry.arguments?.getString("userId")
-                ?: return@composable
-            
-            val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = viewModel(
-                factory = com.mustakim.bokbok.viewmodel.ChatViewModel.Factory(
-                    hybridChatRepository,
-                    userRepository,
-                    friendsRepository,
-                    userId
-                )
-            )
+        ) {
+            val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel()
             
             com.mustakim.bokbok.ui.screens.chat.ChatScreen(
                 navController = navController,
@@ -287,17 +245,9 @@ fun NavGraph(
                     nullable = false
                 }
             )
-        ) { backStackEntry ->
-            val groupId = backStackEntry.arguments?.getString("groupId")
-                ?: return@composable
-
-            val groupChatViewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
-                factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(
-                    context,
-                    groupId
-                )
-            )
-
+        ) {
+            val groupChatViewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
+ 
             com.mustakim.bokbok.ui.screens.chat.GroupChatScreen(
                 navController = navController,
                 viewModel = groupChatViewModel
@@ -311,13 +261,10 @@ fun NavGraph(
                 navArgument("isGroup") { type = NavType.BoolType; defaultValue = false }
             )
         ) { backStackEntry ->
-            val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
             val isGroup = backStackEntry.arguments?.getBoolean("isGroup") ?: false
-
+ 
             if (isGroup) {
-                val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
-                    factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(context, chatId)
-                )
+                val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
                 val groupName by viewModel.groupName.collectAsState()
                 val groupMembers by viewModel.groupMembers.collectAsState()
                 val groupInfo by viewModel.groupInfo.collectAsState()
@@ -356,6 +303,7 @@ fun NavGraph(
                     },
                     onAddMember = { showAddMemberDialog = true },
                     onSeeMembers = {
+                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
                         navController.navigate(NavRoutes.ChatMembers.createRoute(chatId))
                     },
                     onRemoveGroupImage = { viewModel.removeGroupImage() },
@@ -372,7 +320,6 @@ fun NavGraph(
                 if (showAddMemberDialog) {
                     com.mustakim.bokbok.ui.screens.chat.AddMemberDialog(
                         currentMembers = groupMembers,
-                        friendsRepository = friendsRepository,
                         onDismiss = { showAddMemberDialog = false },
                         onAddMembers = { userIds ->
                             userIds.forEach { userId ->
@@ -383,14 +330,7 @@ fun NavGraph(
                     )
                 }
             } else {
-                val viewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = viewModel(
-                    factory = com.mustakim.bokbok.viewmodel.ChatViewModel.Factory(
-                        hybridChatRepository,
-                        userRepository,
-                        friendsRepository,
-                        chatId
-                    )
-                )
+                val viewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel()
                 val friendUser by viewModel.friendUser.collectAsState()
                 
                 com.mustakim.bokbok.ui.screens.chat.ChatDetailsScreen(
@@ -425,9 +365,7 @@ fun NavGraph(
             
             // Reuse GroupChatViewModel or create new one with same groupId
             // Since we need to manage members (remove), reusing is good.
-            val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = viewModel(
-                factory = com.mustakim.bokbok.viewmodel.GroupChatViewModel.Factory(context, groupId)
-            )
+            val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
 
             com.mustakim.bokbok.ui.screens.chat.ChatMembersScreen(
                 viewModel = viewModel,

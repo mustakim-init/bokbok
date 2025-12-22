@@ -10,6 +10,10 @@ import com.mustakim.bokbok.data.model.Notification
 import com.mustakim.bokbok.data.repository.FriendsRepository
 import com.mustakim.bokbok.data.repository.NotificationRepository
 import com.mustakim.bokbok.data.repository.UserRepository
+import com.mustakim.bokbok.data.repository.RoomRepository
+import com.mustakim.bokbok.state.JoinMode
+import com.mustakim.bokbok.state.RoomStateManager
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 sealed class NotificationUiItem {
     abstract val id: String
@@ -39,12 +44,13 @@ enum class NotificationFilter {
     ALL, INVITES, REQUESTS
 }
 
-class NotificationViewModel(
-    application: Application,
+@HiltViewModel
+class NotificationViewModel @Inject constructor(
     private val notificationRepository: NotificationRepository,
     private val friendsRepository: FriendsRepository,
-    private val userRepository: UserRepository
-) : AndroidViewModel(application) {
+    private val userRepository: UserRepository,
+    private val roomRepository: RoomRepository
+) : ViewModel() {
 
     private val _filter = MutableStateFlow(NotificationFilter.ALL)
     val filter: StateFlow<NotificationFilter> = _filter
@@ -125,25 +131,17 @@ class NotificationViewModel(
             notificationRepository.deleteNotification(userId, notificationId)
         }
     }
-
-    // Factory for dependency injection
-    class Factory(
-        private val application: Application,
-        private val notificationRepository: NotificationRepository,
-        private val friendsRepository: FriendsRepository,
-        private val userRepository: UserRepository
-    ) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            if (modelClass.isAssignableFrom(NotificationViewModel::class.java)) {
-                return NotificationViewModel(
-                    application,
-                    notificationRepository,
-                    friendsRepository,
-                    userRepository
-                ) as T
+ 
+    fun joinRoom(roomId: String, loungeViewModel: LoungeViewModel, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            roomRepository.getRoom(roomId).onSuccess { room ->
+                loungeViewModel.joinRoomSessionOnly(room)
+                RoomStateManager.joinRoom(room, JoinMode.SESSION_ONLY)
+                deleteNotification(roomId) // Use roomId as notificationId if applicable, or pass both
+                onComplete()
+            }.onFailure {
+                // handle failure
             }
-            throw IllegalArgumentException("Unknown ViewModel class")
         }
     }
 }

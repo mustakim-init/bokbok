@@ -21,7 +21,11 @@ data class TweakDef(
     val isGlobal: Boolean = false,
     val requiresAdb: Boolean = true,
     val options: List<String>? = null,
-    val category: String
+    val category: String,
+    val minSdk: Int = 1,
+    val maxSdk: Int = Int.MAX_VALUE,
+    val manufacturer: String? = null, // e.g. "samsung", "xiaomi"
+    val warning: String? = null // For caution tweaks
 )
 
 enum class CompileMode(val value: String) {

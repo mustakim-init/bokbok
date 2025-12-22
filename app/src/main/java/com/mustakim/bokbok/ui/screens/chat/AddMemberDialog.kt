@@ -2,7 +2,17 @@ package com.mustakim.bokbok.ui.screens.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -10,8 +20,28 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,12 +49,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.google.firebase.firestore.FirebaseFirestore
 import com.mustakim.bokbok.data.model.User
-import com.mustakim.bokbok.data.repository.FriendsRepository
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import com.mustakim.bokbok.viewmodel.AddMemberViewModel
 
 /**
  * Dialog to add members to a group chat.
@@ -37,79 +65,36 @@ import kotlinx.coroutines.tasks.await
 @Composable
 fun AddMemberDialog(
     currentMembers: List<User>,
-    friendsRepository: FriendsRepository,
     onDismiss: () -> Unit,
-    onAddMembers: (List<String>) -> Unit // userId list for bulk add
+    onAddMembers: (List<String>) -> Unit,
+    viewModel: AddMemberViewModel = hiltViewModel()
 ) {
-    val scope = rememberCoroutineScope()
-    var friends by remember { mutableStateOf<List<User>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val friends by viewModel.friends.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val globalSearchResults by viewModel.globalSearchResults.collectAsState()
+    val isSearching by viewModel.isSearching.collectAsState()
     
+    // Add missing state variables
     var selectedTab by remember { mutableIntStateOf(0) }
     val selectedUserIds = remember { mutableStateListOf<String>() }
-    var searchQuery by remember { mutableStateOf("") }
-    
-    // Global Search State
-    var globalSearchResults by remember { mutableStateOf<List<User>>(emptyList()) }
-    var isSearching by remember { mutableStateOf(false) }
-    
-    val firestore = remember { FirebaseFirestore.getInstance() }
-    
-    // Fetch friends on dialog open
-    LaunchedEffect(Unit) {
-        scope.launch {
-            isLoading = true
-            friendsRepository.observeFriends().collect { friendStatusList ->
-                // Filter out current members
-                val memberIds = currentMembers.map { it.uid }.toSet()
-                friends = friendStatusList
-                    .map { it.user }
-                    .filter { it.uid !in memberIds }
-                isLoading = false
-            }
-        }
-    }
+
+    val memberIds = remember(currentMembers) { currentMembers.map { it.uid }.toSet() }
     
     // Friend filter logic
-    val filteredFriends = remember(friends, searchQuery, selectedTab) {
+    val filteredFriends = remember(friends, searchQuery, selectedTab, memberIds) {
+        val list = friends.filter { it.uid !in memberIds }
         if (selectedTab == 0 && searchQuery.isNotBlank()) {
-            friends.filter {
+            list.filter {
                 it.username.contains(searchQuery, ignoreCase = true) ||
                 it.displayName.contains(searchQuery, ignoreCase = true)
             }
-        } else friends
+        } else list
     }
     
     // Global search when tab is 1
     LaunchedEffect(searchQuery, selectedTab) {
         if (selectedTab == 1 && searchQuery.isNotBlank()) {
-            isSearching = true
-            try {
-                val memberIds = currentMembers.map { it.uid }.toSet()
-                val snapshot = firestore.collection("users")
-                    .whereGreaterThanOrEqualTo("username", searchQuery.lowercase())
-                    .whereLessThanOrEqualTo("username", searchQuery.lowercase() + "\uf8ff")
-                    .limit(20)
-                    .get()
-                    .await()
-                
-                globalSearchResults = snapshot.documents.mapNotNull { doc ->
-                    val uid = doc.id
-                    if (uid in memberIds) return@mapNotNull null // Skip existing members
-                    
-                    User(
-                        uid = uid,
-                        username = doc.getString("username") ?: "",
-                        displayName = doc.getString("displayName") ?: "",
-                        profileImageUrl = doc.getString("profileImageUrl") ?: ""
-                    )
-                }
-            } catch (e: Exception) {
-                globalSearchResults = emptyList()
-            }
-            isSearching = false
-        } else if (selectedTab == 1) {
-            globalSearchResults = emptyList()
+            viewModel.searchGlobal(searchQuery, currentMembers.map { it.uid })
         }
     }
     
@@ -147,12 +132,12 @@ fun AddMemberDialog(
                 ) {
                     Tab(
                         selected = selectedTab == 0,
-                        onClick = { selectedTab = 0; searchQuery = "" },
+                        onClick = { selectedTab = 0; viewModel.updateSearchQuery("") },
                         text = { Text("Friends") }
                     )
                     Tab(
                         selected = selectedTab == 1,
-                        onClick = { selectedTab = 1; searchQuery = "" },
+                        onClick = { selectedTab = 1; viewModel.updateSearchQuery("") },
                         text = { Text("Global Search") }
                     )
                 }
@@ -162,7 +147,7 @@ fun AddMemberDialog(
                 // Search Bar
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = { viewModel.updateSearchQuery(it) },
                     placeholder = { 
                         Text(if (selectedTab == 0) "Search friends..." else "Search by username...") 
                     },
@@ -176,7 +161,7 @@ fun AddMemberDialog(
                 
                 Box(modifier = Modifier.weight(1f, fill = false)) {
                     when {
-                        isLoading && selectedTab == 0 -> {
+                        selectedTab == 0 && friends.isEmpty() -> {
                             Box(
                                 modifier = Modifier.fillMaxWidth().padding(24.dp),
                                 contentAlignment = Alignment.Center

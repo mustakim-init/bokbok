@@ -14,11 +14,13 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class AppManagerViewModel(
-    application: android.app.Application
-) : androidx.lifecycle.AndroidViewModel(application) {
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 
-    private val repository = AppManagerRepository(application)
+@HiltViewModel
+class AppManagerViewModel @Inject constructor(
+    private val repository: AppManagerRepository
+) : androidx.lifecycle.ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()

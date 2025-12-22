@@ -2,10 +2,12 @@ package com.mustakim.bokbok.data.repository
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
+import javax.inject.Inject
+import javax.inject.Singleton
+
+
 // Define the API Interface
 interface BackendService {
     // Note: The path matches your file name in api/ folder
@@ -23,19 +25,12 @@ data class BackendResponse(
     val messageId: String?,
     val error: String?
 )
-class FCMRepository {
+
+
+@Singleton
+class FCMRepository @Inject constructor(
     private val backendService: BackendService
-    init {
-        // 🛑 REPLACE THIS WITH YOUR VERCEL URL
-        val backendUrl = "https://bokbok-backend.vercel.app/"
-
-        val retrofit = Retrofit.Builder()
-            .baseUrl(backendUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-
-        backendService = retrofit.create(BackendService::class.java)
-    }
+) {
     suspend fun sendNotification(
         toToken: String,
         title: String,

@@ -26,7 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.mustakim.bokbok.state.RoomStateManager
@@ -69,7 +69,7 @@ fun MainScaffold(
     val (currentRoom, isMinimized, isMuted) = roomState
 
     // Scope ViewModel to the current room ID to prevent memory leaks
-    val voiceRoomViewModel: VoiceRoomViewModel = viewModel(
+    val voiceRoomViewModel: VoiceRoomViewModel = hiltViewModel(
         key = currentRoom?.let { "room_${it.id}" }
     )
 
@@ -79,7 +79,7 @@ fun MainScaffold(
         }
     }
 
-    val authViewModel: AuthViewModel = viewModel()
+    val authViewModel: AuthViewModel = hiltViewModel()
 
     // Just compute it each recomposition, no remember
     val showBars = currentRoom == null || isMinimized

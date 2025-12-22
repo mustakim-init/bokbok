@@ -11,9 +11,15 @@ import com.google.firebase.messaging.RemoteMessage
 import com.mustakim.bokbok.MainActivity
 import com.mustakim.bokbok.R
 import com.mustakim.bokbok.data.receiver.NotificationReceiver
+import com.mustakim.bokbok.data.repository.UserRepository
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MyFirebaseMessagingService : FirebaseMessagingService() {
+ 
+    @Inject lateinit var userRepository: UserRepository
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         android.util.Log.d("FCM", "Message received from: ${remoteMessage.from}")
@@ -109,10 +115,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // Save token to Firestore
-        val repo = com.mustakim.bokbok.data.repository.UserRepository(applicationContext)
+        // Save token to Firestore using injected repository
         CoroutineScope(Dispatchers.IO).launch {
-            repo.updateFcmToken(token)
+            userRepository.updateFcmToken(token)
         }
     }
 }

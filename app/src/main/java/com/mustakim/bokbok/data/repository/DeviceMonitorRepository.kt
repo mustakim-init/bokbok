@@ -31,8 +31,13 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.io.StringReader
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
 
-class DeviceMonitorRepository(private val context: Context) {
+
+class DeviceMonitorRepository @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     private var lastCpuTotal: Long = 0

@@ -20,6 +20,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
+
 
 /**
  * Result type for sendMessage operations
@@ -33,19 +37,22 @@ sealed class SendMessageResult {
 /**
  * Hybrid ChatRepository: Room as source of truth, Firestore for sync
  * 
+ *
  * Architecture:
  * - All reads come from Room (instant, offline-first)
  * - Writes go to Room first (instant UI update)
  * - Background sync to Firestore via WorkManager
  * - Firestore listeners update Room for incoming messages
  */
-class HybridChatRepository(private val context: Context) {
-
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
-    private val database = BokBokDatabase.getInstance(context)
+@Singleton
+class HybridChatRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore,
+    private val database: BokBokDatabase,
+    private val fcmRepository: FCMRepository
+) {
     private val messageDao = database.messageDao()
-
     private val backgroundScope = CoroutineScope(Dispatchers.IO)
 
     init {
@@ -153,7 +160,7 @@ class HybridChatRepository(private val context: Context) {
                 val senderName = try {
                     val senderDoc = firestore.collection("users").document(senderId).get().await()
                     senderDoc.getString("displayName") ?: "Someone"
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     "Someone"
                 }
                 
@@ -179,7 +186,7 @@ class HybridChatRepository(private val context: Context) {
         isGroup: Boolean,
         groupId: String? = null
     ) {
-        val fcmRepository = FCMRepository()
+        // Using injected fcmRepository
         
         for (userId in summonedUserIds) {
             try {

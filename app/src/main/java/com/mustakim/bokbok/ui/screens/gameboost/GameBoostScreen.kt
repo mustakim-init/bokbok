@@ -33,7 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
@@ -50,11 +50,11 @@ import kotlinx.coroutines.launch
 fun GameBoostScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
-    viewModel: GameBoostViewModel = viewModel(),
-    gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = viewModel(),
-    appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = viewModel(),
-    usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = viewModel(),
-    deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = viewModel()
+    viewModel: GameBoostViewModel = hiltViewModel(),
+    gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(),
+    appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(),
+    usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(),
+    deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel()
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val tabs = remember { viewModel.tabs }

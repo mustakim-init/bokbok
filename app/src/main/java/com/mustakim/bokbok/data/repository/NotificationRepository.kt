@@ -6,11 +6,13 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class NotificationRepository {
-    private val firestore = FirebaseFirestore.getInstance()
+class NotificationRepository @Inject constructor(
+    private val firestore: FirebaseFirestore
+) {
     fun observeNotifications(userId: String): Flow<List<Notification>> = callbackFlow {
         val listener = firestore.collection("users").document(userId)
             .collection("notifications")

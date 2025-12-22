@@ -4,9 +4,8 @@ import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.compose.runtime.Stable
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.database.ChildEventListener
 import com.google.firebase.database.ValueEventListener
@@ -25,6 +24,7 @@ import com.mustakim.bokbok.data.webrtc.VoiceService
 import com.mustakim.bokbok.state.ConnectionStateManager
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.state.SpeakingStateManager
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +35,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
+import javax.inject.Inject
 
 
 data class VoiceRoomUiState(
@@ -56,18 +56,19 @@ data class VoiceRoomUiState(
     val uploadedCoverUrl: String? = null // Temporary holder for new uploads
 )
 
-@Stable
-class VoiceRoomViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val roomRepository = RoomRepository()
-    private val userRepository = UserRepository(getApplication<Application>().applicationContext)
-
+@HiltViewModel
+class VoiceRoomViewModel @Inject constructor(
+    private val application: Application,
+    private val roomRepository: RoomRepository,
+    private val userRepository: UserRepository,
+    private val friendsRepository: com.mustakim.bokbok.data.repository.FriendsRepository,
+    private val presenceRepository: PresenceRepository,
+    private val fcmRepository: FCMRepository,
+    private val notificationRepository: NotificationRepository
+) : ViewModel() {
+ 
     val currentUserId: String?
         get() = userRepository.getCurrentUserId()
-
-    private val friendsRepository = com.mustakim.bokbok.data.repository.FriendsRepository(userRepository)
-    private val notificationRepository = NotificationRepository()
-    private val fcmRepository = FCMRepository()
 
     val friends = friendsRepository.observeFriends()
         .stateIn(
@@ -88,7 +89,6 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val preferencesManager = com.mustakim.bokbok.data.local.PreferencesManager(application.applicationContext)
 
-    private val presenceRepository = PresenceRepository()
     private var presenceListener: ValueEventListener? = null
     private var joinEventsListener: ChildEventListener? = null
 
@@ -307,7 +307,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     fun setOutputVolume(volume: Float) {
         _uiState.update { it.copy(outputVolume = volume) }
         // For output volume, we control the System Voice Call stream
-        val audioManager = getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+        val audioManager = application.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
         audioManager?.let { am ->
             val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_VOICE_CALL)
             val target = (max * volume).toInt()
@@ -533,7 +533,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
                     RoomStateManager.joinRoom(room)
                     // Successfully joined, start the call
                     CallController.startCall(
-                        context = getApplication(),
+                        context = application,
                         roomId = roomId,
                         selfId = selfId
                     )
@@ -561,7 +561,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun syncAudioSettingsToService() {
-        val context = getApplication<Application>().applicationContext
+        val context = application.applicationContext
         val state = _uiState.value
 
         // Apply all settings to the running service
@@ -573,7 +573,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun hasRequiredCallPermissions(): Boolean {
-        val context = getApplication<Application>().applicationContext
+        val context = application.applicationContext
         return REQUIRED_PERMISSIONS.all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
@@ -628,7 +628,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
 
     // in VoiceRoomViewModel
     fun toggleSpeaker() {
-        val appContext = getApplication<Application>().applicationContext
+        val appContext = application.applicationContext
 
         _uiState.update { current ->
             val newSpeakerOn = !current.isSpeakerOn
@@ -644,7 +644,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun toggleA2dpMode() {
-        val appContext = getApplication<Application>().applicationContext
+        val appContext = application.applicationContext
         _uiState.update { current ->
             val newMode = !current.isA2dpModeOn
             // ✅ GUARD
@@ -657,7 +657,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun toggleQualityMode() {
-        val appContext = getApplication<Application>().applicationContext
+        val appContext = application.applicationContext
         _uiState.update { current ->
             val newMode = !current.isHighQuality
             // ✅ GUARD
@@ -772,7 +772,7 @@ class VoiceRoomViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun showJoinNotification(userName: String, roomName: String) {
-        val context = getApplication<Application>().applicationContext
+        val context = application.applicationContext
         val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         // 🎤 CHANGED: New Channel ID to reset settings
         val channelId = "room_activity_v2"

@@ -12,10 +12,15 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class ChatRepository {
-    private val firestore = FirebaseFirestore.getInstance()
-    private val auth = FirebaseAuth.getInstance()
+
+@Singleton
+class ChatRepository @Inject constructor(
+    private val auth: FirebaseAuth,
+    private val firestore: FirebaseFirestore
+) {
 
     private fun getChatId(userId1: String, userId2: String): String {
         return if (userId1 < userId2) "${userId1}_$userId2" else "${userId2}_$userId1"

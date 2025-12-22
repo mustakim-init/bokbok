@@ -1,16 +1,16 @@
 package com.mustakim.bokbok.viewmodel
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.AppUsageInfo
 import com.mustakim.bokbok.data.repository.UsageStatsRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import javax.inject.Inject
 
 enum class IntervalType { DAILY, WEEKLY }
 enum class UsageSortOrder { SCREEN_TIME, TIMES_OPENED, LAST_USED, APP_NAME, BATTERY_USAGE, DATA_USAGE }
@@ -26,9 +26,12 @@ data class UsageStatsUiState(
     val sortOrder: UsageSortOrder = UsageSortOrder.SCREEN_TIME
 )
 
-class UsageStatsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = UsageStatsRepository(application)
+
+@HiltViewModel
+class UsageStatsViewModel @Inject constructor(
+    private val repository: UsageStatsRepository
+) : androidx.lifecycle.ViewModel() {
     
     private val _uiState = MutableStateFlow(UsageStatsUiState())
     val uiState: StateFlow<UsageStatsUiState> = _uiState.asStateFlow()

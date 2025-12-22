@@ -12,7 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.mustakim.bokbok.data.model.PermissionsList
-import com.mustakim.bokbok.data.repository.AuthRepository
+import com.mustakim.bokbok.viewmodel.AuthViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.mustakim.bokbok.startup.StartupManager
 import kotlinx.coroutines.delay
 
@@ -28,10 +29,10 @@ import kotlinx.coroutines.delay
 @Composable
 fun SplashScreen(
     onNavigateToLogin: () -> Unit,
-    onNavigateToLounge: () -> Unit
+    onNavigateToLounge: () -> Unit,
+    viewModel: AuthViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val authRepository = remember { AuthRepository(context) }
 
     LaunchedEffect(Unit) {
         // ✅ OPTIMIZED: Mark UI as ready for StartupManager
@@ -40,8 +41,8 @@ fun SplashScreen(
         // Minimal delay - just enough to show splash
         delay(100)
 
-        // ✅ OPTIMIZED: Only check cached auth status (synchronous, no network)
-        if (authRepository.isUserLoggedIn()) {
+        // ✅ OPTIMIZED: Only check cached auth status
+        if (viewModel.uiState.value.isLoggedIn) {
             // ✅ REMOVED: presenceRepository.setUserOnline()
             // This is now handled by StartupManager deferred tasks
 

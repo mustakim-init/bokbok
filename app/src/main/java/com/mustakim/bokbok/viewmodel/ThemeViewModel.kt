@@ -1,18 +1,21 @@
 package com.mustakim.bokbok.viewmodel
 
 import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.local.PreferencesManager
 import com.mustakim.bokbok.ui.theme.AppTheme
+import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-class ThemeViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val preferencesManager = PreferencesManager(application)
+@HiltViewModel
+class ThemeViewModel @Inject constructor(
+    private val preferencesManager: PreferencesManager
+) : ViewModel() {
 
     private val _selectedTheme = MutableStateFlow(AppTheme.MATERIAL_CLASSIC)
     val selectedTheme: StateFlow<AppTheme> = _selectedTheme.asStateFlow()

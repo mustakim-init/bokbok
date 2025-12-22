@@ -3,7 +3,6 @@ package com.mustakim.bokbok.ui.screens.gameboost.appmanager
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -20,12 +19,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CleaningServices
@@ -50,7 +47,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -59,6 +55,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,7 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -78,10 +75,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
 import com.mustakim.bokbok.data.repository.AppManagerRepository
+import com.mustakim.bokbok.utils.AppIconCache
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
@@ -388,22 +385,28 @@ private fun AppHeaderSection(
                 .clip(RoundedCornerShape(20.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainer)
         ) {
-            val iconBitmap = app.icon?.toBitmap()?.asImageBitmap()
+            val context = LocalContext.current
+            var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
+            
+            LaunchedEffect(app.packageName) {
+                iconBitmap = AppIconCache.getIcon(context, app.packageName)
+            }
+
             if (iconBitmap != null) {
                 Image(
-                    bitmap = iconBitmap,
+                    bitmap = iconBitmap!!,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                Icon(
-                    imageVector = Icons.Default.Android,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .align(Alignment.Center),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Icon(
+                        imageVector = Icons.Default.Android,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
         

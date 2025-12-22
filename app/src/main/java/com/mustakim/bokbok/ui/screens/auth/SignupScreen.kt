@@ -16,7 +16,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.viewmodel.AuthViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
@@ -25,7 +25,7 @@ import com.mustakim.bokbok.viewmodel.UserViewModel
 @Composable
 fun SignupScreen(
     navController: NavHostController,
-    authViewModel: AuthViewModel = viewModel(),
+    authViewModel: AuthViewModel = hiltViewModel(),
     userViewModel: UserViewModel  // ← Add this parameter
 ) {
     val uiState by authViewModel.uiState.collectAsState()

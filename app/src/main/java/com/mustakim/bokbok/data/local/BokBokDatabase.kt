@@ -17,9 +17,11 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         GroupEntity::class,
         GroupMemberEntity::class,
         GroupMessageEntity::class,
-        com.mustakim.bokbok.data.local.entity.GameEntity::class
+        com.mustakim.bokbok.data.local.entity.GameEntity::class,
+        com.mustakim.bokbok.data.local.entity.AppEntity::class,
+        com.mustakim.bokbok.data.local.entity.UsageStatsEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GeneralTypeConverters::class)
@@ -28,6 +30,8 @@ abstract class BokBokDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun groupDao(): GroupDao
     abstract fun gameDao(): com.mustakim.bokbok.data.local.dao.GameDao
+    abstract fun appDao(): com.mustakim.bokbok.data.local.dao.AppDao
+    abstract fun usageStatsDao(): com.mustakim.bokbok.data.local.dao.UsageStatsDao
     
     companion object {
         @Volatile
@@ -39,7 +43,8 @@ abstract class BokBokDatabase : RoomDatabase() {
                     context.applicationContext,
                     BokBokDatabase::class.java,
                     "bokbok_database"
-                ).build()
+                ).fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

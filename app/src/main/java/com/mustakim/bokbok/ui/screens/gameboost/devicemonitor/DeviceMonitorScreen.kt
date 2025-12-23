@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -80,6 +81,7 @@ fun DeviceMonitorScreen(
     
     var showProcessSheet by remember { mutableStateOf(false) }
     var showStorageSheet by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -101,6 +103,7 @@ fun DeviceMonitorScreen(
         containerColor = Color.Transparent
     ) { innerPadding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -108,7 +111,7 @@ fun DeviceMonitorScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Memory Overview (RAM & Swap)
-            item { 
+            item(key = "ram") { 
                 RamCard(
                     ramInfo = uiState.ramInfo,
                     onClick = { 
@@ -119,22 +122,22 @@ fun DeviceMonitorScreen(
             }
 
             // GPU Overview
-            item { GpuCard(uiState.gpuInfo) }
+            item(key = "gpu") { GpuCard(uiState.gpuInfo) }
             
             // CPU Overview (Per-Core & SoC Meta)
-            item { 
+            item(key = "cpu") { 
                 CpuCard(
                     cpuInfo = uiState.cpuInfo
                 ) 
             }
             
             // Battery Overview
-            item { 
+            item(key = "battery") { 
                 BatteryCard(uiState.batteryInfo) 
             }
             
             // Storage Overview
-            item { 
+            item(key = "storage") { 
                 StorageCard(
                     storageInfo = uiState.storageInfo,
                     onClick = { 
@@ -145,7 +148,7 @@ fun DeviceMonitorScreen(
             }
 
             // System Info
-            item { SystemInfoCard(uiState.hasUsagePermission) }
+            item(key = "system") { SystemInfoCard(uiState.hasUsagePermission) }
             
             item { Spacer(modifier = Modifier.height(80.dp)) }
         }

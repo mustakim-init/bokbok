@@ -9,6 +9,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Dispatchers
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -33,22 +38,55 @@ class UsageStatsViewModel @Inject constructor(
     private val repository: UsageStatsRepository
 ) : androidx.lifecycle.ViewModel() {
     
-    private val _uiState = MutableStateFlow(UsageStatsUiState())
-    val uiState: StateFlow<UsageStatsUiState> = _uiState.asStateFlow()
+    private val _sortOrder = MutableStateFlow(UsageSortOrder.SCREEN_TIME)
+    private val _isLoading = MutableStateFlow(false)
+    private val _currentDate = MutableStateFlow(System.currentTimeMillis())
+    private val _intervalType = MutableStateFlow(IntervalType.DAILY)
+    private val _hasPermission = MutableStateFlow(false)
+
+    val uiState: StateFlow<UsageStatsUiState> = combine(
+        repository.observeUsageStats(),
+        combine(_sortOrder, _isLoading, _currentDate, _intervalType, _hasPermission, ::UsageSettingsData)
+    ) { stats, settings ->
+        val sortedList = stats.sortedWith(getComparator(settings.sort))
+        val totalTime = stats.sumOf { it.screenTime }
+        
+        UsageStatsUiState(
+            usageList = sortedList,
+            totalScreenTime = totalTime,
+            isLoading = settings.loading,
+            hasPermission = settings.perm,
+            currentDate = settings.date,
+            intervalType = settings.interval,
+            sortOrder = settings.sort
+        )
+    }.flowOn(Dispatchers.Default)
+    .stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        UsageStatsUiState(isLoading = true)
+    )
 
     init {
-        checkPermissionAndLoad()
+        checkPermission()
+    }
+
+    private fun checkPermission() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val hasPerm = repository.hasUsageStatsPermission()
+            _hasPermission.value = hasPerm
+        }
+    }
+
+    fun loadDataIfNeeded() {
+        if (uiState.value.usageList.isEmpty() && uiState.value.hasPermission) {
+            loadUsageStats()
+        }
     }
 
     fun onResume() {
-        checkPermissionAndLoad()
-    }
-    
-    private fun checkPermissionAndLoad() {
-        val hasPermission = repository.hasUsageStatsPermission()
-        _uiState.update { it.copy(hasPermission = hasPermission) }
-        
-        if (hasPermission) {
+        checkPermission()
+        if (_hasPermission.value && uiState.value.usageList.isEmpty()) {
             loadUsageStats()
         }
     }
@@ -58,72 +96,67 @@ class UsageStatsViewModel @Inject constructor(
     }
 
     private fun loadUsageStats() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            try {
-                val state = _uiState.value
-                val (list, totalTime) = repository.getUsageStats(
-                    state.intervalType, 
-                    state.currentDate,
-                    state.sortOrder
-                )
-                
-                _uiState.update { 
-                    it.copy(
-                        usageList = list,
-                        totalScreenTime = totalTime,
-                        isLoading = false
-                    ) 
-                }
-            } catch (e: Exception) {
-                _uiState.update { 
-                    it.copy(
-                        error = e.message,
-                        isLoading = false
-                    ) 
-                }
-            }
-        }
+        repository.refreshUsageStats()
     }
 
     fun onIntervalChanged(interval: IntervalType) {
-        _uiState.update { it.copy(intervalType = interval) }
+        _intervalType.value = interval
+        // Note: Repository/Worker currently only caches Today (Daily).
+        // For Weekly, we might want to extend the worker later.
         loadUsageStats()
     }
 
     fun onSortOrderChanged(order: UsageSortOrder) {
-        _uiState.update { it.copy(sortOrder = order) }
-        loadUsageStats()
+        _sortOrder.value = order
     }
 
     fun onNextDate() {
+        // Simple update for now, trigger scan for specific date
         val calendar = Calendar.getInstance()
-        calendar.timeInMillis = _uiState.value.currentDate
+        calendar.timeInMillis = _currentDate.value
         
-        if (_uiState.value.intervalType == IntervalType.DAILY) {
+        if (_intervalType.value == IntervalType.DAILY) {
             calendar.add(Calendar.DAY_OF_YEAR, 1)
         } else {
             calendar.add(Calendar.WEEK_OF_YEAR, 1)
         }
         
-        // Don't go into future (optional constraint, users might want to see 0 stats for future)
         if (calendar.timeInMillis <= System.currentTimeMillis()) {
-            _uiState.update { it.copy(currentDate = calendar.timeInMillis) }
+            _currentDate.value = calendar.timeInMillis
             loadUsageStats()
         }
     }
 
     fun onPreviousDate() {
         val calendar = Calendar.getInstance()
-        calendar.timeInMillis = _uiState.value.currentDate
+        calendar.timeInMillis = _currentDate.value
         
-        if (_uiState.value.intervalType == IntervalType.DAILY) {
+        if (_intervalType.value == IntervalType.DAILY) {
             calendar.add(Calendar.DAY_OF_YEAR, -1)
         } else {
             calendar.add(Calendar.WEEK_OF_YEAR, -1)
         }
         
-        _uiState.update { it.copy(currentDate = calendar.timeInMillis) }
+        _currentDate.value = calendar.timeInMillis
         loadUsageStats()
     }
+
+    private fun getComparator(sort: UsageSortOrder) = Comparator<AppUsageInfo> { a, b ->
+        when (sort) {
+            UsageSortOrder.SCREEN_TIME -> b.screenTime.compareTo(a.screenTime)
+            UsageSortOrder.TIMES_OPENED -> b.timesOpened.compareTo(a.timesOpened)
+            UsageSortOrder.LAST_USED -> b.lastUsedTime.compareTo(a.lastUsedTime)
+            UsageSortOrder.APP_NAME -> a.appLabel.lowercase().compareTo(b.appLabel.lowercase())
+            UsageSortOrder.BATTERY_USAGE -> b.batteryUsage.compareTo(a.batteryUsage)
+            UsageSortOrder.DATA_USAGE -> (b.mobileDataUsage + b.wifiDataUsage).compareTo(a.mobileDataUsage + a.wifiDataUsage)
+        }
+    }
 }
+
+data class UsageSettingsData(
+    val sort: UsageSortOrder,
+    val loading: Boolean,
+    val date: Long,
+    val interval: IntervalType,
+    val perm: Boolean
+)

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -86,6 +87,13 @@ fun UsageStatsScreen(
     if (!uiState.hasPermission) {
         PermissionRequestContent(onRequestPermission = { viewModel.requestPermission() })
     } else {
+        val listState = rememberLazyListState()
+        
+        // Trigger load only once
+        LaunchedEffect(Unit) {
+            viewModel.loadDataIfNeeded()
+        }
+
         Scaffold(
             containerColor = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxSize()
@@ -96,6 +104,7 @@ fun UsageStatsScreen(
                     .padding(innerPadding)
             ) {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {

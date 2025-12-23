@@ -28,39 +28,65 @@ class GameRepository @Inject constructor(
 ) {
     private val packageManager = context.packageManager
 
+    private var cachedInstalledPackages: List<PackageInfo>? = null
+    private var lastPackageScanTime: Long = 0
+
     fun getGames(): Flow<List<GameItem>> {
         return gameDao.getAllGames().map { entities ->
-            val flags = PackageManager.GET_META_DATA or PackageManager.MATCH_DISABLED_COMPONENTS
-            val installedApps = packageManager.getInstalledPackages(flags)
+            // Optimization: Cache installed app list for 1 minute to avoid heavy IPC on every flow emission.
+            // When user switches tabs or toggles a profile, the DB flow emits. 
+            // We don't want to re-scan 300+ apps just because a DB row changed.
+            val currentTime = System.currentTimeMillis()
+            if (cachedInstalledPackages == null || currentTime - lastPackageScanTime > 300000) { // 5 mins fallback
+                cachedInstalledPackages = packageManager.getInstalledPackages(0)
+                lastPackageScanTime = currentTime
+            }
+            
+            val installedApps = cachedInstalledPackages!!
             val gameItems = mutableListOf<GameItem>()
 
             val entityMap = entities.associateBy { it.packageName }
             
             installedApps.forEach { packageInfo ->
+                val appInfo = packageInfo.applicationInfo ?: return@forEach
                 val packageName = packageInfo.packageName
                 val entity = entityMap[packageName]
                 
-                // Only add if it's NOT manually removed AND (it's in the DB OR it's a naturally detected game)
-                if (entity?.isManuallyRemoved != true && (entity != null || isGame(packageInfo))) {
-                    gameItems.add(
-                        GameItem(
-                            packageName = packageName,
-                            label = packageInfo.applicationInfo?.loadLabel(packageManager)?.toString() ?: packageName,
-                            icon = packageInfo.applicationInfo?.loadIcon(packageManager),
-                            isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
-                            isUserAdded = entity?.isUserAdded ?: false,
-                            installedTime = packageInfo.firstInstallTime,
-                            apkSize = packageInfo.applicationInfo?.sourceDir?.let { File(it).length() } ?: 0L,
-                            optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
-                            customSettingsJson = entity?.customSettingsJson ?: "{}"
+                // CRITICAL SELECTION LOGIC:
+                // 1. If it's in our DB (User added it or we previously found it), we keep it unless manually removed.
+                // 2. If it's NOT in DB, we only scan it if it's a USER app (not a core system app).
+                // This eliminates scanning 300+ system processes.
+                val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || 
+                              (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                
+                val shouldEvaluationAsGame = entity != null || isUserApp
+                
+                if (shouldEvaluationAsGame && entity?.isManuallyRemoved != true) {
+                    if (entity != null || isGame(packageInfo)) {
+                        gameItems.add(
+                            GameItem(
+                                packageName = packageName,
+                                label = appInfo.loadLabel(packageManager).toString(),
+                                isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
+                                isUserAdded = entity?.isUserAdded ?: false,
+                                installedTime = packageInfo.firstInstallTime,
+                                apkSize = appInfo.sourceDir?.let { File(it).length() } ?: 0L,
+                                optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
+                                customSettingsJson = entity?.customSettingsJson ?: "{}"
+                            )
                         )
-                    )
+                    }
                 }
             }
             gameItems
         }.map { items -> 
             items.sortedBy { it.label } 
         }.flowOn(Dispatchers.IO)
+    }
+
+    fun invalidateCache() {
+        cachedInstalledPackages = null
+        lastPackageScanTime = 0
     }
 
     private fun isGame(packageInfo: PackageInfo): Boolean {
@@ -98,14 +124,29 @@ class GameRepository @Inject constructor(
         }
     }
 
-    suspend fun hideFromLauncher(packageName: String) {
+    suspend fun hideFromLauncher(packageName: String): Boolean {
         executeShizukuCommand("pm disable-user --user 0 $packageName")
-        updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = true) }
+        // Check if actually disabled
+        val isHidden = !isAppEnabled(packageName)
+        if (isHidden) {
+            updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = true) }
+        }
+        return isHidden
     }
 
-    suspend fun showInLauncher(packageName: String) {
+    suspend fun showInLauncher(packageName: String): Boolean {
         executeShizukuCommand("pm enable --user 0 $packageName")
-        updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = false) }
+        // Check if actually enabled
+        val isShown = isAppEnabled(packageName)
+        if (isShown) {
+            updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = false) }
+        }
+        return isShown
+    }
+
+    private suspend fun isAppEnabled(packageName: String): Boolean {
+        val output = executeShizukuCommandAndGet("pm list packages -e $packageName")
+        return output.contains(packageName)
     }
 
     suspend fun addGameManually(packageName: String) {
@@ -119,17 +160,32 @@ class GameRepository @Inject constructor(
     }
 
     suspend fun updateGameEntity(packageName: String, update: (GameEntity) -> GameEntity) {
-        val current = gameDao.getAllGames().first().find { it.packageName == packageName }
-            ?: GameEntity(packageName)
+        val current = gameDao.getGameByPackage(packageName) ?: GameEntity(packageName)
         gameDao.upsertGame(update(current))
+    }
+
+    suspend fun batchUpdateGames(packageNames: List<String>, update: (GameEntity) -> GameEntity) {
+        val updates = packageNames.map { pkg ->
+            val current = gameDao.getGameByPackage(pkg) ?: GameEntity(pkg)
+            update(current)
+        }
+        gameDao.upsertGames(updates)
     }
 
     private val prefs = context.getSharedPreferences("game_mode_snapshots", Context.MODE_PRIVATE)
 
     private fun sanitizeCommand(command: String): String {
-        // Basic protection against command injection (e.g. blocking ";", "&", "|", etc. in user-controlled inputs)
-        // Since many of our commands use specific structures, we mostly want to allow spaces, dots, and colons.
-        return command.replace(Regex("[;&|><`]"), "").trim()
+        // High-security sanitization: 
+        // 1. Block command chaining characters: ; & | > < `
+        // 2. Block command substitution: $( ... )
+        // 3. Block newlines and carriage returns
+        // 4. Block obvious dangerous paths/commands in user inputs
+        return command
+            .replace(Regex("[;&|><`]"), "")
+            .replace(Regex("\\$\\(.*\\)"), "") 
+            .replace("\n", "")
+            .replace("\r", "")
+            .trim()
     }
 
     private suspend fun executeShizukuCommand(command: String) {
@@ -149,8 +205,11 @@ class GameRepository @Inject constructor(
 
         val command = when (tweakId) {
             "window_animation_scale", "transition_animation_scale", "animator_duration_scale" -> {
-                saveSnapshot("global", tweakId, "settings get global $tweakId")
-                "settings put global $tweakId $value"
+                // Allowlist: only digits and dot
+                if (value.matches(Regex("^[0-9.]+$"))) {
+                    saveSnapshot("global", tweakId, "settings get global $tweakId")
+                    "settings put global $tweakId $value"
+                } else null
             }
             "disable_window_blurs" -> {
                 saveSnapshot("global", "disable_window_blurs", "settings get global disable_window_blurs")
@@ -210,14 +269,20 @@ class GameRepository @Inject constructor(
                 "settings put global low_power ${if (value == "true") 0 else 1}"
             }
             "wm_size" -> {
-                if (value.isBlank()) {
+                if (value.isBlank() || value == "reset") {
                     "wm size reset"
                 } else {
-                    val parts = value.split("x")
-                    if (parts.size == 2) {
+                    if (value.matches(Regex("^\\d{3,4}x\\d{3,5}$"))) {
+                        val parts = value.split("x")
                         val w = parts[0].toIntOrNull() ?: 0
                         val h = parts[1].toIntOrNull() ?: 0
-                        if (w >= 320 && h >= 320) {
+                        
+                        // Dynamic Upper Bound: Check physical display size if possible
+                        val metrics = context.resources.displayMetrics
+                        val maxW = (metrics.widthPixels * 1.5).toInt().coerceAtLeast(3840)
+                        val maxH = (metrics.heightPixels * 1.5).toInt().coerceAtLeast(3840)
+
+                        if (w in 320..maxW && h in 320..maxH) {
                             saveSnapshot("wm", tweakId, "wm size")
                             "wm size $value"
                         } else null
@@ -236,10 +301,19 @@ class GameRepository @Inject constructor(
                 }
             }
             "peak_refresh_rate" -> {
+                // Dynamic Check: Get highest supported refresh rate instead of hardcoded 120
+                val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    context.display
+                } else {
+                    @Suppress("DEPRECATION")
+                    (context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay
+                }
+                val maxRefresh = display?.supportedModes?.maxByOrNull { it.refreshRate }?.refreshRate?.toString() ?: "120.0"
+                
                 saveSnapshot("system", "peak_refresh_rate", "settings get system peak_refresh_rate")
                 saveSnapshot("system", "min_refresh_rate", "settings get system min_refresh_rate")
-                executeShizukuCommand("settings put system peak_refresh_rate 120.0")
-                "settings put system min_refresh_rate 120.0"
+                executeShizukuCommand("settings put system peak_refresh_rate $maxRefresh")
+                "settings put system min_refresh_rate $maxRefresh"
             }
             "vulkan_renderer" -> {
                 saveSnapshot("prop", "debug.hwui.renderer", "getprop debug.hwui.renderer")
@@ -257,8 +331,11 @@ class GameRepository @Inject constructor(
                 "settings put global adaptive_connectivity_enabled 0"
             }
             "disable_gos" -> {
-                saveSnapshot("pm", "com.samsung.android.game.gos", "echo disabled")
-                "pm disable-user --user 0 com.samsung.android.game.gos"
+                val manufacturer = Build.MANUFACTURER.lowercase()
+                if (manufacturer.contains("samsung")) {
+                    saveSnapshot("pm", "com.samsung.android.game.gos", "echo disabled")
+                    "pm disable-user --user 0 com.samsung.android.game.gos"
+                } else null
             }
             "bg_process_limit" -> {
                 saveSnapshot("activity", tweakId, "dumpsys activity settings | grep process_limit")
@@ -279,10 +356,10 @@ class GameRepository @Inject constructor(
     }
 
     private suspend fun saveSnapshot(namespace: String, key: String, getCommand: String) {
-        val compositeKey = "$namespace:$key"
+        val compositeKey = "$namespace|$key" // Use pipe as delimiter to avoid collision with colon in keys
         if (!prefs.contains(compositeKey)) {
             val current = executeShizukuCommandAndGet(getCommand).trim()
-            if (current.isNotEmpty() && !current.contains("Error")) {
+            if (current.isNotEmpty() && !current.contains("Error") && !current.contains("not found")) {
                 prefs.edit().putString(compositeKey, current).apply()
             }
         }
@@ -294,8 +371,10 @@ class GameRepository @Inject constructor(
         val allSnapshots = prefs.all
         allSnapshots.forEach { (compositeKey, valueObj) ->
             val value = valueObj.toString()
-            val namespace = compositeKey.substringBefore(":")
-            val key = compositeKey.substringAfter(":")
+            if (compositeKey == "affected_packages") return@forEach
+            
+            val namespace = compositeKey.substringBefore("|")
+            val key = compositeKey.substringAfter("|")
 
             val command = when (namespace) {
                 "wm" -> {
@@ -310,7 +389,10 @@ class GameRepository @Inject constructor(
                     if (key == "bg_process_limit") "activity clear-process-limit" else null
                 }
                 "config" -> {
-                    "device_config put ${key.substringBefore(":")} ${key.substringAfter(":")} $value"
+                    // key is "namespace:key" (e.g. "activity_manager:max_phantom_processes")
+                    val cfgNamespace = key.substringBefore(":")
+                    val cfgKey = key.substringAfter(":")
+                    "device_config put $cfgNamespace $cfgKey $value"
                 }
                 "prop" -> {
                     "setprop $key $value"

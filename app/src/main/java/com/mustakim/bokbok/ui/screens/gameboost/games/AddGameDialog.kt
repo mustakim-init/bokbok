@@ -1,5 +1,6 @@
 package com.mustakim.bokbok.ui.screens.gameboost.games
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.ImageBitmap
+import com.mustakim.bokbok.utils.AppIconCache
 import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -121,20 +124,26 @@ fun AddGameDialog(
                             headlineContent = { Text(app.label, fontWeight = FontWeight.SemiBold) },
                             supportingContent = { Text(app.packageName, style = MaterialTheme.typography.labelSmall) },
                             leadingContent = {
-                                // Loading icons on the fly to save memory
-                                var icon by remember { mutableStateOf<android.graphics.drawable.Drawable?>(null) }
+                                // Shared Icon Cache Implementation
+                                var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
                                 LaunchedEffect(app.packageName) {
-                                    withContext(Dispatchers.IO) {
-                                        icon = app.pkg.applicationInfo?.loadIcon(pm)
-                                    }
+                                    iconBitmap = AppIconCache.getIcon(context, app.packageName)
                                 }
-                                icon?.let {
+                                
+                                if (iconBitmap != null) {
                                     androidx.compose.foundation.Image(
-                                        bitmap = it.toBitmap().asImageBitmap(),
+                                        bitmap = iconBitmap!!,
                                         contentDescription = null,
                                         modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
                                     )
-                                } ?: Box(Modifier.size(40.dp))
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    )
+                                }
                             },
                             modifier = Modifier.clickable { onAddGame(app.packageName) }
                         )

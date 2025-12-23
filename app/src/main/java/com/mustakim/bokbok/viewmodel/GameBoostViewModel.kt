@@ -8,9 +8,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 enum class GameBoostTab(val title: String) {
+    GAME_BOOST("Game Boost"),
     APP_MANAGER("App Manager"),
     DEVICE_MONITOR("Device Monitor"),
-    GAME_BOOST("Game Boost"),
     USAGE_STATS("Usage Stats"),
     SCREEN_RECORD("Screen Record");
     

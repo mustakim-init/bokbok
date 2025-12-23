@@ -11,13 +11,13 @@ fun GameBoostTabScreen(
 ) {
     val selectedGame by viewModel.selectedGame.collectAsState()
 
-    if (selectedGame != null) {
+    selectedGame?.let { game ->
         GameDetailScreen(
-            game = selectedGame!!,
+            game = game,
             viewModel = viewModel,
             onBack = { viewModel.clearSelectedGame() }
         )
-    } else {
+    } ?: run {
         GameListScreen(viewModel = viewModel)
     }
 }

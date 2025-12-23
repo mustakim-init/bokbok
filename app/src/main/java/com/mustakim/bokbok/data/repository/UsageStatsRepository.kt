@@ -22,12 +22,22 @@ import java.util.Calendar
 import java.util.Collections
 import java.util.Locale
 
+import androidx.work.*
+import com.mustakim.bokbok.data.local.dao.UsageStatsDao
+import com.mustakim.bokbok.data.local.entity.UsageStatsEntity
+import com.mustakim.bokbok.workers.UsageStatsWorker
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class UsageStatsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val usageStatsDao: UsageStatsDao
 ) {
+    private val workManager = WorkManager.getInstance(context)
 
     private val usageStatsManager: UsageStatsManager by lazy {
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
@@ -65,111 +75,33 @@ class UsageStatsRepository @Inject constructor(
         context.startActivity(intent)
     }
 
-    suspend fun getUsageStats(
-        intervalType: IntervalType,
-        date: Long,
-        sortOrder: UsageSortOrder
-    ): Pair<List<AppUsageInfo>, Long> = withContext(Dispatchers.IO) {
-        if (!hasUsageStatsPermission()) {
-            return@withContext Pair(emptyList(), 0L)
+    fun observeUsageStats(): Flow<List<AppUsageInfo>> {
+        return usageStatsDao.getUsageStats().map { entities ->
+            entities.map { it.toModel() }
         }
-
-        val (startTime, endTime) = getTimeRange(intervalType, date)
-        
-        // We use UsageEvents for accuracy
-        val events = usageStatsManager.queryEvents(startTime, endTime)
-        val usageMap = HashMap<String, AppUsageTempData>()
-        
-        val event = UsageEvents.Event()
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            val packageName = event.packageName
-            
-            val data = usageMap.getOrPut(packageName) { AppUsageTempData(packageName) }
-            
-            when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> {
-                    data.lastStartTime = event.timeStamp
-                    if (data.lastUsedTime < event.timeStamp) {
-                        data.lastUsedTime = event.timeStamp
-                    }
-                    data.timesOpened++
-                }
-                UsageEvents.Event.ACTIVITY_PAUSED, 
-                UsageEvents.Event.ACTIVITY_STOPPED -> {
-                    if (data.lastStartTime > 0) {
-                        data.screenTime += (event.timeStamp - data.lastStartTime)
-                        data.lastStartTime = 0
-                    }
-                }
-            }
-        }
-        
-        // Handle case where app is still running
-        val clampTime = if (System.currentTimeMillis() < endTime) System.currentTimeMillis() else endTime
-        usageMap.values.forEach { data ->
-            if (data.lastStartTime > 0 && data.lastStartTime < clampTime) {
-                data.screenTime += (clampTime - data.lastStartTime)
-                data.lastStartTime = 0
-            }
-        }
-
-        var totalScreenTime = 0L
-        val processedList = ArrayList<AppUsageInfo>()
-        
-        usageMap.values.forEach { data ->
-            if (data.screenTime > 0 || data.timesOpened > 0) {
-                try {
-                    val appInfo = packageManager.getApplicationInfo(data.packageName, 0)
-                    val label = appInfo.loadLabel(packageManager).toString()
-                    val icon = appInfo.loadIcon(packageManager)
-                    val uid = appInfo.uid
-                    
-                    val (wifiData, mobileData) = getNetworkUsage(uid, startTime, endTime)
-                    
-                    // Simple battery estimation: 
-                    // Baseline: 1 hour of screen time = ~10% battery
-                    // This is very rough but provides a visual "score" for battery impact
-                    val batteryEst = (data.screenTime.toDouble() / (3600000.0)) * 10.0
-
-                    processedList.add(
-                        AppUsageInfo(
-                            packageName = data.packageName,
-                            appLabel = label,
-                            screenTime = data.screenTime,
-                            timesOpened = data.timesOpened,
-                            lastUsedTime = data.lastUsedTime,
-                            mobileDataUsage = mobileData,
-                            wifiDataUsage = wifiData,
-                            batteryUsage = batteryEst,
-                            usagePercentage = 0f // Calculated below
-                        )
-                    )
-                    totalScreenTime += data.screenTime
-                } catch (e: PackageManager.NameNotFoundException) {
-                    // App might have been uninstalled
-                } catch (e: Exception) {
-                    // Other errors (security, etc)
-                }
-            }
-        }
-        
-        // Calculate percentages and Sort
-        val finalSortedList = processedList.map { 
-            it.copy(usagePercentage = if (totalScreenTime > 0) it.screenTime.toFloat() / totalScreenTime * 100f else 0f)
-        }.let { list ->
-            when (sortOrder) {
-                UsageSortOrder.SCREEN_TIME -> list.sortedByDescending { it.screenTime }
-                UsageSortOrder.TIMES_OPENED -> list.sortedByDescending { it.timesOpened }
-                UsageSortOrder.LAST_USED -> list.sortedByDescending { it.lastUsedTime }
-                UsageSortOrder.APP_NAME -> list.sortedBy { it.appLabel.lowercase() }
-                UsageSortOrder.BATTERY_USAGE -> list.sortedByDescending { it.batteryUsage }
-                UsageSortOrder.DATA_USAGE -> list.sortedByDescending { it.mobileDataUsage + it.wifiDataUsage }
-            }
-        }
-
-        Pair(finalSortedList, totalScreenTime)
     }
+
+    fun refreshUsageStats() {
+        val request = OneTimeWorkRequestBuilder<UsageStatsWorker>()
+            .build()
+        workManager.enqueueUniqueWork(
+            UsageStatsWorker.WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    private fun UsageStatsEntity.toModel() = AppUsageInfo(
+        packageName = packageName,
+        appLabel = appLabel,
+        screenTime = screenTime,
+        timesOpened = timesOpened,
+        lastUsedTime = lastUsedTime,
+        mobileDataUsage = mobileDataUsage,
+        wifiDataUsage = wifiDataUsage,
+        batteryUsage = batteryUsage,
+        usagePercentage = usagePercentage
+    )
 
     private fun getNetworkUsage(uid: Int, startTime: Long, endTime: Long): Pair<Long, Long> {
         var wifiData = 0L

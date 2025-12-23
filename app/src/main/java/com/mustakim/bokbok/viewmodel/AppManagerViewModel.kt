@@ -31,20 +31,27 @@ class AppManagerViewModel @Inject constructor(
     private val _sortOrder = MutableStateFlow(AppSortOrder.NAME_ASC)
     val sortOrder = _sortOrder.asStateFlow()
 
-    private val _rawApps = MutableStateFlow<List<AppItem>>(emptyList())
-    private val _isLoading = MutableStateFlow(true)
+    private val _selectedPackages = MutableStateFlow<Set<String>>(emptySet())
+    val selectedPackages = _selectedPackages.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading = _isLoading.asStateFlow()
+
     private val _error = MutableStateFlow<String?>(null)
     
     // Selected app for details screen
     private val _selectedApp = MutableStateFlow<AppItem?>(null)
     val selectedApp: StateFlow<AppItem?> = _selectedApp.asStateFlow()
+
+    private val _appsFlow = repository.observeApps()
     
     // Combining flows to produce the final UI list
     val uiState: StateFlow<AppManagerUiState> = combine(
-        combine(_rawApps, _isLoading, _error, ::Triple),
+        combine(_appsFlow, _selectedPackages, _isLoading, _error, ::AppStatsData),
         combine(_searchQuery, _filterType, _sortOrder, ::Triple)
-    ) { (apps, isLoading, error), (query, filter, sort) ->
+    ) { (apps, selected, isLoading, error), (query, filter, sort) ->
         val filteredApps = apps
+            .map { it.copy(isSelected = selected.contains(it.packageName)) }
             .filter { app ->
                 // Apply Filter Type
                 when (filter) {
@@ -98,32 +105,20 @@ class AppManagerViewModel @Inject constructor(
     )
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             // Attempt to grant Usage Stats permission via Shizuku
             repository.grantSelfPermissions()
-            
-            // Note: Bloatware DB sync moved to BloatwareSyncWorker (WorkManager)
-            // for non-blocking app startup
+        }
+    }
 
-            // Then load apps
+    fun loadDataIfNeeded() {
+        if (uiState.value.apps.isEmpty()) {
             loadApps()
         }
     }
 
     fun loadApps() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                repository.getInstalledApps()
-                    .collect { apps ->
-                        _rawApps.value = apps
-                        _isLoading.value = false
-                    }
-            } catch (e: Exception) {
-                _error.value = e.message
-                _isLoading.value = false
-            }
-        }
+        repository.refreshApps()
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -154,17 +149,16 @@ class AppManagerViewModel @Inject constructor(
     fun getRepository(): AppManagerRepository = repository
 
     fun onAppLongClicked(app: AppItem) {
-        // Toggle selection
-        val currentApps = _rawApps.value.toMutableList()
-        val index = currentApps.indexOfFirst { it.packageName == app.packageName }
-        if (index != -1) {
-            currentApps[index] = app.copy(isSelected = !app.isSelected)
-            _rawApps.value = currentApps
+        val current = _selectedPackages.value
+        if (current.contains(app.packageName)) {
+            _selectedPackages.value = current - app.packageName
+        } else {
+            _selectedPackages.value = current + app.packageName
         }
     }
 
     fun clearSelection() {
-        _rawApps.value = _rawApps.value.map { it.copy(isSelected = false) }
+        _selectedPackages.value = emptySet()
     }
 
     fun onUninstallSelected() {
@@ -235,6 +229,13 @@ data class AppManagerUiState(
     val totalApps: Int = 0,
     val bloatwareCount: Int = 0,
     val safeToRemoveCount: Int = 0
+)
+
+data class AppStatsData(
+    val apps: List<AppItem>,
+    val selected: Set<String>,
+    val isLoading: Boolean,
+    val error: String?
 )
 
 enum class AppFilterType { ALL, USER, SYSTEM, BLOATWARE, SAFE_TO_REMOVE, UNINSTALLED }

@@ -178,6 +178,8 @@ dependencies {
 
     // WorkManager (for background sync)
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.work.compiler)
 
     // Debug
     debugImplementation(libs.compose.ui.tooling)

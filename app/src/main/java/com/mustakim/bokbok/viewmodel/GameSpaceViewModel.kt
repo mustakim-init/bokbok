@@ -161,18 +161,23 @@ class GameSpaceViewModel @Inject constructor(
                 
                 // 3. Final Launch
                 _launchState.value = LaunchState.LAUNCHING
+                
+                // START MONITORING SERVICE BEFORE LAUNCH
+                // This ensures the service is ready to catch the PID as soon as the app starts.
+                com.mustakim.bokbok.data.service.GameMonitorService.start(application, game.packageName)
+                
                 repository.launchGame(game.packageName)
                 
-                // 4. Start monitoring service AFTER launch to prevent race conditions
-                com.mustakim.bokbok.data.service.GameMonitorService.start(application, game.packageName)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.e("GameSpaceViewModel", "Launch failed, reverting", e)
                 // If anything fails during launch, REVERT immediately
                 withContext(Dispatchers.IO) {
                     repository.revertAllOptimizations()
+                    com.mustakim.bokbok.data.service.GameMonitorService.stop(application)
                 }
             } finally {
                 // Reset state after a delay to ensure UI reflects launch
-                delay(1000)
+                delay(1500)
                 _launchState.value = LaunchState.NONE
             }
         }
@@ -195,13 +200,32 @@ class GameSpaceViewModel @Inject constructor(
     }
 
     fun removeSelectedGames() {
-        viewModelScope.launch {
-            _selectedGames.value.forEach { pkg ->
-                // Restore from launcher if it was hidden
-                repository.showInLauncher(pkg)
-                repository.removeFromGameList(pkg)
+        viewModelScope.launch(Dispatchers.IO) {
+            val toRemove = _selectedGames.value.toList()
+            val successfullyRestored = mutableListOf<String>()
+            
+            // 1. Restore launcher state for all (Shell commands)
+            toRemove.forEach { pkg ->
+                try {
+                    val success = repository.showInLauncher(pkg)
+                    if (success) {
+                        successfullyRestored.add(pkg)
+                    } else {
+                        android.util.Log.w("GameSpaceViewModel", "Failed to restore launcher for $pkg, keeping in list for safety.")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("GameSpaceViewModel", "Error unhiding $pkg", e)
+                }
             }
-            clearSelection()
+            
+            // 2. Only mark as removed in DB if unhiding succeeded (or if it wasn't hidden)
+            if (successfullyRestored.isNotEmpty()) {
+                repository.batchUpdateGames(successfullyRestored) { it.copy(isManuallyRemoved = true) }
+            }
+            
+            withContext(Dispatchers.Main) {
+                clearSelection()
+            }
         }
     }
 

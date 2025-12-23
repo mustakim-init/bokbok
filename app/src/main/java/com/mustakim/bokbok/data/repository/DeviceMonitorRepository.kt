@@ -628,15 +628,18 @@ class DeviceMonitorRepository @Inject constructor(
 
         // Use cached static info to avoid 4+ Shizuku calls every cycle
         if (cachedGpuStaticInfo == null) {
-            var model = readShellCommand("getprop ro.product.board")?.trim()
-            if (model.isNullOrEmpty()) model = readShellCommand("getprop ro.board.platform")?.trim()
+            val batchOutput = readShellCommand("getprop ro.product.board; echo \"--SEP--\"; getprop ro.board.platform; echo \"--SEP--\"; dumpsys SurfaceFlinger | grep \"GLES:\"")
+            val batchParts = batchOutput?.split("--SEP--")?.map { it.trim() } ?: emptyList()
             
-            // Parse GPU info from SurfaceFlinger - most complete source
-            // Format: "GLES: Qualcomm, Adreno (TM) 735, OpenGL ES 3.2 V@676.0 ..."
+            var board = batchParts.getOrNull(0)
+            var platform = batchParts.getOrNull(1)
+            val sfOutput = batchParts.getOrNull(2)
+            
+            var model = if (!board.isNullOrEmpty()) board else platform
+            
             var renderer: String? = null
             var apiVersion: String? = null
             
-            val sfOutput = readShellCommand("dumpsys SurfaceFlinger | grep \"GLES:\"")
             if (!sfOutput.isNullOrEmpty() && sfOutput.contains("GLES:")) {
                 val glesLine = sfOutput.substringAfter("GLES:").trim()
                 val parts = glesLine.split(",").map { it.trim() }
@@ -852,7 +855,23 @@ class DeviceMonitorRepository @Inject constructor(
             "/sys/class/power_supply/bms/uevent"
         )
         for (path in paths) {
-            val content = readShellCommand("cat $path", 300)?.trim() ?: continue
+            var content: String? = null
+            
+            // Try direct read first
+            if (!blockedDirectPaths.contains(path)) {
+                try {
+                     content = File(path).readText().trim()
+                } catch (_: Exception) {
+                     blockedDirectPaths.add(path)
+                }
+            }
+            
+            // Fallback to shell
+            if (content == null) {
+                 content = readShellCommand("cat $path", 300)?.trim()
+            }
+            
+            if (content == null) continue
             
             // If it's a uevent file, parse it
             if (path.endsWith("uevent")) {
@@ -882,7 +901,23 @@ class DeviceMonitorRepository @Inject constructor(
             "/sys/class/power_supply/bms/uevent"
         )
         for (path in paths) {
-            val content = readShellCommand("cat $path", 300)?.trim() ?: continue
+            var content: String? = null
+            
+            // Try direct read first
+            if (!blockedDirectPaths.contains(path)) {
+                try {
+                     content = File(path).readText().trim()
+                } catch (_: Exception) {
+                     blockedDirectPaths.add(path)
+                }
+            }
+            
+            // Fallback to shell
+            if (content == null) {
+                 content = readShellCommand("cat $path", 300)?.trim()
+            }
+            
+            if (content == null) continue
             
             if (path.endsWith("uevent")) {
                 val lines = content.split("\n")
@@ -914,7 +949,20 @@ class DeviceMonitorRepository @Inject constructor(
             "/sys/class/power_supply/battery/soh" // State of Health
         )
         for (path in paths) {
-            val content = readShellCommand("cat $path", 300)?.trim()
+            var content: String? = null
+            
+            if (!blockedDirectPaths.contains(path)) {
+                try {
+                     content = File(path).readText().trim()
+                } catch (_: Exception) {
+                     blockedDirectPaths.add(path)
+                }
+            }
+            
+            if (content == null) {
+                 content = readShellCommand("cat $path", 300)?.trim()
+            }
+            
             val pct = content?.toIntOrNull()
             if (pct != null && pct in 1..100) {
                 return pct

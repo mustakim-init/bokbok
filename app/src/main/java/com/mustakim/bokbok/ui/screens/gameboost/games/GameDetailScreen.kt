@@ -31,6 +31,9 @@ import com.mustakim.bokbok.data.model.*
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 import com.mustakim.bokbok.viewmodel.LaunchState
+import com.mustakim.bokbok.utils.AppIconCache
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.ImageBitmap
 import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,14 +96,21 @@ fun GameDetailScreen(
                             color = MaterialTheme.colorScheme.surface,
                             tonalElevation = 2.dp
                         ) {
-                            game.icon?.let {
-                                androidx.compose.foundation.Image(
-                                    bitmap = it.toBitmap().asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
+                        val context = LocalContext.current
+                        var iconBitmap by remember(game.packageName) { mutableStateOf<ImageBitmap?>(null) }
+                        
+                        LaunchedEffect(game.packageName) {
+                            iconBitmap = AppIconCache.getIcon(context, game.packageName)
+                        }
+
+                        if (iconBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = iconBitmap!!,
+                                contentDescription = null,
+                                modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
                         }
                         Spacer(Modifier.height(16.dp))
                         Text(

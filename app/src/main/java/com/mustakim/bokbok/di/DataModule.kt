@@ -3,7 +3,10 @@ package com.mustakim.bokbok.di
 import android.content.Context
 import com.mustakim.bokbok.data.local.BokBokDatabase
 import com.mustakim.bokbok.data.local.dao.GameDao
+import com.mustakim.bokbok.data.local.dao.AppDao
+import com.mustakim.bokbok.data.local.dao.UsageStatsDao
 import com.mustakim.bokbok.data.repository.AppManagerRepository
+import com.mustakim.bokbok.data.repository.UsageStatsRepository
 import com.mustakim.bokbok.data.repository.GameRepository
 import com.mustakim.bokbok.data.repository.FCMRepository
 import com.mustakim.bokbok.data.repository.BackendService
@@ -30,9 +33,25 @@ object DataModule {
     }
 
     @Provides
+    fun provideAppDao(database: BokBokDatabase): AppDao {
+        return database.appDao()
+    }
+
+    @Provides
+    fun provideUsageStatsDao(database: BokBokDatabase): UsageStatsDao {
+        return database.usageStatsDao()
+    }
+
+    @Provides
     @Singleton
-    fun provideAppManagerRepository(@ApplicationContext context: Context): AppManagerRepository {
-        return AppManagerRepository(context)
+    fun provideAppManagerRepository(@ApplicationContext context: Context, appDao: AppDao): AppManagerRepository {
+        return AppManagerRepository(context, appDao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideUsageStatsRepository(@ApplicationContext context: Context, usageStatsDao: UsageStatsDao): UsageStatsRepository {
+        return UsageStatsRepository(context, usageStatsDao)
     }
 
     @Provides

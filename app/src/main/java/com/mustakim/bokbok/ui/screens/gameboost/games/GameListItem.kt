@@ -19,6 +19,14 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import com.mustakim.bokbok.utils.AppIconCache
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,21 +77,30 @@ fun GameListItem(
                 )
             }
 
-            // Icon
-            game.icon?.let { icon ->
+            // Shared Icon Cache Implementation
+            val context = LocalContext.current
+            var iconBitmap by remember(game.packageName) { mutableStateOf<ImageBitmap?>(null) }
+            
+            LaunchedEffect(game.packageName) {
+                iconBitmap = AppIconCache.getIcon(context, game.packageName)
+            }
+
+            if (iconBitmap != null) {
                 androidx.compose.foundation.Image(
-                    bitmap = icon.toBitmap().asImageBitmap(),
+                    bitmap = iconBitmap!!,
                     contentDescription = null,
                     modifier = Modifier
                         .size(52.dp)
                         .clip(RoundedCornerShape(12.dp))
                 )
-            } ?: Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
+            }
 
             Spacer(Modifier.width(16.dp))
 

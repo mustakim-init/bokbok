@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CleaningServices
@@ -54,6 +55,7 @@ fun AppManagerScreen(
     val selectedApp by viewModel.selectedApp.collectAsState()
 
     var showFilters by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
     
     // Show App Details Screen if an app is selected
     selectedApp?.let { app ->
@@ -220,6 +222,7 @@ fun AppManagerScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
                     items(

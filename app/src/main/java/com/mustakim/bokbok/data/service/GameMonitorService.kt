@@ -115,11 +115,12 @@ class GameMonitorService : Service() {
     }
 
     private suspend fun isAppRunning(packageName: String): Boolean {
-        // We use repository's existing logic or similar
-        // Since we can't easily access private methods, we'll re-implement the check
-        // Or we could have exposed a public method in repository
-        val output = repository.executeShizukuCommandAndGet("pidof $packageName")
-        return output.trim().isNotEmpty()
+        // Robust check: 1. Is it the foreground activity? 2. Is any process still alive?
+        val foregroundOutput = repository.executeShizukuCommandAndGet("dumpsys activity activities | grep mResumedActivity")
+        if (foregroundOutput.contains(packageName)) return true
+        
+        val pidOutput = repository.executeShizukuCommandAndGet("pidof $packageName")
+        return pidOutput.trim().isNotEmpty()
     }
 
     private fun createNotificationChannel() {
@@ -155,8 +156,16 @@ class GameMonitorService : Service() {
     }
 
     override fun onDestroy() {
-        // Final attempt to clean up if the service is being stopped for any reason
-        // But only if we have active snapshots and the job is cancelled.
+        // Final attempt to clean up if the service is being stopped for any reason.
+        // We use a new scope because serviceScope is bound to serviceJob which we are cancelling.
+        val cleanupScope = CoroutineScope(Dispatchers.IO + NonCancellable)
+        cleanupScope.launch {
+            if (repository.hasActiveSnapshots()) {
+                Log.d("GameMonitor", "Service destroyed with active snapshots. Reverting now.")
+                repository.revertAllOptimizations()
+            }
+        }
+        
         serviceJob.cancel()
         super.onDestroy()
     }

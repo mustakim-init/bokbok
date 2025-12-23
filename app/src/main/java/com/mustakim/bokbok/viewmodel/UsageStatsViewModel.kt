@@ -44,6 +44,21 @@ class UsageStatsViewModel @Inject constructor(
     private val _intervalType = MutableStateFlow(IntervalType.DAILY)
     private val _hasPermission = MutableStateFlow(false)
 
+    init {
+        checkPermission()
+        observeWorkStatus()
+    }
+
+    private fun observeWorkStatus() {
+        viewModelScope.launch {
+            repository.observeWorkStatus().collect { state ->
+                // Mark as loading if work is running or enqueued
+                _isLoading.value = state == androidx.work.WorkInfo.State.RUNNING || 
+                                 state == androidx.work.WorkInfo.State.ENQUEUED
+            }
+        }
+    }
+
     val uiState: StateFlow<UsageStatsUiState> = combine(
         repository.observeUsageStats(),
         combine(_sortOrder, _isLoading, _currentDate, _intervalType, _hasPermission, ::UsageSettingsData)
@@ -67,9 +82,6 @@ class UsageStatsViewModel @Inject constructor(
         UsageStatsUiState(isLoading = true)
     )
 
-    init {
-        checkPermission()
-    }
 
     private fun checkPermission() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -96,7 +108,8 @@ class UsageStatsViewModel @Inject constructor(
     }
 
     private fun loadUsageStats() {
-        repository.refreshUsageStats()
+        val range = repository.getTimeRange(_intervalType.value, _currentDate.value)
+        repository.refreshUsageStats(range.first, range.second)
     }
 
     fun onIntervalChanged(interval: IntervalType) {

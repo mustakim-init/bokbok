@@ -15,6 +15,8 @@ import com.mustakim.bokbok.data.local.entity.UsageStatsEntity
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 
@@ -31,14 +33,13 @@ class UsageStatsWorker @AssistedInject constructor(
             val networkStatsManager = applicationContext.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
             val packageManager = applicationContext.packageManager
 
-            // Fetch for the current day
-            val calendar = Calendar.getInstance()
-            val endTime = calendar.timeInMillis
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val startTime = calendar.timeInMillis
+            // Fetch for specific range (passed via inputData)
+            val startTime = inputData.getLong("start_time", 0L)
+            val endTime = inputData.getLong("end_time", 0L)
+            
+            if (startTime == 0L || endTime == 0L) {
+                return@withContext Result.failure()
+            }
 
             val events = usageStatsManager.queryEvents(startTime, endTime)
             val usageMap = HashMap<String, AppUsageTempData>()
@@ -78,43 +79,45 @@ class UsageStatsWorker @AssistedInject constructor(
             val wifiUsageMap = getNetworkUsageBatch(networkStatsManager, ConnectivityManager.TYPE_WIFI, startTime, endTime)
             val mobileUsageMap = getNetworkUsageBatch(networkStatsManager, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
 
-            var totalScreenTime = 0L
-            val entities = mutableListOf<UsageStatsEntity>()
-
             // Batch fetch ApplicationInfo to avoid missing labels or slow lookups in loop
             val installedApps = packageManager.getInstalledPackages(0).associateBy { it.packageName }
 
-            usageMap.values.forEach { data ->
-                if (data.screenTime > 0 || data.timesOpened > 0) {
-                    try {
-                        val packageInfo = installedApps[data.packageName] ?: return@forEach
-                        val appInfo = packageInfo.applicationInfo ?: return@forEach
-                        
-                        val label = pmGetLabel(packageManager, appInfo)
-                        val uid = appInfo.uid
-                        
-                        val wifiData = wifiUsageMap[uid] ?: 0L
-                        val mobileData = mobileUsageMap[uid] ?: 0L
-                        val batteryEst = (data.screenTime.toDouble() / 3600000.0) * 10.0
+            // Parallel processing for metadata to speed up huge lists
+            val entities = usageMap.values.chunked(25).flatMap { chunk ->
+                coroutineScope {
+                    chunk.map { data ->
+                        async {
+                            if (data.screenTime > 0 || data.timesOpened > 0) {
+                                try {
+                                    val packageInfo = installedApps[data.packageName] ?: return@async null
+                                    val appInfo = packageInfo.applicationInfo ?: return@async null
+                                    
+                                    val label = pmGetLabel(packageManager, appInfo)
+                                    val uid = appInfo.uid
+                                    
+                                    val wifiData = wifiUsageMap[uid] ?: 0L
+                                    val mobileData = mobileUsageMap[uid] ?: 0L
+                                    val batteryEst = (data.screenTime.toDouble() / 3600000.0) * 10.0
 
-                        entities.add(
-                            UsageStatsEntity(
-                                packageName = data.packageName,
-                                appLabel = label,
-                                screenTime = data.screenTime,
-                                timesOpened = data.timesOpened,
-                                lastUsedTime = data.lastUsedTime,
-                                mobileDataUsage = mobileData,
-                                wifiDataUsage = wifiData,
-                                batteryUsage = batteryEst,
-                                usagePercentage = 0f // Calculate later
-                            )
-                        )
-                        totalScreenTime += data.screenTime
-                    } catch (_: Exception) {}
+                                    UsageStatsEntity(
+                                        packageName = data.packageName,
+                                        appLabel = label,
+                                        screenTime = data.screenTime,
+                                        timesOpened = data.timesOpened,
+                                        lastUsedTime = data.lastUsedTime,
+                                        mobileDataUsage = mobileData,
+                                        wifiDataUsage = wifiData,
+                                        batteryUsage = batteryEst,
+                                        usagePercentage = 0f
+                                    )
+                                } catch (_: Exception) { null }
+                            } else null
+                        }
+                    }.mapNotNull { it.await() }
                 }
             }
 
+            val totalScreenTime = entities.sumOf { it.screenTime }
             val finalEntities = entities.map { 
                 it.copy(usagePercentage = if (totalScreenTime > 0) it.screenTime.toFloat() / totalScreenTime * 100f else 0f)
             }

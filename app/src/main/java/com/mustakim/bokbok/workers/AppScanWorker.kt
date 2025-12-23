@@ -15,6 +15,8 @@ import com.mustakim.bokbok.data.local.entity.AppEntity
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -36,69 +38,71 @@ class AppScanWorker @AssistedInject constructor(
             // Optimization: Load existing apps to check for changes and skip redundant IPC calls
             val existingAppsMap = appDao.getAppsOneShot().associateBy { it.packageName }
             
-            val entities = packages.mapNotNull { packageInfo ->
-                val appInfo = packageInfo.applicationInfo ?: return@mapNotNull null
-                val packageName = packageInfo.packageName
-                val isInstalled = (appInfo.flags and ApplicationInfo.FLAG_INSTALLED) != 0
-                val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                
-                val existing = existingAppsMap[packageName]
-                val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(applicationContext, packageName)
-                
-                // SMART SIZE REFRESH: Only query StorageStatsManager if the app was updated 
-                // or if we have no record of its size. Data/Cache can change, but APK size won't.
-                // We refresh everything if it's the first time or if the app version changed.
-                val shouldRefreshSize = existing == null || 
-                                      existing.lastUpdateTime != packageInfo.lastUpdateTime ||
-                                      existing.dataSize == 0L
-                
-                val (apkSize, dataSize, cacheSize) = if (isInstalled) {
-                    if (shouldRefreshSize) {
-                        getAppSize(applicationContext, packageName) ?: Triple(0L, 0L, 0L)
-                    } else {
-                        Triple(existing!!.apkSize, existing.dataSize, existing.cacheSize)
-                    }
-                } else Triple(0L, 0L, 0L)
+            // Optimization: Process apps in parallel to avoid sequential binder bottlenecks
+            val entities = packages.chunked(25).flatMap { chunk ->
+                coroutineScope {
+                    chunk.map { packageInfo ->
+                        async(Dispatchers.IO) {
+                            val appInfo = packageInfo.applicationInfo ?: return@async null
+                            val packageName = packageInfo.packageName
+                            val isInstalled = (appInfo.flags and ApplicationInfo.FLAG_INSTALLED) != 0
+                            val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                            
+                            val existing = existingAppsMap[packageName]
+                            val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(applicationContext, packageName)
+                            
+                            val shouldRefreshSize = existing == null || 
+                                                  existing.lastUpdateTime != packageInfo.lastUpdateTime ||
+                                                  existing.dataSize == 0L
+                            
+                            val (apkSize, dataSize, cacheSize) = if (isInstalled) {
+                                if (shouldRefreshSize) {
+                                    getAppSize(applicationContext, packageName) ?: Triple(0L, 0L, 0L)
+                                } else {
+                                    Triple(existing!!.apkSize, existing.dataSize, existing.cacheSize)
+                                }
+                            } else Triple(0L, 0L, 0L)
 
-                // Lighter check for launchable activity (only if installed)
-                val hasLauncher = if (isInstalled) {
-                    // Cache the launcher status if updateTime is same
-                    if (existing != null && existing.lastUpdateTime == packageInfo.lastUpdateTime) {
-                        existing.hasActivities
-                    } else {
-                        pm.queryIntentActivities(
-                            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName),
-                            0
-                        ).isNotEmpty()
-                    }
-                } else false
+                            val hasLauncher = if (isInstalled) {
+                                if (existing != null && existing.lastUpdateTime == packageInfo.lastUpdateTime) {
+                                    existing.hasActivities
+                                } else {
+                                    pm.queryIntentActivities(
+                                        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName),
+                                        0
+                                    ).isNotEmpty()
+                                }
+                            } else false
 
-                AppEntity(
-                    packageName = packageName,
-                    label = pm.getApplicationLabel(appInfo).toString(),
-                    versionName = packageInfo.versionName,
-                    versionCode = PackageInfoCompat.getLongVersionCode(packageInfo),
-                    isSystemApp = isSystemApp,
-                    isInstalled = isInstalled,
-                    uid = appInfo.uid,
-                    targetSdk = appInfo.targetSdkVersion,
-                    minSdk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) appInfo.minSdkVersion else 21, // Sensible default for old APIs
-                    isEnabled = appInfo.enabled,
-                    firstInstallTime = packageInfo.firstInstallTime,
-                    lastUpdateTime = packageInfo.lastUpdateTime,
-                    dataSize = dataSize,
-                    cacheSize = cacheSize,
-                    apkSize = apkSize,
-                    hasActivities = hasLauncher,
-                    isDebuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
-                    isBloatware = bloatwareInfo != null,
-                    removalSafety = bloatwareInfo?.getRemovalSafety() ?: com.mustakim.bokbok.data.bloatware.RemovalSafety.UNKNOWN,
-                    bloatwareType = bloatwareInfo?.type,
-                    bloatwareWarning = bloatwareInfo?.warning,
-                    bloatwareDescription = bloatwareInfo?.description,
-                    apkPath = appInfo.sourceDir ?: "",
-                    dataPath = appInfo.dataDir ?: ""
-                )
+                            AppEntity(
+                                packageName = packageName,
+                                label = pm.getApplicationLabel(appInfo).toString(),
+                                versionName = packageInfo.versionName,
+                                versionCode = PackageInfoCompat.getLongVersionCode(packageInfo),
+                                isSystemApp = isSystemApp,
+                                isInstalled = isInstalled,
+                                uid = appInfo.uid,
+                                targetSdk = appInfo.targetSdkVersion,
+                                minSdk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) appInfo.minSdkVersion else 21,
+                                isEnabled = appInfo.enabled,
+                                firstInstallTime = packageInfo.firstInstallTime,
+                                lastUpdateTime = packageInfo.lastUpdateTime,
+                                dataSize = dataSize,
+                                cacheSize = cacheSize,
+                                apkSize = apkSize,
+                                hasActivities = hasLauncher,
+                                isDebuggable = (appInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0,
+                                isBloatware = bloatwareInfo != null,
+                                removalSafety = bloatwareInfo?.getRemovalSafety() ?: com.mustakim.bokbok.data.bloatware.RemovalSafety.UNKNOWN,
+                                bloatwareType = bloatwareInfo?.type,
+                                bloatwareWarning = bloatwareInfo?.warning,
+                                bloatwareDescription = bloatwareInfo?.description,
+                                apkPath = appInfo.sourceDir ?: "",
+                                dataPath = appInfo.dataDir ?: ""
+                            )
+                        }
+                    }.mapNotNull { it.await() }
+                }
             }
             
             appDao.refreshApps(entities)

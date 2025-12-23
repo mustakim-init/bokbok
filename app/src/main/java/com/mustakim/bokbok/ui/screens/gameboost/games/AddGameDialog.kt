@@ -63,7 +63,11 @@ fun AddGameDialog(
     LaunchedEffect(Unit) {
         scope.launch {
             val installed = withContext(Dispatchers.IO) {
-                pm.getInstalledPackages(0).map { pkg ->
+                pm.getInstalledPackages(0).filter { pkg ->
+                    // Filter: Only include user-installed apps (NOT system apps)
+                    val appInfo = pkg.applicationInfo
+                    (appInfo != null) && (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0)
+                }.map { pkg ->
                     AppInfo(
                         packageName = pkg.packageName,
                         label = pkg.applicationInfo?.loadLabel(pm)?.toString() ?: pkg.packageName,

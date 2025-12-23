@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.lifecycle.HiltViewModel
+import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
 enum class GameBoostTab(val title: String) {
@@ -29,11 +30,24 @@ class GameBoostViewModel @Inject constructor() : ViewModel() {
 
     val tabs = GameBoostTab.entries
 
+    private val _shizukuActive = MutableStateFlow(true)
+    val shizukuActive: StateFlow<Boolean> = _shizukuActive.asStateFlow()
+
     fun onTabSelected(tab: GameBoostTab) {
         _selectedTab.value = tab
+        verifyShizukuStatus()
     }
     
     fun onTabSelected(index: Int) {
         _selectedTab.value = GameBoostTab.getByIndex(index)
+        verifyShizukuStatus()
+    }
+
+    fun verifyShizukuStatus() {
+        _shizukuActive.value = try {
+            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) {
+            false
+        }
     }
 }

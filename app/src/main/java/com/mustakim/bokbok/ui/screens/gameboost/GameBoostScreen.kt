@@ -3,6 +3,7 @@ package com.mustakim.bokbok.ui.screens.gameboost
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -143,7 +144,7 @@ fun GameBoostScreen(
             ) {
                 ScrollableTabRow(
                     selectedTabIndex = pagerState.currentPage,
-                    containerColor = MaterialTheme.colorScheme.surface, // Match TopBar
+                    containerColor = MaterialTheme.colorScheme.surface,
                     edgePadding = 12.dp,
                     indicator = { tabPositions ->
                         if (pagerState.currentPage < tabPositions.size) {
@@ -172,6 +173,32 @@ fun GameBoostScreen(
                                 text = tab.title,
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = if (pagerState.currentPage == index) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                val shizukuActive by viewModel.shizukuActive.collectAsState()
+                if (!shizukuActive) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        tonalElevation = 4.dp
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Shizuku Not Running",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Most optimizations and system monitoring features require Shizuku to be active and authorized.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
                     }

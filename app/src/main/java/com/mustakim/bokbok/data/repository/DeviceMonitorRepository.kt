@@ -101,10 +101,15 @@ class DeviceMonitorRepository @Inject constructor(
         val maxFrequencies = mutableListOf<Long>()
         val onlineStatus = mutableListOf<Boolean>()
 
+        // Optimistically try to read all frequencies in one go if they are restricted
+        val batchFrequencies = readFreqsBatch(coreCount)
+        val batchOnline = readOnlineBatch(coreCount)
+        val batchMaxFreqs = readMaxFreqsBatch(coreCount)
+
         for (i in 0 until coreCount) {
-            frequencies.add(readFreq(i))
-            onlineStatus.add(isCoreOnline(i))
-            maxFrequencies.add(readMaxFreq(i))
+            frequencies.add(batchFrequencies[i] ?: readFreq(i))
+            onlineStatus.add(batchOnline[i] ?: isCoreOnline(i))
+            maxFrequencies.add(batchMaxFreqs[i] ?: readMaxFreq(i))
         }
         
         // Calculate Clusters (e.g. "1x 3.01GHz, 4x 2.61GHz")
@@ -258,6 +263,45 @@ class DeviceMonitorRepository @Inject constructor(
         return 0L
     }
     
+    private suspend fun readFreqsBatch(coreCount: Int): Map<Int, Long> {
+        val result = mutableMapOf<Int, Long>()
+        // Only try batch shell if direct read is likely to fail (or has failed)
+        val output = readShellCommand("cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq", 500)
+        if (!output.isNullOrEmpty()) {
+            output.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
+                if (index < coreCount) result[index] = s.trim().toLongOrNull() ?: 0L
+            }
+        }
+        return result
+    }
+
+    private suspend fun readOnlineBatch(coreCount: Int): Map<Int, Boolean> {
+        val result = mutableMapOf<Int, Boolean>()
+        val output = readShellCommand("cat /sys/devices/system/cpu/cpu*/online", 500)
+        if (!output.isNullOrEmpty()) {
+             output.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
+                if (index < coreCount) result[index] = s.trim() == "1"
+            }
+        }
+        return result
+    }
+
+    private suspend fun readMaxFreqsBatch(coreCount: Int): Map<Int, Long> {
+        if (cachedCpuMaxFreqs.size >= coreCount) return cachedCpuMaxFreqs
+        val result = mutableMapOf<Int, Long>()
+        val output = readShellCommand("cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq", 500)
+        if (!output.isNullOrEmpty()) {
+            output.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
+                val freq = s.trim().toLongOrNull() ?: 0L
+                if (index < coreCount) {
+                    result[index] = freq
+                    if (freq > 0) cachedCpuMaxFreqs[index] = freq
+                }
+            }
+        }
+        return result
+    }
+
     private suspend fun isCoreOnline(core: Int): Boolean {
         val path = workingCoreOnlinePaths[core] ?: "/sys/devices/system/cpu/cpu$core/online"
         
@@ -272,7 +316,7 @@ class DeviceMonitorRepository @Inject constructor(
             }
         }
 
-        // Try shell
+        // Try shell - Note: Usually batch will have caught this, but fallback just in case
         if (!blockedShellPaths.contains(path)) {
             val output = readShellCommand("cat $path", 300)
             if (output != null) {
@@ -1040,7 +1084,7 @@ class DeviceMonitorRepository @Inject constructor(
     suspend fun getRunningProcesses(): List<ProcessInfo> = withContext(Dispatchers.IO) {
         val processes = mutableListOf<ProcessInfo>()
         // Use top because it gives %CPU easily. -n 1 for single iteration. -b for batch mode.
-        val output = readShellCommand("top -b -n 1") 
+        val output = readShellCommand("top -b -n 1 -m 20") 
         // Note: removed -s 9 as it's not supported on some toybox versions and causes failure
         
         if (!output.isNullOrEmpty()) {

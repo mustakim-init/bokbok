@@ -12,6 +12,8 @@ import com.mustakim.bokbok.data.local.entity.GameEntity
 import com.mustakim.bokbok.data.model.GameItem
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -43,42 +45,42 @@ class GameRepository @Inject constructor(
             }
             
             val installedApps = cachedInstalledPackages!!
-            val gameItems = mutableListOf<GameItem>()
-
             val entityMap = entities.associateBy { it.packageName }
             
-            installedApps.forEach { packageInfo ->
-                val appInfo = packageInfo.applicationInfo ?: return@forEach
-                val packageName = packageInfo.packageName
-                val entity = entityMap[packageName]
-                
-                // CRITICAL SELECTION LOGIC:
-                // 1. If it's in our DB (User added it or we previously found it), we keep it unless manually removed.
-                // 2. If it's NOT in DB, we only scan it if it's a USER app (not a core system app).
-                // This eliminates scanning 300+ system processes.
-                val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || 
-                              (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                
-                val shouldEvaluationAsGame = entity != null || isUserApp
-                
-                if (shouldEvaluationAsGame && entity?.isManuallyRemoved != true) {
-                    if (entity != null || isGame(packageInfo)) {
-                        gameItems.add(
-                            GameItem(
-                                packageName = packageName,
-                                label = appInfo.loadLabel(packageManager).toString(),
-                                isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
-                                isUserAdded = entity?.isUserAdded ?: false,
-                                installedTime = packageInfo.firstInstallTime,
-                                apkSize = appInfo.sourceDir?.let { File(it).length() } ?: 0L,
-                                optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
-                                customSettingsJson = entity?.customSettingsJson ?: "{}"
-                            )
-                        )
-                    }
+            // Optimization: Process games in parallel chunks to avoid sequential IPC lag
+            val entitiesList = installedApps.chunked(30).flatMap { chunk ->
+                coroutineScope {
+                    chunk.map { packageInfo ->
+                        async {
+                            val appInfo = packageInfo.applicationInfo ?: return@async null
+                            val packageName = packageInfo.packageName
+                            val entity = entityMap[packageName]
+                            
+                            val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || 
+                                          (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                            
+                            val shouldEvaluationAsGame = entity != null || isUserApp
+                            
+                            if (shouldEvaluationAsGame && entity?.isManuallyRemoved != true) {
+                                if (entity != null || isGame(packageInfo)) {
+                                    return@async GameItem(
+                                        packageName = packageName,
+                                        label = appInfo.loadLabel(packageManager).toString(),
+                                        isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
+                                        isUserAdded = entity?.isUserAdded ?: false,
+                                        installedTime = packageInfo.firstInstallTime,
+                                        apkSize = appInfo.sourceDir?.let { File(it).length() } ?: 0L,
+                                        optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
+                                        customSettingsJson = entity?.customSettingsJson ?: "{}"
+                                    )
+                                }
+                            }
+                            null
+                        }
+                    }.mapNotNull { it.await() }
                 }
             }
-            gameItems
+            entitiesList
         }.map { items -> 
             items.sortedBy { it.label } 
         }.flowOn(Dispatchers.IO)

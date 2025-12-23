@@ -40,33 +40,27 @@ class DeviceMonitorViewModel @Inject constructor(
             while (isActive) {
                 try {
                     // Ticks are every 2 seconds
-                    val isProcessTick = tickCount % 2 == 0   // Every 4 seconds
                     val isBatteryTick = tickCount % 5 == 0   // Every 10 seconds
-                    val isStorageTick = tickCount % 10 == 0  // Every 20 seconds
+                    val isStorageTick = tickCount % 15 == 0  // Every 30 seconds
+                    val isProcessTick = tickCount % 4 == 0   // Every 8 seconds (top is VERY heavy)
 
-                    val cpuDef = async(Dispatchers.IO) { repository.getCpuInfo() }
-                    val ramDef = async(Dispatchers.IO) { repository.getRamInfo() }
-                    val gpuDef = async(Dispatchers.IO) { repository.getGpuInfo() }
+                    // SEQUENCE UPDATES to avoid "Shizuku Storm"
+                    // Parallel async {} for shell commands causes massive frame drops on cold starts.
+                    // Sequential execution is safer and the 2s refresh still feels real-time.
+                    val cpu = try { repository.getCpuInfo() } catch (_: Exception) { _uiState.value.cpuInfo }
+                    val ram = try { repository.getRamInfo() } catch (_: Exception) { _uiState.value.ramInfo }
+                    val gpu = try { repository.getGpuInfo() } catch (_: Exception) { _uiState.value.gpuInfo }
                     
-                    val procDef = if (isProcessTick) async(Dispatchers.IO) { repository.getRunningProcesses() } else null
-                    val batDef = if (isBatteryTick) async(Dispatchers.IO) { repository.getBatteryInfo() } else null
-                    val stoDef = if (isStorageTick) async(Dispatchers.IO) { repository.getStorageInfo() } else null
-
-                    // Await items
-                    val cpu = try { cpuDef.await() } catch (_: Exception) { _uiState.value.cpuInfo }
-                    val ram = try { ramDef.await() } catch (_: Exception) { _uiState.value.ramInfo }
-                    val gpu = try { gpuDef.await() } catch (_: Exception) { _uiState.value.gpuInfo }
-                    
-                    val processes = if (procDef != null) {
-                        try { procDef.await() } catch (_: Exception) { _uiState.value.processList }
+                    val processes = if (isProcessTick) {
+                        try { repository.getRunningProcesses() } catch (_: Exception) { _uiState.value.processList }
                     } else _uiState.value.processList
                     
-                    val battery = if (batDef != null) {
-                        try { batDef.await() } catch (_: Exception) { _uiState.value.batteryInfo }
+                    val battery = if (isBatteryTick) {
+                        try { repository.getBatteryInfo() } catch (_: Exception) { _uiState.value.batteryInfo }
                     } else _uiState.value.batteryInfo
                     
-                    val storage = if (stoDef != null) {
-                        try { stoDef.await() } catch (_: Exception) { _uiState.value.storageInfo }
+                    val storage = if (isStorageTick) {
+                        try { repository.getStorageInfo() } catch (_: Exception) { _uiState.value.storageInfo }
                     } else _uiState.value.storageInfo
 
                     val hasPermission = repository.hasUsageStatsPermission()

@@ -81,14 +81,26 @@ class UsageStatsRepository @Inject constructor(
         }
     }
 
-    fun refreshUsageStats() {
-        val request = OneTimeWorkRequestBuilder<UsageStatsWorker>()
+    fun refreshUsageStats(startTime: Long, endTime: Long) {
+        val inputData = Data.Builder()
+            .putLong("start_time", startTime)
+            .putLong("end_time", endTime)
             .build()
+
+        val request = OneTimeWorkRequestBuilder<UsageStatsWorker>()
+            .setInputData(inputData)
+            .build()
+            
         workManager.enqueueUniqueWork(
             UsageStatsWorker.WORK_NAME,
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.REPLACE, // Change to REPLACE to trigger new fetch immediately
             request
         )
+    }
+
+    fun observeWorkStatus(): Flow<WorkInfo.State?> {
+        return workManager.getWorkInfosForUniqueWorkFlow(UsageStatsWorker.WORK_NAME)
+            .map { it.firstOrNull()?.state }
     }
 
     private fun UsageStatsEntity.toModel() = AppUsageInfo(
@@ -151,7 +163,7 @@ class UsageStatsRepository @Inject constructor(
         var lastStartTime: Long = 0
     )
 
-    private fun getTimeRange(intervalType: IntervalType, date: Long): Pair<Long, Long> {
+    fun getTimeRange(intervalType: IntervalType, date: Long): Pair<Long, Long> {
         val calendar = Calendar.getInstance()
         calendar.timeInMillis = date
         

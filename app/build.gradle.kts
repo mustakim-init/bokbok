@@ -16,7 +16,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mustakim.bokbok"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
@@ -50,6 +50,13 @@ android {
         buildConfigField("String", "TURN_FALLBACK_URL", "\"$fallbackUrl\"")
         buildConfigField("String", "TURN_FALLBACK_USERNAME", "\"$fallbackUser\"")
         buildConfigField("String", "TURN_FALLBACK_PASSWORD", "\"$fallbackPass\"")
+
+        externalNativeBuild {
+            cmake {
+                arguments("-DANDROID_STL=c++_shared")
+                abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            }
+        }
     }
 
     buildTypes {
@@ -85,12 +92,20 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        prefab = true
     }
 
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/proguard/androidx-*.pro"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 }
@@ -147,6 +162,10 @@ dependencies {
     // WebRTC
     implementation("io.getstream:stream-webrtc-android:1.3.10")
 
+    // Media3 Transformer (for track extraction/export)
+    implementation("androidx.media3:media3-transformer:1.5.0")
+    implementation("androidx.media3:media3-common:1.5.0")
+
     // Coroutines
     implementation(libs.bundles.coroutines)
 
@@ -181,6 +200,9 @@ dependencies {
     implementation(libs.hilt.work)
     ksp(libs.hilt.work.compiler)
 
+    // Logging
+    implementation("com.jakewharton.timber:timber:5.0.1")
+
     // Debug
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
@@ -194,4 +216,7 @@ dependencies {
     // Shizuku (for ADB/Root operations)
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // Oboe (for low-latency native audio)
+    implementation("com.google.oboe:oboe:1.9.3")
 }

@@ -23,6 +23,14 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,6 +52,7 @@ import com.mustakim.bokbok.viewmodel.UserViewModel
 import com.mustakim.bokbok.ui.screens.gameboost.appmanager.AppManagerScreen
 import com.mustakim.bokbok.ui.screens.gameboost.usagestats.UsageStatsScreen
 import com.mustakim.bokbok.ui.screens.gameboost.devicemonitor.DeviceMonitorScreen
+import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.ScreenRecordTab
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +66,7 @@ fun GameBoostScreen(
     val tabs = remember { viewModel.tabs }
     val pagerState = rememberPagerState(initialPage = selectedTab.ordinal) { tabs.size }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     
     // ✅ SCOPE PERSISTENCE: Scope ViewModels to the 'game_boost' route.
     // This ensures they stay alive in the background even when 'disposed' by the pager UI.
@@ -179,29 +189,65 @@ fun GameBoostScreen(
                 }
 
                 val shizukuActive by viewModel.shizukuActive.collectAsState()
-                if (!shizukuActive) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        tonalElevation = 4.dp
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                var showShizukuDialog by remember { mutableStateOf(false) }
+
+                LaunchedEffect(shizukuActive) {
+                    if (!shizukuActive) {
+                        showShizukuDialog = true
+                    }
+                }
+
+                if (showShizukuDialog && !shizukuActive) {
+                    AlertDialog(
+                        modifier = Modifier.padding(28.dp),
+                        onDismissRequest = { showShizukuDialog = false },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        },
+                        title = {
                             Text(
                                 "Shizuku Not Running",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold
                             )
+                        },
+                        text = {
                             Text(
-                                "Most optimizations and system monitoring features require Shizuku to be active and authorized.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
+                                "Most optimizations and system monitoring features require Shizuku to be active and authorized. Please ensure Shizuku is running and this app is authorized in Shizuku's settings.",
+                                style = MaterialTheme.typography.bodyMedium
                             )
-                        }
-                    }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                try {
+                                    val intent = context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                                    if (intent != null) {
+                                        context.startActivity(intent)
+                                    } else {
+                                        // Open Play Store if not installed? Or just show message
+                                        val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))
+                                        context.startActivity(playStoreIntent)
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open Shizuku", Toast.LENGTH_SHORT).show()
+                                }
+                                showShizukuDialog = false
+                            }) {
+                                Text("Open Shizuku")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showShizukuDialog = false }) {
+                                Text("Dismiss")
+                            }
+                        },
+                        shape = RoundedCornerShape(28.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    )
                 }
 
                 Surface(
@@ -258,6 +304,12 @@ fun GameBoostScreen(
 
                             GameBoostTab.DEVICE_MONITOR -> {
                                 DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
+                            }
+
+                            GameBoostTab.SCREEN_RECORD -> {
+                                val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel =
+                                    hiltViewModel(viewModelStoreOwner)
+                                ScreenRecordTab(viewModel = screenRecordViewModel)
                             }
 
                             else -> {

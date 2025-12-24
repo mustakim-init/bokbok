@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Public Movies directory where recordings are saved -->
+    <external-path
+        name="movies"
+        path="Movies/BokBok" />
+    
+    <!-- Cache directory for temporary files -->
+    <cache-path
+        name="cache"
+        path="." />
+</paths>

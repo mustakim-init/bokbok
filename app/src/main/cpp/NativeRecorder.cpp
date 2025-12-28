@@ -82,8 +82,8 @@ struct RecorderContext {
 
     // Aggressive Noise Gate with Hysteresis
     // AGGRESSIVE: High threshold to completely eliminate speaker feedback when not speaking
-    static constexpr float NOISE_GATE_THRESHOLD = 200.0f;  // Much higher to catch only real voice
-    static constexpr float NOISE_GATE_HYSTERESIS = 50.0f;  // Hysteresis to prevent flutter
+    static constexpr float NOISE_GATE_THRESHOLD = 100.0f;  // Much higher to catch only real voice
+    static constexpr float NOISE_GATE_HYSTERESIS = 90.0f;  // Hysteresis to prevent flutter
     static constexpr int GATE_HOLD_FRAMES = 5;             // ~50ms hold (fast release)
     static constexpr int GATE_ATTACK_FRAMES = 1;           // ~10ms attack (fast open)
     int gateHoldCounter = 0;
@@ -95,7 +95,7 @@ struct RecorderContext {
     std::atomic<float> micAudioRatio{1.0f};       // 0.0 to 1.0 (default: full mic)
     
     // Mic post-gain (applied after all processing)
-    static constexpr float MIC_POST_GAIN = 4.0f;  // Boost clean voice signal
+    static constexpr float MIC_POST_GAIN = 50.0f;  // Boost clean voice signal to match internal audio levels
 };
 
 static RecorderContext* gCtx = nullptr;

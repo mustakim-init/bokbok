@@ -140,14 +140,7 @@ fun ScreenRecordTab(
                                 value = config.resolutionName,
                                 options = listOf("480p", "720p", "1080p", "2K", "4K"),
                                 onSelected = { name ->
-                                    val (w, h) = when(name) {
-                                        "480p" -> 480 to 854
-                                        "720p" -> 720 to 1280
-                                        "1080p" -> 1080 to 1920
-                                        "2K" -> 1440 to 2560
-                                        "4K" -> 2160 to 3840
-                                        else -> 1080 to 1920
-                                    }
+                                    val (w, h) = calculateResolution(context, name)
                                     viewModel.updateConfig(config.copy(width = w, height = h, resolutionName = name))
                                 }
                             )
@@ -202,6 +195,33 @@ fun ScreenRecordTab(
                                 checked = config.useCountdown,
                                 onCheckedChange = { viewModel.updateConfig(config.copy(useCountdown = it)) }
                             )
+                        }
+                    }
+
+                    // Audio Mix Ratio Slider (only visible when both audio sources enabled)
+                    if (config.includeMic && config.includeInternal) {
+                        item {
+                            Text(
+                                text = "Audio Mix Balance",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        item {
+                            SettingsGroup {
+                                AudioMixRatioSlider(
+                                    internalRatio = config.internalAudioRatio,
+                                    micRatio = config.micAudioRatio,
+                                    onRatioChange = { internal, mic ->
+                                        viewModel.updateConfig(config.copy(
+                                            internalAudioRatio = internal,
+                                            micAudioRatio = mic
+                                        ))
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -426,5 +446,166 @@ fun ToggleSetting(
             }
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * Calculates correct resolution while preserving the device's actual aspect ratio.
+ */
+private fun calculateResolution(context: Context, preset: String): Pair<Int, Int> {
+    val metrics = context.resources.displayMetrics
+    val screenWidth = metrics.widthPixels
+    val screenHeight = metrics.heightPixels
+    
+    // Most phones are portrait (height > width)
+    val isPortrait = screenHeight > screenWidth
+    val aspectRatio = if (isPortrait) {
+        screenWidth.toFloat() / screenHeight.toFloat()
+    } else {
+        screenHeight.toFloat() / screenWidth.toFloat()
+    }
+
+    val targetHeight = when (preset) {
+        "480p" -> 854
+        "720p" -> 1280
+        "1080p" -> 1920
+        "2K" -> 2560
+        "4K" -> 3840
+        else -> 1920
+    }
+
+    // Adjust width based on actual aspect ratio
+    var calculatedWidth = (targetHeight * aspectRatio).toInt()
+    
+    // Ensure width is even for video encoding compatibility
+    if (calculatedWidth % 2 != 0) calculatedWidth++
+    
+    return calculatedWidth to targetHeight
+}
+
+/**
+ * Audio Mix Ratio Slider for controlling the balance between internal (game) audio
+ * and microphone audio. Uses a single slider where:
+ * - Left side = More internal audio
+ * - Right side = More microphone audio
+ * - Center = Equal mix
+ */
+@Composable
+fun AudioMixRatioSlider(
+    internalRatio: Float,
+    micRatio: Float,
+    onRatioChange: (internal: Float, mic: Float) -> Unit
+) {
+    // Convert to a single balance value: -1.0 (all internal) to 1.0 (all mic)
+    // 0.0 = equal mix
+    var balance by remember(internalRatio, micRatio) { 
+        mutableStateOf(calculateBalance(internalRatio, micRatio))
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.SurroundSound,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = "Audio Balance",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = getBalanceDescription(balance),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Balance labels
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Game",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Voice",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        
+        Slider(
+            value = balance,
+            onValueChange = { newBalance ->
+                balance = newBalance
+                val (internal, mic) = calculateRatiosFromBalance(newBalance)
+                onRatioChange(internal, mic)
+            },
+            valueRange = -1f..1f,
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // Show current ratio values
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "${((1f - balance.coerceIn(0f, 1f)) * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "${((1f + balance.coerceIn(-1f, 0f)) * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+private fun calculateBalance(internal: Float, mic: Float): Float {
+    // Convert two ratios to a single balance value
+    // If both are 1.0, balance is 0
+    // If internal is higher, balance is negative
+    // If mic is higher, balance is positive
+    return (mic - internal).coerceIn(-1f, 1f)
+}
+
+private fun calculateRatiosFromBalance(balance: Float): Pair<Float, Float> {
+    // Convert balance back to two ratios
+    // At balance 0: both at 1.0
+    // At balance -1: internal at 1.0, mic at 0.0
+    // At balance 1: internal at 0.0, mic at 1.0
+    val internal = (1f - balance.coerceIn(0f, 1f)).coerceIn(0f, 1f)
+    val mic = (1f + balance.coerceIn(-1f, 0f)).coerceIn(0f, 1f)
+    return internal to mic
+}
+
+private fun getBalanceDescription(balance: Float): String {
+    return when {
+        balance < -0.6f -> "Game audio dominant"
+        balance < -0.2f -> "Slightly more game audio"
+        balance > 0.6f -> "Voice dominant"
+        balance > 0.2f -> "Slightly more voice"
+        else -> "Balanced mix"
     }
 }

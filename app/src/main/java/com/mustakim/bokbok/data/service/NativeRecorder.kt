@@ -27,6 +27,7 @@ class NativeRecorder {
         bitrate: Int,
         fps: Int,
         useHevc: Boolean,
+        audioEnabled: Boolean,
         outputPath: String
     ): Boolean
 
@@ -82,4 +83,23 @@ class NativeRecorder {
      * Sends raw PCM audio data (16-bit interleaved stereo) to the native encoder.
      */
     external fun writeAudioBuffer(data: ShortArray, length: Int): Boolean
+    
+    /**
+     * Writes separate mic and internal audio samples for AEC processing.
+     */
+    external fun writeAudioSamples(micData: ShortArray, internalData: ShortArray, length: Int): Boolean
+
+    /**
+     * Gets current audio levels for UI display.
+     * Returns FloatArray: [micRms, micPeak, internalRms, internalPeak]
+     */
+    external fun getAudioLevels(): FloatArray
+    
+    /**
+     * Sets the mix ratio for internal and mic audio.
+     * Both values are 0.0 to 1.0.
+     * @param internalRatio Volume of internal/game audio (1.0 = full, 0.0 = muted)
+     * @param micRatio Volume of processed mic audio (1.0 = full, 0.0 = muted)
+     */
+    external fun setMixRatio(internalRatio: Float, micRatio: Float)
 }

@@ -30,6 +30,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+import android.hardware.display.DisplayManager
+import android.view.Display
 
 @AndroidEntryPoint
 class ScreenRecordService : Service() {
@@ -41,6 +43,8 @@ class ScreenRecordService : Service() {
     
     private var virtualDisplay: android.hardware.display.VirtualDisplay? = null
     private var recordingOverlay: com.mustakim.bokbok.ui.screens.gameboost.screenrecord.RecordingOverlay? = null
+    private var currentConfig: RecordConfig? = null
+    private var displayManager: DisplayManager? = null
     
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
@@ -68,6 +72,17 @@ class ScreenRecordService : Service() {
     private val _countdownValue = MutableStateFlow(0)
     val countdownValue = _countdownValue.asStateFlow()
 
+    // DisplayListener for orientation changes
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY && _isRecording.value && !_isPaused.value) {
+                handleOrientationChange()
+            }
+        }
+    }
+
     inner class LocalBinder : Binder() {
         fun getService(): ScreenRecordService = this@ScreenRecordService
     }
@@ -78,6 +93,7 @@ class ScreenRecordService : Service() {
         super.onCreate()
         createNotificationChannel()
         audioCaptureManager = AudioCaptureManager(this, nativeRecorder)
+        displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -112,7 +128,14 @@ class ScreenRecordService : Service() {
         try {
             // 0. Start Foreground Service FIRST (Required for API 34+)
             val notification = createNotification("Preparing for recording...", showActions = false)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // API 34+: Must declare both microphone AND mediaProjection
+                startForeground(
+                    NOTIFICATION_ID, 
+                    notification, 
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
@@ -129,6 +152,12 @@ class ScreenRecordService : Service() {
             // Register callback for system-initiated stop
             mediaProjection?.registerCallback(projectionCallback, null)
 
+            // Store config for orientation handling
+            currentConfig = config
+
+            // Register display listener for orientation changes
+            displayManager?.registerDisplayListener(displayListener, null)
+
             // 1. Setup NDK Engine - Save to PUBLIC directory for Gallery visibility
             val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
             val bokbokDir = File(moviesDir, "BokBok").apply { mkdirs() }
@@ -137,13 +166,17 @@ class ScreenRecordService : Service() {
             _lastRecordingPath.value = outputFile
             
             val setupSuccess = nativeRecorder.setup(
-                config.width, config.height, config.bitrate, config.fps, config.useHevc, outputFile
+                config.width, config.height, config.bitrate, config.fps, config.useHevc, 
+                config.includeMic || config.includeInternal, outputFile
             )
 
             if (!setupSuccess) {
                 handleError("Failed to initialize video encoder")
                 return
             }
+
+            // Set the audio mix ratio from user configuration
+            nativeRecorder.setMixRatio(config.internalAudioRatio, config.micAudioRatio)
 
             // 2. Start Audio Capture (Kotlin -> NDK)
             if (config.includeMic || config.includeInternal) {
@@ -167,6 +200,11 @@ class ScreenRecordService : Service() {
                 null,
                 null
             )
+
+            if (virtualDisplay == null) {
+                handleError("Failed to create virtual display")
+                return
+            }
 
             if (nativeRecorder.start()) {
                 // Update notification with recording state and actions
@@ -197,9 +235,43 @@ class ScreenRecordService : Service() {
         cleanupResources()
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
+
+    /**
+     * Handles display orientation changes by resizing the VirtualDisplay.
+     * Note: Most MediaCodec implementations don't support dynamic resolution changes,
+     * so we log the event but don't attempt to resize the encoder mid-recording.
+     * For a full solution, one would need to stop/restart the encoder.
+     */
+    private fun handleOrientationChange() {
+        val metrics = resources.displayMetrics
+        val newWidth = metrics.widthPixels
+        val newHeight = metrics.heightPixels
+        val dpi = metrics.densityDpi
+
+        val config = currentConfig ?: return
+
+        // Only resize if dimensions actually changed
+        if (newWidth == config.width && newHeight == config.height) return
+
+        Timber.i("Orientation changed: ${config.width}x${config.height} -> ${newWidth}x${newHeight}")
+
+        // Resize VirtualDisplay (this works without restarting the encoder)
+        try {
+            // DISABLING: MediaCodec does not support dynamic resolution changes.
+            // Feeding a different resolution to a fixed-size encoder causes the "cut in half" bug.
+            // virtualDisplay?.resize(newWidth, newHeight, dpi)
+            Timber.i("VirtualDisplay resize bypassed to prevent encoder corruption")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to resize VirtualDisplay")
+        }
+    }
     
     private fun cleanupResources() {
         try {
+            // Unregister display listener
+            displayManager?.unregisterDisplayListener(displayListener)
+            currentConfig = null
+
             audioCaptureManager.stopCapture()
             virtualDisplay?.release()
             virtualDisplay = null
@@ -237,13 +309,18 @@ class ScreenRecordService : Service() {
             showCapturedNotification(path)
         }
         
-        stopSelf()
+        // Wait a small bit to ensure sequential operations complete before killing service
+        CoroutineScope(Dispatchers.Main).launch {
+            delay(500)
+            stopSelf()
+        }
         Timber.i("Recording stopped. File: $recordedPath")
     }
 
     fun pauseRecording() {
         if (!_isRecording.value || _isPaused.value) return
         if (nativeRecorder.pause()) {
+            audioCaptureManager.pauseCapture()
             _isPaused.value = true
             updateNotification("Recording Paused", showResume = true)
         }
@@ -252,6 +329,7 @@ class ScreenRecordService : Service() {
     fun resumeRecording() {
         if (!_isRecording.value || !_isPaused.value) return
         if (nativeRecorder.resume()) {
+            audioCaptureManager.resumeCapture()
             _isPaused.value = false
             updateNotification("Recording Screen...", showPause = true)
         }

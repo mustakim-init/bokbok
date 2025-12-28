@@ -32,7 +32,8 @@ class GroupChatViewModel @Inject constructor(
 ) : ViewModel() {
 
     val groupId: String = savedStateHandle.get<String>("groupId")
-        ?: throw IllegalArgumentException("groupId is required")
+        ?: savedStateHandle.get<String>("chatId")
+        ?: throw IllegalArgumentException("groupId or chatId is required")
 
     val currentUserId: String = repository.currentUserId
 

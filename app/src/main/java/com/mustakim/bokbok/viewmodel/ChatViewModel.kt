@@ -34,7 +34,8 @@ class ChatViewModel @Inject constructor(
 ) : ViewModel() {
     
     val friendId: String = savedStateHandle.get<String>("userId")
-        ?: throw IllegalArgumentException("userId is required")
+        ?: savedStateHandle.get<String>("chatId")
+        ?: throw IllegalArgumentException("userId or chatId is required")
 
     private val _messages = MutableStateFlow<List<Message>?>(null)
     val messages: StateFlow<List<Message>?> = _messages.asStateFlow()

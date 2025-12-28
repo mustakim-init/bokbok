@@ -157,6 +157,6 @@
             android:name=".data.service.ScreenRecordService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection|microphone" />
     </application>
 </manifest>

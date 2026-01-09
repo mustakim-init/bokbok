@@ -27,8 +27,12 @@ class NativeRecorder {
         bitrate: Int,
         fps: Int,
         useHevc: Boolean,
-        audioEnabled: Boolean,
-        outputPath: String
+        audioEnabled: Boolean, 
+        videoPath: String,
+        micPath: String,
+        internalPath: String,
+        audioSampleRate: Int,
+        audioBitrate: Int
     ): Boolean
 
     /**
@@ -55,6 +59,35 @@ class NativeRecorder {
      * Gracefully stops the engine and finalizes the MP4 container.
      */
     external fun stop(): Boolean
+
+    /**
+     * Processes the raw mic, internal, and video recordings into a final output file.
+     */
+    external fun processRecording(
+        videoFd: Int,
+        videoWidth: Int,
+        videoHeight: Int,
+        micPath: String,
+        internalPath: String,
+        outputPath: String,
+        modelPath: String,
+        enableBleed: Boolean,
+        enableNoise: Boolean,
+        micGain: Float,
+        internalGain: Float,
+        exportMic: Boolean,
+        exportInternal: Boolean,
+        audioSampleRate: Int,
+        audioBitrate: Int
+    ): Boolean
+
+    // Listener for progress updates
+    var onProgressUpdate: ((Float, String) -> Unit)? = null
+
+    // Called from JNI
+    fun onProcessProgress(progress: Float, message: String) {
+        onProgressUpdate?.invoke(progress, message)
+    }
 
     /**
      * Captures a still frame from the current surface buffer.

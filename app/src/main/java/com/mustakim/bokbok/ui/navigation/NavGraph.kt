@@ -213,6 +213,27 @@ fun NavGraph(
             BatteryOptimizationScreen(navController)
         }
 
+        composable(NavRoutes.RecordingsGallery.route) {
+            val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel = hiltViewModel()
+            com.mustakim.bokbok.ui.screens.gameboost.screenrecord.RecordingsGalleryScreen(
+                navController = navController,
+                viewModel = screenRecordViewModel
+            )
+        }
+
+        composable(
+            route = NavRoutes.VideoPlayer.route,
+            arguments = listOf(
+                navArgument("path") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val path = backStackEntry.arguments?.getString("path") ?: ""
+            com.mustakim.bokbok.ui.screens.gameboost.screenrecord.InternalVideoPlayerScreen(
+                navController = navController,
+                videoPath = path
+            )
+        }
+
 
 
         // ============= VOICE ROOM =============

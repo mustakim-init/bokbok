@@ -309,7 +309,10 @@ fun GameBoostScreen(
                             GameBoostTab.SCREEN_RECORD -> {
                                 val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel =
                                     hiltViewModel(viewModelStoreOwner)
-                                ScreenRecordTab(viewModel = screenRecordViewModel)
+                                ScreenRecordTab(
+                                    navController = navController,
+                                    viewModel = screenRecordViewModel
+                                )
                             }
 
                             else -> {

@@ -20,12 +20,48 @@ data class RecordConfig(
     val useHevc: Boolean = true,
     val includeMic: Boolean = true,
     val includeInternal: Boolean = true,
+    val profile: RecordingProfile = RecordingProfile.CUSTOM,
     val useCountdown: Boolean = true,
+    val showFacecam: Boolean = false,
+    val exportMicOnly: Boolean = false,
+    val exportInternalOnly: Boolean = false,
+    val autoStopDurationMinutes: Int = 0, // 0 = disabled
+    val autoStopBatteryLevel: Int = 0,    // 0 = disabled
+    val useWatermarkText: Boolean = false,
+    val watermarkText: String = "BokBok Screen Recorder",
+    val useWatermarkImage: Boolean = false,
+    val watermarkImagePath: String = "",
+    val stopOnScreenOff: Boolean = true,
+    val stopOnShake: Boolean = false,
+    val autoLaunchPackage: String = "",
+    val setVolumeOnStart: Boolean = false,
+    val startVolumeLevel: Int = 100,
+    val showTouches: Boolean = false,
+    val orientationLock: String = "Auto", // Auto, Portrait, Landscape
+    val facecamShape: String = "Circle", // Circle, Square
+    val audioSampleRate: Int = 48000,
+    val audioBitrate: Int = 128000,
+    val shakeSensitivity: Float = 20f,
     val resolutionName: String = "1080p",
     val bitrateName: String = "20 Mbps",
     val powerMode: PowerMode = PowerMode.BALANCED,
     val internalAudioRatio: Float = 1.0f,  // 0.0 to 1.0 (1.0 = full volume)
-    val micAudioRatio: Float = 1.0f        // 0.0 to 1.0 (1.0 = full volume)
+    val micAudioRatio: Float = 1.0f,       // 0.0 to 1.0 (1.0 = full volume)
+    
+    // Kapture Parity Overlay Settings
+    val menuStyle: Int = 0,               // 0: Horizontal, 1: Vertical
+    val showShortcuts: Boolean = false,
+    val shortcuts: List<String> = emptyList(),
+    val minimizingSide: Int = 0,          // 0: Right, 1: Left
+    val startMinimized: Boolean = false,
+    val showPauseResumeOnMenu: Boolean = true,
+    val showCameraButtonOnMenu: Boolean = true,
+    val showDrawButtonOnMenu: Boolean = true,
+    val showScreenshotButtonOnMenu: Boolean = true,
+    val showTimeOnMenu: Boolean = true,
+    val showTimeLimitOnMenu: Boolean = false,
+    val isMono: Boolean = false,
+    val outputFormat: String = "mp4" // mp4, mkv, etc (currently only mp4 supported via native)
 ) {
     companion object {
         /**

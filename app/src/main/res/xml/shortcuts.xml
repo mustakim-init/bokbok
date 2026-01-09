@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_recording"
+        android:enabled="true"
+        android:icon="@drawable/ic_tile_not_recording"
+        android:shortcutShortLabel="@string/shortcut_new_recording"
+        android:shortcutLongLabel="@string/shortcut_new_recording_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.mustakim.bokbok"
+            android:targetClass="com.mustakim.bokbok.ui.MainActivity">
+            <extra android:name="shortcut_action" android:value="start_recording" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="new_screenshot"
+        android:enabled="true"
+        android:icon="@drawable/ic_tile_recording"
+        android:shortcutShortLabel="@string/shortcut_new_screenshot"
+        android:shortcutLongLabel="@string/shortcut_new_screenshot_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.mustakim.bokbok"
+            android:targetClass="com.mustakim.bokbok.ui.MainActivity">
+            <extra android:name="shortcut_action" android:value="screenshot" />
+        </intent>
+    </shortcut>
+</shortcuts>

@@ -43,6 +43,11 @@ object DataModule {
     }
 
     @Provides
+    fun provideRecordingDao(database: BokBokDatabase): com.mustakim.bokbok.data.local.dao.RecordingDao {
+        return database.recordingDao()
+    }
+
+    @Provides
     @Singleton
     fun provideAppManagerRepository(@ApplicationContext context: Context, appDao: AppDao): AppManagerRepository {
         return AppManagerRepository(context, appDao)
@@ -56,7 +61,7 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun provideGameRepository(@ApplicationContext context: Context, gameDao: com.mustakim.bokbok.data.local.dao.GameDao): GameRepository {
+    fun provideGameRepository(@ApplicationContext context: Context, gameDao: GameDao): GameRepository {
         return GameRepository(context, gameDao)
     }
 
@@ -134,8 +139,8 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun provideFCMRepository(backendService: BackendService): com.mustakim.bokbok.data.repository.FCMRepository {
-        return com.mustakim.bokbok.data.repository.FCMRepository(backendService)
+    fun provideFCMRepository(backendService: BackendService): FCMRepository {
+        return FCMRepository(backendService)
     }
 
     @Provides

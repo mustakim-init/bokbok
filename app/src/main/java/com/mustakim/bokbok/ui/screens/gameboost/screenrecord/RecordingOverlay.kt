@@ -19,6 +19,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -29,10 +30,20 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.Launch
+import android.content.pm.PackageManager
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.LineWeight
+import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.ScreenLockPortrait
+import androidx.compose.material.icons.filled.ScreenLockLandscape
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,12 +59,20 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import android.content.Intent
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.mustakim.bokbok.model.RecordConfig
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
 import kotlinx.coroutines.delay
 
 /**
@@ -71,7 +90,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     
     // Drawing Layer (full screen)
     private val drawingComposeView = ComposeView(context)
-    private var isDrawingLayerVisible = false
+    private var isDrawingModeEnabled = false
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
@@ -88,17 +107,34 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     private var onStopCallback: (() -> Unit)? = null
     private var onPauseCallback: (() -> Unit)? = null
     private var onResumeCallback: (() -> Unit)? = null
+    private var onTakeScreenshotCallback: (() -> Unit)? = null
+    private var onToggleFacecamCallback: (() -> Unit)? = null
+    private var onToggleWatermarkCallback: (() -> Unit)? = null
+    
+    private var currentConfig: RecordConfig = RecordConfig()
 
     init {
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
     }
 
-    fun show(onStop: () -> Unit, onPause: () -> Unit, onResume: () -> Unit) {
+    fun show(
+        config: RecordConfig,
+        onStop: () -> Unit, 
+        onPause: () -> Unit, 
+        onResume: () -> Unit,
+        onTakeScreenshot: () -> Unit,
+        onToggleFacecam: () -> Unit,
+        onToggleWatermark: () -> Unit
+    ) {
+        currentConfig = config
         startTime = System.currentTimeMillis()
         onStopCallback = onStop
         onPauseCallback = onPause
         onResumeCallback = onResume
+        onTakeScreenshotCallback = onTakeScreenshot
+        onToggleFacecamCallback = onToggleFacecam
+        onToggleWatermarkCallback = onToggleWatermark
         
         val savedX = prefs.getInt("pos_x", 100)
         val savedY = prefs.getInt("pos_y", 400)
@@ -122,11 +158,11 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
+            PixelFormat.TRANSPARENT // Use TRANSPARENT for drawing layer
         )
 
         hudContainer.hudComposeView.setContent {
-            FloatingHUD()
+            FloatingHUD(currentConfig)
         }
 
         drawingComposeView.setContent {
@@ -141,7 +177,8 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
         }
 
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
-        windowManager.addView(drawingComposeView, drawingLayoutParams)
+        // Initially only add the HUD. The drawing layer is added on demand to avoid "weird overlay" issues.
+        // windowManager.addView(drawingComposeView, drawingLayoutParams)
         windowManager.addView(hudContainer, hudLayoutParams)
 
         // Initialize drag handling link
@@ -164,18 +201,88 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     }
 
     private fun toggleDrawingMode(enabled: Boolean) {
-        isDrawingLayerVisible = enabled
+        isDrawingModeEnabled = enabled
         drawingLayoutParams.flags = if (enabled) {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         } else {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         }
+        
         try {
-            windowManager.updateViewLayout(drawingComposeView, drawingLayoutParams)
+            if (enabled) {
+                // Add view if not added or update if exists
+                try {
+                    windowManager.addView(drawingComposeView, drawingLayoutParams)
+                } catch (e: Exception) {
+                    windowManager.updateViewLayout(drawingComposeView, drawingLayoutParams)
+                }
+            } else {
+                // Remove view when not in drawing mode to ensure no interference
+                try {
+                    windowManager.removeView(drawingComposeView)
+                } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 
     private val drawPaths = mutableStateListOf<DrawPath>()
+    private val undonePaths = mutableStateListOf<DrawPath>() // Changed to StateList for UI reactivity
+    private val recentColors = mutableStateListOf(Color.Red, Color.Green, Color.Blue, Color.Yellow, Color.White) // Default recent colors
+    
+    private var currentColor by mutableStateOf(Color.Red)
+    private var currentWidth by mutableFloatStateOf(4f)
+    
+    private var internalRms by mutableFloatStateOf(0f)
+    private var micRms by mutableFloatStateOf(0f)
+
+    fun updateLevels(levels: FloatArray) {
+        if (levels.size >= 4) {
+            micRms = levels[0]
+            internalRms = levels[2]
+        }
+    }
+
+    private fun undo() {
+        if (drawPaths.isNotEmpty()) {
+            val last = drawPaths.removeLast()
+            undonePaths.add(last)
+        }
+    }
+
+    private fun redo() {
+        if (undonePaths.isNotEmpty()) {
+            val last = undonePaths.removeLast()
+            drawPaths.add(last)
+        }
+    }
+    
+    private fun selectColor(color: Color) {
+        currentColor = color
+        // Update recent colors (move to front if exists, else add)
+        if (recentColors.contains(color)) {
+            recentColors.remove(color)
+        }
+        recentColors.add(0, color)
+        if (recentColors.size > 5) recentColors.removeLast()
+    }
+    
+    /**
+     * Captures just the drawing layer to a bitmap and saves it.
+     */
+    private fun captureDrawingLayer() {
+        // Implement generic View PixelCopy or Bitmap creation
+        val bitmap = Bitmap.createBitmap(drawingComposeView.width, drawingComposeView.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawingComposeView.draw(canvas)
+        
+        // Save using existing utility (assuming KFile-like utility or just direct IO)
+        // For now, reuse the callback but strictly for drawing? 
+        // Or better, trigger the standard screenshot callback but modify logic?
+        // Actually, let's create a specific method for this.
+        saveBitmapToGallery(bitmap)
+    }
+
+
 
     @Composable
     private fun DrawingCanvas() {
@@ -187,8 +294,13 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { offset ->
-                            currentPath = DrawPath(mutableStateListOf(offset))
+                            currentPath = DrawPath(
+                                points = mutableStateListOf(offset),
+                                color = currentColor,
+                                width = currentWidth
+                            )
                             drawPaths.add(currentPath!!)
+                            undonePaths.clear() // Clear redo history on new draw
                         },
                         onDrag = { change, _ ->
                             currentPath?.points?.add(change.position)
@@ -206,19 +318,24 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                 }
                 drawPath(
                     path = p,
-                    color = Color.Red,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4.dp.toPx())
+                    color = path.color,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = path.width.dp.toPx(),
+                        cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                        join = androidx.compose.ui.graphics.StrokeJoin.Round
+                    )
                 )
             }
         }
     }
 
     @Composable
-    private fun FloatingHUD() {
-        var isExpanded by remember { mutableStateOf(true) }
+    private fun FloatingHUD(config: RecordConfig) {
+        var isExpanded by remember { mutableStateOf(!config.startMinimized) }
         var isPaused by remember { mutableStateOf(false) }
-        var isMinimized by remember { mutableStateOf(false) }
+        var isMinimized by remember { mutableStateOf(config.startMinimized) }
         var isDrawingMode by remember { mutableStateOf(false) }
+        var showShortcuts by remember { mutableStateOf(false) }
         
         // Timer state
         var elapsedSeconds by remember { mutableLongStateOf(0L) }
@@ -231,135 +348,428 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
 
         // Snap animation observer
         LaunchedEffect(isMinimized) {
-            if (isMinimized) isExpanded = false
+            if (isMinimized) {
+                isExpanded = false
+                showShortcuts = false
+            }
             hudContainer.animateMinimized(isMinimized)
         }
 
+        val menuAlpha by animateFloatAsState(
+            targetValue = if (isMinimized) 0.6f else 1f,
+            animationSpec = tween(300), label = ""
+        )
+
         Surface(
-            modifier = Modifier.wrapContentSize(),
-            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .wrapContentSize()
+                .alpha(menuAlpha),
+            shape = RoundedCornerShape(20.dp), // Kapture Parity
             color = Color(0xCC1A1A1A),
             tonalElevation = 12.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(0.15f))
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Recording indicator & Timer
+            val isVertical = config.menuStyle == 1
+            
+            if (isVertical) {
+                Column(
+                    modifier = Modifier.padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp) // Kapture parity
+                ) {
+                    HUDContent(config, isVertical, isExpanded, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
+                        toggleExpand = { isExpanded = !isExpanded },
+                        togglePause = { 
+                            isPaused = !isPaused
+                            if (isPaused) onPauseCallback?.invoke() else onResumeCallback?.invoke()
+                        },
+                        toggleMinimize = { isMinimized = !isMinimized },
+                        toggleDrawing = { 
+                            isDrawingMode = !isDrawingMode
+                            toggleDrawingMode(isDrawingMode)
+                        },
+                        toggleShortcuts = { showShortcuts = !showShortcuts }
+                    )
+                }
+            } else {
                 Row(
-                    modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp) // Kapture parity
                 ) {
-                    val indicatorAlpha by animateFloatAsState(
-                        targetValue = if (isPaused) 0.5f else 1f,
-                        animationSpec = tween(500), label = ""
+                    HUDContent(config, isVertical, isExpanded, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
+                        toggleExpand = { isExpanded = !isExpanded },
+                        togglePause = { 
+                            isPaused = !isPaused
+                            if (isPaused) onPauseCallback?.invoke() else onResumeCallback?.invoke()
+                        },
+                        toggleMinimize = { isMinimized = !isMinimized },
+                        toggleDrawing = { 
+                            isDrawingMode = !isDrawingMode
+                            toggleDrawingMode(isDrawingMode)
+                        },
+                        toggleShortcuts = { showShortcuts = !showShortcuts }
                     )
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .alpha(indicatorAlpha)
-                            .background(if (isPaused) Color.Yellow else Color.Red, androidx.compose.foundation.shape.CircleShape)
-                    )
-                    Text(
-                        text = formatTime(elapsedSeconds),
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-
-                // Main Action Button (Minimize/Expand toggle)
-                IconButton(
-                    onClick = { 
-                        if (isMinimized) {
-                            isMinimized = false
-                            isExpanded = true
-                        } else {
-                            isExpanded = !isExpanded
-                        }
-                    },
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.Close else Icons.Default.Menu,
-                        contentDescription = "Toggle",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = isExpanded,
-                    enter = expandHorizontally() + fadeIn(),
-                    exit = shrinkHorizontally() + fadeOut()
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Pause Button
-                        SmallHudButton(
-                            icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                            tint = if (isPaused) Color.Green else Color.White,
-                            onClick = {
-                                isPaused = !isPaused
-                                if (isPaused) onPauseCallback?.invoke() else onResumeCallback?.invoke()
-                            }
-                        )
-
-                        // Draw Button
-                        SmallHudButton(
-                            icon = Icons.Default.Edit,
-                            tint = if (isDrawingMode) Color.Cyan else Color.White,
-                            onClick = { 
-                                isDrawingMode = !isDrawingMode
-                                toggleDrawingMode(isDrawingMode)
-                            }
-                        )
-
-                        // Trash Button (Clear Drawing)
-                        if (isDrawingMode) {
-                            SmallHudButton(
-                                icon = Icons.Default.Delete,
-                                onClick = { drawPaths.clear() }
-                            )
-                        }
-
-                        // Minimize to Edge Button
-                        SmallHudButton(
-                            icon = Icons.Default.Close,
-                            onClick = { 
-                                isMinimized = true
-                                isExpanded = false
-                            }
-                        )
-
-                        // Stop Button
-                        IconButton(
-                            onClick = {
-                                hide()
-                                onStopCallback?.invoke()
-                            },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(Color.Red.copy(0.2f), androidx.compose.foundation.shape.CircleShape)
-                        ) {
-                            Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.Red, modifier = Modifier.size(24.dp))
-                        }
-                    }
                 }
             }
         }
     }
 
     @Composable
+    private fun HUDContent(
+        config: RecordConfig,
+        isVertical: Boolean,
+        isExpanded: Boolean,
+        isPaused: Boolean,
+        isMinimized: Boolean,
+        isDrawingMode: Boolean,
+        showShortcuts: Boolean,
+        elapsedSeconds: Long,
+        toggleExpand: () -> Unit,
+        togglePause: () -> Unit,
+        toggleMinimize: () -> Unit,
+        toggleDrawing: () -> Unit,
+        toggleShortcuts: () -> Unit
+    ) {
+        // Handle/Pill when minimized
+        if (isMinimized) {
+            Box(
+                modifier = Modifier
+                    .size(if (isVertical) 36.dp else 5.dp, if (isVertical) 5.dp else 36.dp)
+                    .background(Color.White.copy(0.3f), RoundedCornerShape(100.dp))
+                    .clickable { toggleMinimize() }
+            )
+            return
+        }
+
+        // Timer and Countdown (if enabled)
+        if (config.showTimeOnMenu) {
+            val autoStopSeconds = config.autoStopDurationMinutes * 60L
+            val remainingSeconds = if (autoStopSeconds > 0) (autoStopSeconds - elapsedSeconds).coerceAtLeast(0) else -1L
+
+            Column(
+                modifier = Modifier.padding(horizontal = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(modifier = Modifier.size(6.dp).background(if (isPaused) Color.Yellow else Color.Red, CircleShape))
+                    Text(formatTime(elapsedSeconds), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                
+                if (remainingSeconds >= 0) {
+                    Text(
+                        "Ends in: ${formatTime(remainingSeconds)}", 
+                        color = if (remainingSeconds < 60) Color.Red else Color.LightGray, 
+                        fontSize = 9.sp
+                    )
+                }
+
+                // Audio Levels
+                if (!isMinimized) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    AudioLevelMeters(micRms, internalRms, isVertical)
+                }
+            }
+        }
+
+        // Toggle Expand/Collapse
+        IconButton(onClick = toggleExpand, modifier = Modifier.size(36.dp)) {
+            Icon(if (isExpanded) Icons.Default.Close else Icons.Default.Menu, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        }
+
+        AnimatedVisibility(visible = isExpanded) {
+            if (isVertical) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) { ExpandableButtons(config, isPaused, isDrawingMode, showShortcuts, togglePause, toggleDrawing, toggleShortcuts, toggleMinimize) }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) { ExpandableButtons(config, isPaused, isDrawingMode, showShortcuts, togglePause, toggleDrawing, toggleShortcuts, toggleMinimize) }
+            }
+        }
+        
+        // App Shortcuts Section
+        if (showShortcuts && config.shortcuts.isNotEmpty()) {
+            if (isVertical) {
+                Column(modifier = Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { ShortcutList(config.shortcuts) }
+            } else {
+                Row(modifier = Modifier.padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { ShortcutList(config.shortcuts) }
+            }
+        }
+
+        // Expanded Drawing Controls
+        AnimatedVisibility(
+            visible = isExpanded && isDrawingMode,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(bottom = 8.dp, start = 8.dp, end = 8.dp)
+                    .width(IntrinsicSize.Min),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HorizontalDivider(color = Color.White.copy(0.1f))
+
+                // Undo / Redo / Screenshot Draw
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    IconButton(onClick = { undo() }, enabled = drawPaths.isNotEmpty()) {
+                        Icon(
+                            Icons.Default.Undo, 
+                            null, 
+                            tint = if (drawPaths.isNotEmpty()) Color.White else Color.White.copy(0.3f)
+                        )
+                    }
+                    
+                    IconButton(onClick = { redo() }, enabled = undonePaths.isNotEmpty()) {
+                        Icon(
+                            Icons.Default.Redo, 
+                            null, 
+                            tint = if (undonePaths.isNotEmpty()) Color.White else Color.White.copy(0.3f)
+                        )
+                    }
+                    
+                    // Screenshot Drawing Only
+                    IconButton(onClick = { captureDrawingLayer() }) {
+                        Icon(Icons.Default.CameraAlt, null, tint = Color.Cyan)
+                    }
+                }
+                
+                HorizontalDivider(color = Color.White.copy(0.1f))
+                
+                // Color History
+                if (recentColors.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        recentColors.forEach { color ->
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(color, CircleShape)
+                                    .border(
+                                        width = if (currentColor == color) 2.dp else 0.dp,
+                                        color = Color.White,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { selectColor(color) }
+                            )
+                        }
+                    }
+                    HorizontalDivider(color = Color.White.copy(0.1f))
+                }
+                
+                // Colors (Standard Palette) - Modified to use selectColor
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(Color.Red, Color.Green, Color.Blue, Color.Yellow, Color.White, Color.Cyan, Color.Magenta).forEach { color ->
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .background(color, CircleShape)
+                                .border(
+                                    width = if (currentColor == color) 2.dp else 0.dp,
+                                    color = Color.White,
+                                    shape = CircleShape
+                                )
+                                .clickable { selectColor(color) }
+                        )
+                    }
+                }
+
+                // Stroke Width
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.LineWeight, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    androidx.compose.material3.Slider(
+                        value = currentWidth,
+                        onValueChange = { currentWidth = it },
+                        valueRange = 2f..20f,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+    
+    // Helper to save bitmap
+    private fun saveBitmapToGallery(bitmap: Bitmap) {
+        val filename = "Drawing_${System.currentTimeMillis()}.png"
+        var fos: java.io.OutputStream? = null
+        try {
+             // For Android Q and above used scoped storage via MediaStore
+             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                 val contentValues = android.content.ContentValues().apply {
+                     put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, filename)
+                     put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                     put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/BokBok/Drawings")
+                 }
+                 val imageUri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                 if (imageUri != null) {
+                     fos = context.contentResolver.openOutputStream(imageUri)
+                 }
+             } else {
+                 // For older versions, direct file access
+                 val imagesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES).toString() + "/BokBok/Drawings"
+                 val file = java.io.File(imagesDir)
+                 if (!file.exists()) {
+                     file.mkdirs()
+                 }
+                 val image = java.io.File(imagesDir, filename)
+                 fos = java.io.FileOutputStream(image)
+             }
+             
+             fos?.use {
+                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                 android.widget.Toast.makeText(context, "Drawing Saved!", android.widget.Toast.LENGTH_SHORT).show()
+             }
+        } catch (e: Exception) {
+            android.util.Log.e("RecordingOverlay", "Error saving drawing", e)
+             android.widget.Toast.makeText(context, "Failed to save drawing", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Composable
+    private fun ExpandableButtons(
+        config: RecordConfig, 
+        isPaused: Boolean, 
+        isDrawingMode: Boolean, 
+        showShortcuts: Boolean,
+        togglePause: () -> Unit, 
+        toggleDrawing: () -> Unit,
+        toggleShortcuts: () -> Unit,
+        toggleMinimize: () -> Unit
+    ) {
+        if (config.showPauseResumeOnMenu) {
+            SmallHudButton(if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, if (isPaused) Color.Green else Color.White, togglePause)
+        }
+        
+        if (config.showCameraButtonOnMenu) {
+            SmallHudButton(Icons.Default.PhotoCamera, Color.White) { onToggleFacecamCallback?.invoke() }
+        }
+
+        if (config.showDrawButtonOnMenu) {
+            SmallHudButton(Icons.Default.Edit, if (isDrawingMode) Color.Cyan else Color.White, toggleDrawing)
+        }
+
+        if (config.showScreenshotButtonOnMenu) {
+            SmallHudButton(Icons.Default.CameraAlt, Color.White) { onTakeScreenshotCallback?.invoke() }
+        }
+
+        // Orientation Toggle
+        var currentOrientationMode by remember { mutableIntStateOf(0) } // 0: Auto, 1: Portrait, 2: Landscape
+        SmallHudButton(
+            icon = when(currentOrientationMode) {
+                1 -> Icons.Default.ScreenLockPortrait
+                2 -> Icons.Default.ScreenLockLandscape
+                else -> Icons.Default.ScreenRotation
+            },
+            tint = if (currentOrientationMode == 0) Color.White else Color.Cyan
+        ) {
+            currentOrientationMode = (currentOrientationMode + 1) % 3
+            // TODO: In a real implementation, this would send an intent to ScreenRecordService
+            // to update the virtual display orientation.
+            android.widget.Toast.makeText(context, when(currentOrientationMode) {
+                1 -> "Locked: Portrait"
+                2 -> "Locked: Landscape"
+                else -> "Orientation: Auto"
+            }, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        
+        if (config.useWatermarkText || config.useWatermarkImage) {
+            SmallHudButton(Icons.Default.WaterDrop, Color.White) { onToggleWatermarkCallback?.invoke() }
+        }
+
+        if (config.showShortcuts && config.shortcuts.isNotEmpty()) {
+            SmallHudButton(Icons.Default.Launch, if (showShortcuts) Color.Yellow else Color.White, toggleShortcuts)
+        }
+
+        SmallHudButton(Icons.Default.Close, Color.White, toggleMinimize)
+
+        IconButton(onClick = { hide(); onStopCallback?.invoke() }, modifier = Modifier.size(36.dp).background(Color.Red.copy(0.2f), CircleShape)) {
+            Icon(Icons.Default.Stop, null, tint = Color.Red, modifier = Modifier.size(20.dp))
+        }
+    }
+
+    @Composable
+    private fun ShortcutList(shortcuts: List<String>) {
+        shortcuts.take(4).forEach { pkg ->
+            IconButton(onClick = { launchApp(pkg) }, modifier = Modifier.size(36.dp)) {
+                val icon = remember { getAppIcon(pkg) }
+                if (icon != null) {
+                    androidx.compose.foundation.Image(bitmap = icon, contentDescription = null, modifier = Modifier.size(24.dp).alpha(0.8f))
+                } else {
+                    Icon(Icons.Default.Launch, null, tint = Color.White.copy(0.6f), modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+
+    private fun launchApp(pkg: String) {
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+            intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
+    private fun getAppIcon(pkg: String): ImageBitmap? {
+        return try {
+            val icon = context.packageManager.getApplicationIcon(pkg)
+            val bitmap = Bitmap.createBitmap(icon.intrinsicWidth, icon.intrinsicHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            icon.setBounds(0, 0, canvas.width, canvas.height)
+            icon.draw(canvas)
+            bitmap.asImageBitmap()
+        } catch (_: Exception) { null }
+    }
+
+    @Composable
     private fun SmallHudButton(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color = Color.White, onClick: () -> Unit) {
-        IconButton(onClick = onClick, modifier = Modifier.size(34.dp)) {
+        IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
             Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        }
+    }
+
+    @Composable
+    private fun AudioLevelMeters(mic: Float, internal: Float, isVertical: Boolean) {
+        val micLevel by animateFloatAsState(targetValue = mic.coerceIn(0f, 1f), animationSpec = tween(100), label = "")
+        val intLevel by animateFloatAsState(targetValue = internal.coerceIn(0f, 1f), animationSpec = tween(100), label = "")
+        
+        if (isVertical) {
+            Row(modifier = Modifier.width(32.dp).height(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                LevelBar(micLevel, Modifier.weight(1f), Color(0xFF00E676))
+                LevelBar(intLevel, Modifier.weight(1f), Color(0xFF2979FF))
+            }
+        } else {
+            Column(modifier = Modifier.width(32.dp).height(4.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                LevelBar(micLevel, Modifier.fillMaxWidth(), Color(0xFF00E676))
+                LevelBar(intLevel, Modifier.fillMaxWidth(), Color(0xFF2979FF))
+            }
+        }
+    }
+
+    @Composable
+    private fun LevelBar(level: Float, modifier: Modifier, color: Color) {
+        Box(
+            modifier = modifier
+                .background(Color.White.copy(0.1f), RoundedCornerShape(1.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(level)
+                    .background(color, RoundedCornerShape(1.dp))
+            )
         }
     }
 
@@ -457,7 +867,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
             val screenWidth = context.resources.displayMetrics.widthPixels
             val viewWidth = this.width
             
-            val offset = (viewWidth * 0.6).toInt()
+            val offset = (viewWidth * 0.7).toInt() // Slightly more hidden - Kapture style
             val targetX = if (lp.x + viewWidth / 2 < screenWidth / 2) {
                 if (minimized) -offset else 0
             } else {
@@ -478,5 +888,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
 }
 
 data class DrawPath(
-    val points: androidx.compose.runtime.snapshots.SnapshotStateList<androidx.compose.ui.geometry.Offset>
+    val points: androidx.compose.runtime.snapshots.SnapshotStateList<androidx.compose.ui.geometry.Offset>,
+    val color: Color = Color.Red,
+    val width: Float = 4f
 )

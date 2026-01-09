@@ -51,6 +51,12 @@ object ScreenRecordPermissions {
                 missing.add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+
+        // CAMERA is optional but needed for Facecam
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) 
+            != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.CAMERA)
+        }
         
         return missing
     }

@@ -23,6 +23,13 @@ sealed class NavRoutes(val route: String) {
     object Settings : NavRoutes("settings")
     object Notifications : NavRoutes("notifications")
     object BatteryOptimization : NavRoutes("battery_optimization")
+    object RecordingsGallery : NavRoutes("recordings_gallery")
+    object VideoPlayer : NavRoutes("video_player?path={path}") {
+        fun createRoute(path: String): String {
+            val encodedPath = java.net.URLEncoder.encode(path, "UTF-8")
+            return "video_player?path=$encodedPath"
+        }
+    }
 
     // ============= VOICE ROOM =============
     object Room : NavRoutes("room/{roomId}") {

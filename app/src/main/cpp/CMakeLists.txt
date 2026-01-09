@@ -5,7 +5,15 @@ project("native-recorder")
 # Add Oboe library
 find_package(oboe REQUIRED CONFIG)
 
-# Set include paths for WebRTC, Aec3Processor, and RNNoise
+# Add ONNX Runtime library (for DeepFilterNet)
+set(ONNX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-lib")
+include_directories(${ONNX_ROOT}/headers)
+
+add_library(onnxruntime SHARED IMPORTED)
+set_target_properties(onnxruntime PROPERTIES IMPORTED_LOCATION
+    "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libonnxruntime.so")
+
+# Set include paths for WebRTC AEC3
 include_directories(
     .
     ./webrtc
@@ -15,9 +23,7 @@ include_directories(
     ./webrtc/base/rtc_base
     ./webrtc/base/system_wrappers/include
     ./webrtc/base/abseil
-    ./webrtc/base/jsoncpp/include
     ./webrtc/common_audio/include
-    ./rnnoise
 )
 
 # WebRTC Definitions for ARM64
@@ -25,17 +31,11 @@ add_definitions(-DWEBRTC_POSIX)
 add_definitions(-DWEBRTC_ANDROID)
 add_definitions(-DWEBRTC_ARCH_ARM64)
 add_definitions(-DWEBRTC_HAS_NEON)
-# Let arch.h determine endianness to avoid redefinition warnings
-# add_definitions(-DWEBRTC_ARCH_LITTLE_ENDIAN)
 add_definitions(-DWEBRTC_APM_DEBUG_DUMP=0)
 add_definitions(-DWEBRTC_AUDIO_PROCESSING_ONLY)
+add_definitions(-DCOMPILE_OPUS) # Needed for kiss_fft.c
 
-# RNNoise definitions - use fixed point for better mobile performance
-add_definitions(-DRNNOISE_BUILD)
-add_definitions(-DCOMPILE_OPUS)
-add_definitions(-DTRAINING=0)
-
-# Suppress warnings that break builds on some NDK versions (Abseil/WebRTC legacy code)
+# Suppress warnings that break builds on some NDK versions
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-aligned-new -Wno-deprecated-builtins -Wno-error=unused-variable -Wno-error=format -Wno-unused-parameter")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=format -Wno-unused-parameter -Wno-null-dereference")
 
@@ -46,16 +46,6 @@ file(GLOB_RECURSE WEBRTC_SOURCES
     "webrtc/audio_processing/*.c"
     "webrtc/base/*.cc"
     "webrtc/base/*.c"
-)
-
-# Gather RNNoise source files
-set(RNNOISE_SOURCES
-    rnnoise/denoise.c
-    rnnoise/kiss_fft.c
-    rnnoise/celt_lpc.c
-    rnnoise/pitch.c
-    rnnoise/rnn.c
-    rnnoise/rnn_data.c
 )
 
 # Aggressively remove test files, benchmarks, mocks, stubs and architecture-specific files
@@ -103,10 +93,11 @@ add_library(
     native-recorder
     SHARED
     NativeRecorder.cpp
+    PostProcessor.cpp
+    DeepFilterNet.cpp
     Aec3Processor.cpp
     NativeAudioMixer.cpp
-    RnNoiseProcessor.cpp
-    ${RNNOISE_SOURCES}
+    rnnoise/kiss_fft.c  # Needed for DeepFilterNet's FFT 
     ${WEBRTC_SOURCES}
 )
 
@@ -121,5 +112,5 @@ target_link_libraries(
     ${android-lib}
     ${mediandk-lib}
     oboe::oboe
+    onnxruntime
 )
-

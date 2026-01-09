@@ -14,4 +14,15 @@
     <string name="mute">Mute</string>
     <string name="unmute">Unmute</string>
     <string name="default_web_client_id">5720343497-o35mshptp2poiu396ngco5o4cvrk1gq9.apps.googleusercontent.com</string>
+    
+    <!-- Screen Record Tile & Widget -->
+    <string name="tile_start_recording">Start Recording</string>
+    <string name="tile_stop_recording">Stop Recording</string>
+    <string name="shortcut_new_recording">New Recording</string>
+    <string name="shortcut_new_recording_long">Start a new screen recording</string>
+    <string name="shortcut_new_screenshot">Quick Screenshot</string>
+    <string name="shortcut_new_screenshot_long">Take a partial or full screenshot</string>
+    <string name="widget_basic">Record (Basic)</string>
+    <string name="widget_start">Start</string>
+    <string name="widget_stop">Stop</string>
 </resources>

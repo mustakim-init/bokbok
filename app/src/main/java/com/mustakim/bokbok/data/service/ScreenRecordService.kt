@@ -16,6 +16,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import com.mustakim.bokbok.MainActivity
 import com.mustakim.bokbok.R
@@ -24,6 +25,7 @@ import com.mustakim.bokbok.model.RecordConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
 import java.io.File
 import java.text.SimpleDateFormat
@@ -32,20 +34,70 @@ import java.util.Locale
 import javax.inject.Inject
 import android.hardware.display.DisplayManager
 import android.view.Display
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.media.AudioManager
+import android.provider.Settings
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
+import android.graphics.Bitmap
+import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.FacecamOverlay
+import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.WatermarkOverlay
 
 @AndroidEntryPoint
 class ScreenRecordService : Service() {
 
+    companion object {
+        const val NOTIFICATION_ID = 1337
+        const val CHANNEL_ID = "screen_record_service"
+        const val CHANNEL_CAPTURED = "screen_record_captured"
+        
+        const val ACTION_STOP = "com.mustakim.bokbok.STOP"
+        const val ACTION_PAUSE = "com.mustakim.bokbok.PAUSE"
+        const val ACTION_RESUME = "com.mustakim.bokbok.RESUME"
+        
+        // Static state for Quick Settings Tile and Widget
+        @Volatile var isRecordingActive = false
+            private set
+        @Volatile var isPausedState = false
+            private set
+
+        private const val AUDIO_LEVEL_POLL_MS = 100L
+        private const val SHAKE_THRESHOLD_DIVISOR = 2f
+    }
+
     private val binder = LocalBinder()
     private var mediaProjection: MediaProjection? = null
     private val nativeRecorder = NativeRecorder()
+    private val projectionManager by lazy { getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager }
     private lateinit var audioCaptureManager: AudioCaptureManager
     
+    @Inject lateinit var notificationRepository: com.mustakim.bokbok.data.repository.NotificationRepository
+    @Inject lateinit var recordingRepository: com.mustakim.bokbok.data.repository.RecordingRepository
+    @Inject lateinit var modelRepository: com.mustakim.bokbok.data.repository.ModelRepository
+    @Inject lateinit var preferencesManager: com.mustakim.bokbok.data.local.PreferencesManager
+
     private var virtualDisplay: android.hardware.display.VirtualDisplay? = null
     private var recordingOverlay: com.mustakim.bokbok.ui.screens.gameboost.screenrecord.RecordingOverlay? = null
+    private var facecamOverlay: com.mustakim.bokbok.ui.screens.gameboost.screenrecord.FacecamOverlay? = null
+    private var textWatermarkOverlay: WatermarkOverlay? = null
+    private var imageWatermarkOverlay: WatermarkOverlay? = null
     private var currentConfig: RecordConfig? = null
     private var displayManager: DisplayManager? = null
     
+    // Auto-stop monitoring
+    private val autoStopHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var batteryReceiver: android.content.BroadcastReceiver? = null
+    private var screenOffReceiver: BroadcastReceiver? = null
+    private var sensorManager: SensorManager? = null
+    private var shakeListener: SensorEventListener? = null
+    
+    private var recordStartTime: Long = 0
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
 
@@ -71,6 +123,14 @@ class ScreenRecordService : Service() {
     
     private val _countdownValue = MutableStateFlow(0)
     val countdownValue = _countdownValue.asStateFlow()
+
+    private val _processingProgress = MutableStateFlow<Map<Long, Float>>(emptyMap())
+    val processingProgress = _processingProgress.asStateFlow()
+
+    private val _audioLevels = MutableStateFlow(floatArrayOf(0f, 0f, 0f, 0f))
+    val audioLevels = _audioLevels.asStateFlow()
+
+    private var audioLevelsJob: Job? = null
 
     // DisplayListener for orientation changes
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -141,7 +201,29 @@ class ScreenRecordService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
 
-            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            // Adjust dimensions based on Orientation Lock
+            var finalWidth = config.width
+            var finalHeight = config.height
+            
+            if (config.orientationLock == "Portrait" && finalWidth > finalHeight) {
+                finalWidth = config.height
+                finalHeight = config.width
+            } else if (config.orientationLock == "Landscape" && finalWidth < finalHeight) {
+                finalWidth = config.height
+                finalHeight = config.width
+            } else if (config.orientationLock == "Auto") {
+                 val metrics = resources.displayMetrics
+                 val isDeviceLandscape = metrics.widthPixels > metrics.heightPixels
+                 val isConfigLandscape = finalWidth > finalHeight
+                 if (isDeviceLandscape != isConfigLandscape) {
+                     finalWidth = config.height
+                     finalHeight = config.width
+                 }
+            }
+            
+            // Create effective config
+            val effectiveConfig = config.copy(width = finalWidth, height = finalHeight)
+            currentConfig = effectiveConfig
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
 
             if (mediaProjection == null) {
@@ -153,7 +235,7 @@ class ScreenRecordService : Service() {
             mediaProjection?.registerCallback(projectionCallback, null)
 
             // Store config for orientation handling
-            currentConfig = config
+            currentConfig = effectiveConfig
 
             // Register display listener for orientation changes
             displayManager?.registerDisplayListener(displayListener, null)
@@ -165,9 +247,19 @@ class ScreenRecordService : Service() {
             val outputFile = File(bokbokDir, "BokBok_$timestamp.mp4").absolutePath
             _lastRecordingPath.value = outputFile
             
+            // Use app-specific external storage for raw files to ensure native write access
+            val rawDir = getExternalFilesDir("raw_recordings")?.apply { mkdirs() }
+            val micPath = File(rawDir, "BokBok_${timestamp}_mic.pcm").absolutePath
+            val intPath = File(rawDir, "BokBok_${timestamp}_int.pcm").absolutePath
+            
             val setupSuccess = nativeRecorder.setup(
-                config.width, config.height, config.bitrate, config.fps, config.useHevc, 
-                config.includeMic || config.includeInternal, outputFile
+                effectiveConfig.width, effectiveConfig.height, effectiveConfig.bitrate, effectiveConfig.fps, effectiveConfig.useHevc, 
+                effectiveConfig.includeMic || effectiveConfig.includeInternal, 
+                outputFile,
+                micPath,
+                intPath,
+                effectiveConfig.audioSampleRate,
+                effectiveConfig.audioBitrate
             )
 
             if (!setupSuccess) {
@@ -180,7 +272,26 @@ class ScreenRecordService : Service() {
 
             // 2. Start Audio Capture (Kotlin -> NDK)
             if (config.includeMic || config.includeInternal) {
-                audioCaptureManager.startCapture(config.includeMic, config.includeInternal, mediaProjection)
+                // Determine if we need to force internal audio for AEC reference
+                var forceInternalRef = false
+                try {
+                    val settings = runBlocking(Dispatchers.IO) { preferencesManager.recorderSettings.first() }
+                    val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
+                    // Force internal if bleed reduction is enabled and we are recording from mic
+                    if (bleedReduction && config.includeMic && !config.includeInternal) {
+                        forceInternalRef = true
+                        Timber.i("Forcing internal audio capture for AEC reference (Bleed Reduction ON)")
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to read bleedReduction setting")
+                }
+
+                audioCaptureManager.startCapture(
+                    includeMic = config.includeMic, 
+                    includeInternal = config.includeInternal, 
+                    forceInternalRef = forceInternalRef,
+                    mediaProjection = mediaProjection
+                )
             }
 
             // 3. Get Surface and Start VirtualDisplay
@@ -192,8 +303,8 @@ class ScreenRecordService : Service() {
 
             virtualDisplay = mediaProjection?.createVirtualDisplay(
                 "ScreenRecorder",
-                config.width,
-                config.height,
+                effectiveConfig.width,
+                effectiveConfig.height,
                 currentDpi(), 
                 android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 surface,
@@ -205,6 +316,9 @@ class ScreenRecordService : Service() {
                 handleError("Failed to create virtual display")
                 return
             }
+            
+            // 4. Start Audio Level Polling
+            startAudioLevelPolling()
 
             if (nativeRecorder.start()) {
                 // Update notification with recording state and actions
@@ -213,12 +327,43 @@ class ScreenRecordService : Service() {
                 // Show Draggable HUD
                 recordingOverlay = com.mustakim.bokbok.ui.screens.gameboost.screenrecord.RecordingOverlay(this)
                 recordingOverlay?.show(
-                    onStop = { stopRecording() },
+                    config = config,
                     onPause = { pauseRecording() },
-                    onResume = { resumeRecording() }
+                    onResume = { resumeRecording() },
+                    onStop = { stopRecording() },
+                    onTakeScreenshot = { takeScreenshot() },
+                    onToggleFacecam = { toggleFacecam() },
+                    onToggleWatermark = { toggleWatermark() }
                 )
                 
+                // Show Facecam if enabled
+                if (config.showFacecam) {
+                    facecamOverlay = com.mustakim.bokbok.ui.screens.gameboost.screenrecord.FacecamOverlay(this)
+                    facecamOverlay?.show(config)
+                }
+
+                if (config.useWatermarkText) {
+                    textWatermarkOverlay = WatermarkOverlay(this).also {
+                        it.showText(config.watermarkText)
+                    }
+                }
+
+                if (config.useWatermarkImage && config.watermarkImagePath.isNotEmpty()) {
+                    imageWatermarkOverlay = WatermarkOverlay(this).also {
+                        it.showImage(config.watermarkImagePath)
+                    }
+                }
+                
+                recordStartTime = System.currentTimeMillis()
+                startAutoStopMonitoring(config)
+                
+                // Final Polish Features
+                handleFinalPolishOnStart(config)
+                
                 _isRecording.value = true
+                isRecordingActive = true
+                isPausedState = false
+                updateExternalUIs()
                 Timber.i("Recording started: $outputFile")
             } else {
                 handleError("Failed to start video encoder")
@@ -234,6 +379,74 @@ class ScreenRecordService : Service() {
         _errorMessage.value = message
         cleanupResources()
         stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun handleFinalPolishOnStart(config: RecordConfig) {
+        // 1. Auto-Launch App
+        if (config.autoLaunchPackage.isNotEmpty()) {
+            try {
+                val launchIntent = packageManager.getLaunchIntentForPackage(config.autoLaunchPackage)
+                launchIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launchIntent)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to launch app: ${config.autoLaunchPackage}")
+            }
+        }
+
+        // 2. Set Volume
+        if (config.setVolumeOnStart) {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val targetVol = (maxVol * (config.startVolumeLevel / 100f)).toInt()
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+        }
+
+        // 3. Show Touches (Requires WRITE_SETTINGS)
+        if (config.showTouches) {
+            try {
+                if (Settings.System.canWrite(this)) {
+                    Settings.System.putInt(contentResolver, "show_touches", 1)
+                }
+            } catch (e: Exception) {
+                Timber.w("Could not set show_touches: ${e.message}")
+            }
+        }
+
+        // 4. Screen Off Trigger
+        if (config.stopOnScreenOff) {
+            screenOffReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                        stopRecording()
+                    }
+                }
+            }
+            registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        }
+
+        // 5. Shake Trigger
+        if (config.stopOnShake) {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            shakeListener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
+                    val totalForce = Math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+                    val netForce = kotlin.math.abs(totalForce - SensorManager.GRAVITY_EARTH)
+                    
+                    // Config sensitivity is roughly m/s^2. 
+                    // Default 20f means ~2g total, or ~1g (9.8) net force required.
+                    // We use netForce to be robust against orientation.
+                    if (netForce > (config.shakeSensitivity / SHAKE_THRESHOLD_DIVISOR)) { 
+                        stopRecording()
+                    }
+                }
+                override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+            }
+            sensorManager?.registerListener(shakeListener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+        }
     }
 
     /**
@@ -266,6 +479,32 @@ class ScreenRecordService : Service() {
         }
     }
     
+    private fun cleanupFinalPolish() {
+        // 1. Restore Show Touches
+        try {
+            if (Settings.System.canWrite(this)) {
+                Settings.System.putInt(contentResolver, "show_touches", 0)
+            }
+        } catch (_: Exception) {}
+
+        // 2. Unregister Screen Off
+        screenOffReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {}
+            screenOffReceiver = null
+        }
+
+        // 3. Unregister Shake
+        sensorManager?.let { sm ->
+            shakeListener?.let { sl ->
+                sm.unregisterListener(sl)
+            }
+            sensorManager = null
+            shakeListener = null
+        }
+    }
+
     private fun cleanupResources() {
         try {
             // Unregister display listener
@@ -277,6 +516,19 @@ class ScreenRecordService : Service() {
             virtualDisplay = null
             recordingOverlay?.hide()
             recordingOverlay = null
+            facecamOverlay?.hide()
+            facecamOverlay = null
+            
+            textWatermarkOverlay?.hide()
+            textWatermarkOverlay = null
+            
+            imageWatermarkOverlay?.hide()
+            imageWatermarkOverlay = null
+            
+            // Final Polish Cleanup
+            cleanupFinalPolish()
+            
+            stopAutoStopMonitoring()
             mediaProjection?.unregisterCallback(projectionCallback)
             mediaProjection?.stop()
             mediaProjection = null
@@ -291,30 +543,206 @@ class ScreenRecordService : Service() {
     fun stopRecording() {
         if (!_isRecording.value && mediaProjection == null) return
         
+        // Capture config before cleanup
+        val recordConfig = currentConfig
         val recordedPath = _lastRecordingPath.value
+        val startTime = recordStartTime
+        
+        audioLevelsJob?.cancel()
+        _audioLevels.value = floatArrayOf(0f, 0f, 0f, 0f)
         
         nativeRecorder.stop()
         cleanupResources()
         
         _isRecording.value = false
         _isPaused.value = false
+        isRecordingActive = false
+        isPausedState = false
+        updateExternalUIs()
         stopForeground(STOP_FOREGROUND_REMOVE)
         
         // Notify MediaScanner so video appears in Gallery
         recordedPath?.let { path ->
-            MediaScannerConnection.scanFile(this, arrayOf(path), arrayOf("video/mp4")) { _, uri ->
-                Timber.i("MediaScanner completed: $uri")
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val settings = preferencesManager.recorderSettings.first()
+                    val autoProcess = settings["autoProcess"] as? Boolean ?: true
+                    
+                    val rawDir = getExternalFilesDir("raw_recordings")
+                    val timestamp = path.substringAfter("BokBok_").substringBefore(".mp4")
+                    val micPath = File(rawDir, "BokBok_${timestamp}_mic.pcm").absolutePath
+                    val intPath = File(rawDir, "BokBok_${timestamp}_int.pcm").absolutePath
+
+                    // 1. Save to Database as PENDING
+                    val duration = if (startTime > 0) System.currentTimeMillis() - startTime else 0L
+                    val dbId = recordingRepository.addPendingRecording(
+                        videoPath = path,
+                        micPath = micPath,
+                        internalPath = intPath,
+                        durationMs = duration
+                    )
+
+                    if (autoProcess) {
+                        performProcessing(dbId, recordConfig?.micAudioRatio ?: 1.0f, recordConfig?.internalAudioRatio ?: 1.0f)
+                    } else {
+                        // Manual Mode
+                        MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(path), arrayOf("video/mp4")) { _, uri ->
+                             Timber.i("MediaScanner completed: $uri")
+                        }
+                        showCapturedNotification(path) 
+                        stopSelf()
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error during auto-processing")
+                } finally {
+                    // Manual stop might be needed here or stopSelf() is enough if all work done
+                }
             }
-            // Show success notification with Play/Share actions
-            showCapturedNotification(path)
         }
         
-        // Wait a small bit to ensure sequential operations complete before killing service
-        CoroutineScope(Dispatchers.Main).launch {
-            delay(500)
-            stopSelf()
-        }
         Timber.i("Recording stopped. File: $recordedPath")
+    }
+
+    /**
+     * Triggers processing for a specific recording ID from the database.
+     */
+    fun processHistoricalRecording(id: Long, micGain: Float = 1.0f, internalGain: Float = 1.0f) {
+        if (_isRecording.value) {
+            _errorMessage.value = "Cannot process while recording"
+            return
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // Ensure foreground service is running for processing (not strictly required if we have a notification, but good for priority)
+                // Ensure foreground service is running for processing
+                updateNotification("Processing background task...", showPause = false)
+                performProcessing(id, micGain, internalGain)
+            } catch (e: Exception) {
+                Timber.e(e, "Manual processing failed")
+            } finally {
+                stopSelf()
+            }
+        }
+    }
+
+    private suspend fun performProcessing(dbId: Long, micGain: Float = 1.0f, internalGain: Float = 1.0f) {
+        val recording = recordingRepository.getRecording(dbId) ?: return
+        val path = recording.videoPath
+        val micPath = recording.micPath
+        val intPath = recording.internalPath
+
+        try {
+            val settings = preferencesManager.recorderSettings.first()
+            val noiseReduction = settings["noiseReduction"] as? Boolean ?: true
+            val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
+            val qualityMode = settings["qualityMode"] as? Int ?: 1
+            val exportMic = settings["exportMicOnly"] as? Boolean ?: false
+            val exportInternal = settings["exportInternalOnly"] as? Boolean ?: false
+
+            val currentRecordConfig = preferencesManager.recordConfig.first()
+            
+            updateNotification("Processing recording...", showPause = false)
+            recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSING)
+            
+            val originalFile = File(path)
+            val tempInputVideo = File(path.replace(".mp4", "_temp.mp4"))
+            
+            delay(200) 
+            
+            if (originalFile.renameTo(tempInputVideo)) {
+                nativeRecorder.onProgressUpdate = { progress, msg ->
+                    val percent = (progress * 100).toInt()
+                    updateNotification("Processing: $percent% - $msg", showPause = false)
+                    
+                    // Update flow for UI
+                    _processingProgress.value = _processingProgress.value.toMutableMap().apply {
+                        put(dbId, progress)
+                    }
+                }
+
+                var success: Boolean
+                try {
+                    // Open file descriptor for Native Layer (bypasses raw path permission issues)
+                    val pfd = ParcelFileDescriptor.open(tempInputVideo, ParcelFileDescriptor.MODE_READ_ONLY)
+                    val videoFd = pfd.fd
+                    
+                    success = nativeRecorder.processRecording(
+                        videoFd = videoFd,
+                        videoWidth = currentRecordConfig.width,
+                        videoHeight = currentRecordConfig.height,
+                        micPath = micPath,
+                        internalPath = intPath,
+                        outputPath = path,
+                        modelPath = modelRepository.getModelDirectory(),
+                        enableBleed = bleedReduction, 
+                        enableNoise = noiseReduction, 
+                        micGain = micGain, 
+                        internalGain = internalGain,
+                        exportMic = exportMic,
+                        exportInternal = exportInternal,
+                        audioSampleRate = currentRecordConfig.audioSampleRate,
+                        audioBitrate = currentRecordConfig.audioBitrate
+                    )
+                    
+                    pfd.close() // Close FD after native processing is done
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to open ParcelFileDescriptor or process recording")
+                    success = false
+                }
+                
+                nativeRecorder.onProgressUpdate = null
+                _processingProgress.value = _processingProgress.value.toMutableMap().apply {
+                    remove(dbId)
+                }
+                
+                if (success) {
+                    Timber.i("Processing successful: $path")
+                    tempInputVideo.delete()
+                    File(micPath).delete()
+                    File(intPath).delete()
+                    recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSED, path)
+                    MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(path), arrayOf("video/mp4")) { _, _ ->
+                        Timber.i("MediaScanner completed: $path")
+                    }
+                    showCapturedNotification(path)
+                } else {
+                    Timber.e("Processing failed! Restoring original video.")
+                    tempInputVideo.renameTo(originalFile)
+                    recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
+                    handleError("Processing failed")
+                }
+            } else {
+                 Timber.e("Failed to rename temp file for processing")
+                 recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
+                 handleError("Processing failed: Could not prepare files.")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "performProcessing failed")
+            recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
+            handleError("Processing failed: ${e.message}")
+        } finally {
+            _processingProgress.value = _processingProgress.value.toMutableMap().apply {
+                remove(dbId)
+            }
+        }
+    }
+
+
+    private fun startAudioLevelPolling() {
+        audioLevelsJob?.cancel()
+        audioLevelsJob = CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+            while (isActive && _isRecording.value) {
+                if (!_isPaused.value) {
+                    val levels = nativeRecorder.getAudioLevels()
+                    _audioLevels.value = levels
+                    recordingOverlay?.updateLevels(levels)
+                } else {
+                    _audioLevels.value = floatArrayOf(0f, 0f, 0f, 0f)
+                    recordingOverlay?.updateLevels(floatArrayOf(0f, 0f, 0f, 0f))
+                }
+                delay(AUDIO_LEVEL_POLL_MS)
+            }
+        }
     }
 
     fun pauseRecording() {
@@ -322,6 +750,8 @@ class ScreenRecordService : Service() {
         if (nativeRecorder.pause()) {
             audioCaptureManager.pauseCapture()
             _isPaused.value = true
+            isPausedState = true
+            updateExternalUIs()
             updateNotification("Recording Paused", showResume = true)
         }
     }
@@ -331,7 +761,86 @@ class ScreenRecordService : Service() {
         if (nativeRecorder.resume()) {
             audioCaptureManager.resumeCapture()
             _isPaused.value = false
+            isPausedState = false
+            updateExternalUIs()
             updateNotification("Recording Screen...", showPause = true)
+        }
+    }
+
+    fun takeScreenshot() {
+        val surface = nativeRecorder.getInputSurface() ?: return
+        val config = currentConfig ?: return
+        
+        // Use a Handler to run on the main thread as PixelCopy requires it
+        Handler(Looper.getMainLooper()).post {
+            val bitmap = Bitmap.createBitmap(config.width, config.height, Bitmap.Config.ARGB_8888)
+            val handlerThread = android.os.HandlerThread("PixelCopyHelper")
+            handlerThread.start()
+            
+            try {
+                PixelCopy.request(
+                    surface,
+                    bitmap,
+                    { result ->
+                        if (result == PixelCopy.SUCCESS) {
+                            saveScreenshot(bitmap)
+                        }
+                        handlerThread.quitSafely()
+                    },
+                    Handler(handlerThread.getLooper())
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "PixelCopy request failed")
+                handlerThread.quitSafely()
+            }
+        }
+    }
+
+    private fun saveScreenshot(bitmap: Bitmap) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                val bokbokDir = File(moviesDir, "BokBok/Screenshots").apply { mkdirs() }
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file = File(bokbokDir, "BokBok_SS_$timestamp.png")
+                
+                file.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                
+                MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(file.absolutePath), arrayOf("image/png")) { _, _ -> }
+                Timber.i("Screenshot saved: ${file.absolutePath}")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save screenshot")
+            }
+        }
+    }
+
+    fun toggleFacecam() {
+        val config = currentConfig ?: return
+        if (facecamOverlay == null) {
+            facecamOverlay = FacecamOverlay(this)
+            facecamOverlay?.show(config)
+        } else {
+            facecamOverlay?.hide()
+            facecamOverlay = null
+        }
+    }
+
+    fun toggleWatermark() {
+        val config = currentConfig ?: return
+        if (textWatermarkOverlay == null && imageWatermarkOverlay == null) {
+            if (config.useWatermarkText) {
+                textWatermarkOverlay = WatermarkOverlay(this).also { it.showText(config.watermarkText) }
+            }
+            if (config.useWatermarkImage && config.watermarkImagePath.isNotEmpty()) {
+                imageWatermarkOverlay = WatermarkOverlay(this).also { it.showImage(config.watermarkImagePath) }
+            }
+        } else {
+            textWatermarkOverlay?.hide()
+            textWatermarkOverlay = null
+            imageWatermarkOverlay?.hide()
+            imageWatermarkOverlay = null
         }
     }
     
@@ -339,10 +848,13 @@ class ScreenRecordService : Service() {
         _errorMessage.value = null
     }
 
+    private fun updateExternalUIs() {
+        com.mustakim.bokbok.data.service.quicktile.RecordWidgetProvider.updateAllWidgets(this)
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(NotificationManager::class.java)
-            
             // Recording channel
             val recordingChannel = NotificationChannel(
                 CHANNEL_ID,
@@ -495,13 +1007,40 @@ class ScreenRecordService : Service() {
         return builder.build()
     }
 
-    companion object {
-        const val CHANNEL_ID = "screen_record_channel"
-        const val CHANNEL_CAPTURED = "screen_record_captured"
-        const val NOTIFICATION_ID = 1337
-        
-        const val ACTION_PAUSE = "com.mustakim.bokbok.PAUSE_RECORDING"
-        const val ACTION_RESUME = "com.mustakim.bokbok.RESUME_RECORDING"
-        const val ACTION_STOP = "com.mustakim.bokbok.STOP_RECORDING"
+
+    private fun startAutoStopMonitoring(config: RecordConfig) {
+        // 1. Duration Monitoring
+        if (config.autoStopDurationMinutes > 0) {
+            val delayMs = config.autoStopDurationMinutes * 60 * 1000L
+            autoStopHandler.postDelayed({
+                Timber.i("Auto-stop: Duration reached (${config.autoStopDurationMinutes} min)")
+                stopRecording()
+            }, delayMs)
+        }
+
+        // 2. Battery Monitoring
+        if (config.autoStopBatteryLevel > 0) {
+            batteryReceiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    val level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+                    val batteryPct = level * 100 / scale.toFloat()
+                    
+                    if (batteryPct <= config.autoStopBatteryLevel) {
+                        Timber.i("Auto-stop: Battery level reached (${batteryPct.toInt()}%)")
+                        stopRecording()
+                    }
+                }
+            }
+            registerReceiver(batteryReceiver, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        }
+    }
+
+    private fun stopAutoStopMonitoring() {
+        autoStopHandler.removeCallbacksAndMessages(null)
+        batteryReceiver?.let {
+            unregisterReceiver(it)
+            batteryReceiver = null
+        }
     }
 }

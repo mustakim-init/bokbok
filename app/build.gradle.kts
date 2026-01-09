@@ -162,9 +162,11 @@ dependencies {
     // WebRTC
     implementation("io.getstream:stream-webrtc-android:1.3.10")
 
-    // Media3 Transformer (for track extraction/export)
+    // Media3
     implementation("androidx.media3:media3-transformer:1.5.0")
     implementation("androidx.media3:media3-common:1.5.0")
+    implementation("androidx.media3:media3-exoplayer:1.5.0")
+    implementation("androidx.media3:media3-ui:1.5.0")
 
     // Coroutines
     implementation(libs.bundles.coroutines)
@@ -219,4 +221,16 @@ dependencies {
 
     // Oboe (for low-latency native audio)
     implementation("com.google.oboe:oboe:1.9.3")
+
+    // ONNX Runtime (for Neural Audio Processing)
+    // implementation("com.microsoft.onnxruntime:onnxruntime-android:1.16.3") // Manual integration used
+
+    // CameraX (for Facecam)
+    val camerax_version = "1.3.1"
+    implementation("androidx.camera:camera-camera2:$camerax_version")
+    implementation("androidx.camera:camera-lifecycle:$camerax_version")
+    implementation("androidx.camera:camera-view:$camerax_version")
+
+    // NanoHTTPD (for Wi-Fi File Sharing)
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 }

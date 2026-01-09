@@ -79,6 +79,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Inside <application> -->
@@ -158,5 +161,38 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
+
+        <!-- Screen Record Quick Settings Tile -->
+        <service
+            android:name=".data.service.quicktile.ScreenRecordTileService"
+            android:exported="true"
+            android:label="@string/tile_start_recording"
+            android:icon="@drawable/ic_tile_not_recording"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Transparent activity for MediaProjection request -->
+        <activity
+            android:name=".data.service.quicktile.ProjectionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
+        <!-- Home Screen Widget -->
+        <receiver
+            android:name=".data.service.quicktile.RecordWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_basic">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_record_info" />
+        </receiver>
     </application>
 </manifest>

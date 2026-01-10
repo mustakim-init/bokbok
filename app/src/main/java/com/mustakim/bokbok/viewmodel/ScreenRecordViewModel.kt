@@ -288,10 +288,11 @@ class ScreenRecordViewModel @Inject constructor(
         autoProcess: Boolean,
         noiseReduction: Boolean,
         bleedReduction: Boolean,
-        qualityMode: Int
+        qualityMode: Int,
+        studioMaster: Boolean
     ) {
         viewModelScope.launch {
-            preferencesManager.saveRecorderSettings(autoProcess, noiseReduction, bleedReduction, qualityMode)
+            preferencesManager.saveRecorderSettings(autoProcess, noiseReduction, bleedReduction, qualityMode, studioMaster)
         }
     }
     

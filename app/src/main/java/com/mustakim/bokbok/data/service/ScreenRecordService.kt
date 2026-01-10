@@ -638,6 +638,7 @@ class ScreenRecordService : Service() {
             val qualityMode = settings["qualityMode"] as? Int ?: 1
             val exportMic = settings["exportMicOnly"] as? Boolean ?: false
             val exportInternal = settings["exportInternalOnly"] as? Boolean ?: false
+            val studioMaster = settings["studioMaster"] as? Boolean ?: true
 
             val currentRecordConfig = preferencesManager.recordConfig.first()
             
@@ -676,6 +677,7 @@ class ScreenRecordService : Service() {
                         modelPath = modelRepository.getModelDirectory(),
                         enableBleed = bleedReduction, 
                         enableNoise = noiseReduction, 
+                        enableStudioMaster = studioMaster,
                         micGain = micGain, 
                         internalGain = internalGain,
                         exportMic = exportMic,

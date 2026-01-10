@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CleaningServices
@@ -38,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mustakim.bokbok.viewmodel.AppFilterType
@@ -55,6 +58,7 @@ fun AppManagerScreen(
     val selectedApp by viewModel.selectedApp.collectAsState()
 
     var showFilters by remember { mutableStateOf(false) }
+    var isSearchActive by remember { mutableStateOf(searchQuery.isNotEmpty()) }
     val listState = rememberLazyListState()
     
     // Show App Details Screen if an app is selected
@@ -115,35 +119,78 @@ fun AppManagerScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { viewModel.onSearchQueryChanged(it) },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Search apps...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    trailingIcon = {
-                         Row {
-                             IconButton(onClick = { showFilters = !showFilters }) {
-                                 Icon(
-                                     imageVector = if (showFilters) Icons.Default.FilterList else Icons.AutoMirrored.Filled.Sort,
-                                     contentDescription = "Filter"
-                                 )
-                             }
-                             IconButton(onClick = { viewModel.onRefresh() }) {
-                                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                             }
-                         }
-                    },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.medium,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    )
-                )
+                androidx.compose.animation.AnimatedContent(
+                    targetState = isSearchActive,
+                    label = "SearchTransition"
+                ) { active ->
+                    if (active) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.onSearchQueryChanged(it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Search apps...") },
+                            leadingIcon = {
+                                IconButton(onClick = { 
+                                    isSearchActive = false
+                                    viewModel.onSearchQueryChanged("")
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close Search")
+                                }
+                            },
+                            trailingIcon = {
+                                Row {
+                                    IconButton(onClick = { showFilters = !showFilters }) {
+                                        Icon(
+                                            imageVector = if (showFilters) Icons.Default.FilterList else Icons.AutoMirrored.Filled.Sort,
+                                            contentDescription = "Filter"
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = CircleShape,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "App Manager",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            
+                            Row {
+                                IconButton(onClick = { isSearchActive = true }) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search")
+                                }
+                                IconButton(onClick = { showFilters = !showFilters }) {
+                                    Icon(
+                                        imageVector = if (showFilters) Icons.Default.FilterList else Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = "Filter"
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.onRefresh() }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                                }
+                            }
+                        }
+                    }
+                }
                 
                 if (showFilters) {
                     androidx.compose.foundation.lazy.LazyRow(

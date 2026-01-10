@@ -9,20 +9,12 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FlipCameraAndroid
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -44,6 +36,7 @@ import java.util.concurrent.Executors
 
 /**
  * A floating Facecam overlay using CameraX.
+ * Aligned with Kapture's interaction-driven design (tap to flip).
  */
 class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -59,6 +52,9 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
     private val container = DraggableCameraContainer(context)
     private lateinit var layoutParams: WindowManager.LayoutParams
     private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    
+    // Lens state shared between container (tap detect) and content (preview)
+    private val lensFacingState = mutableIntStateOf(CameraSelector.LENS_FACING_FRONT)
 
     init {
         savedStateRegistryController.performRestore(null)
@@ -83,10 +79,7 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
         }
 
         container.composeView.setContent {
-            FacecamContent(
-                onClose = { hide() },
-                config = config
-            )
+            FacecamContent(config)
         }
 
         container.setViewTreeLifecycleOwner(this)
@@ -98,6 +91,11 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
         
         windowManager.addView(container, layoutParams)
         container.initDrag(windowManager, layoutParams)
+        
+        container.onToggleCamera = {
+            lensFacingState.intValue = if (lensFacingState.intValue == CameraSelector.LENS_FACING_FRONT)
+                CameraSelector.LENS_FACING_BACK else CameraSelector.LENS_FACING_FRONT
+        }
     }
 
     private fun saveState() {
@@ -118,52 +116,18 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
     }
 
     @Composable
-    private fun FacecamContent(
-        onClose: () -> Unit,
-        config: com.mustakim.bokbok.model.RecordConfig
-    ) {
-        var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_FRONT) }
-        val context = LocalContext.current
-        val lifecycleOwner = LocalLifecycleOwner.current
-
+    private fun FacecamContent(config: com.mustakim.bokbok.model.RecordConfig) {
+        val lensFacing by lensFacingState
+        
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(if (config.facecamShape == "Circle") CircleShape else RoundedCornerShape(12.dp))
-                .background(Color.Black)
-                .border(2.dp, MaterialTheme.colorScheme.primary, if (config.facecamShape == "Circle") CircleShape else RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
         ) {
             CameraPreview(
                 lensFacing = lensFacing,
                 modifier = Modifier.fillMaxSize()
             )
-
-            // Controls
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                IconButton(
-                    onClick = { 
-                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_FRONT) 
-                                     CameraSelector.LENS_FACING_BACK else CameraSelector.LENS_FACING_FRONT 
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.FlipCameraAndroid, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                }
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                }
-            }
         }
     }
 
@@ -195,9 +159,7 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
                         cameraSelector,
                         preview
                     )
-                } catch (exc: Exception) {
-                    // Log error
-                }
+                } catch (exc: Exception) {}
             }, ContextCompat.getMainExecutor(context))
         }
 
@@ -217,6 +179,12 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
         private var initialY = 0
         private var initialTouchX = 0f
         private var initialTouchY = 0f
+        private var touchDownTime = 0L
+        private var isDragging = false
+        private var touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+        
+        var onToggleCamera: (() -> Unit)? = null
+        
         private var wm: WindowManager? = null
         private var lp: WindowManager.LayoutParams? = null
 
@@ -224,10 +192,8 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
             override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
                 val lp = lp ?: return false
                 val wm = wm ?: return false
-                
                 val scaleFactor = detector.scaleFactor
                 val newSize = (lp.width * scaleFactor).toInt().coerceIn(100.dpToPx(context), 500.dpToPx(context))
-                
                 lp.width = newSize
                 lp.height = newSize
                 wm.updateViewLayout(this@DraggableCameraContainer, lp)
@@ -235,18 +201,14 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
             }
         })
 
-        init {
-            addView(composeView)
-        }
+        init { addView(composeView) }
 
         fun initDrag(wm: WindowManager, lp: WindowManager.LayoutParams) {
             this.wm = wm
             this.lp = lp
         }
 
-        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
-            return true
-        }
+        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean { return true }
 
         override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
             scaleDetector.onTouchEvent(ev)
@@ -261,14 +223,26 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
                     initialY = lp.y
                     initialTouchX = ev.rawX
                     initialTouchY = ev.rawY
+                    touchDownTime = System.currentTimeMillis()
+                    isDragging = false
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
-                    lp.x = (initialX + (ev.rawX - initialTouchX)).toInt()
-                    lp.y = (initialY + (ev.rawY - initialTouchY)).toInt()
-                    wm.updateViewLayout(this, lp)
+                    val dx = Math.abs(ev.rawX - initialTouchX)
+                    val dy = Math.abs(ev.rawY - initialTouchY)
+                    if (dx > touchSlop || dy > touchSlop) {
+                        isDragging = true
+                        lp.x = (initialX + (ev.rawX - initialTouchX)).toInt()
+                        lp.y = (initialY + (ev.rawY - initialTouchY)).toInt()
+                        wm.updateViewLayout(this, lp)
+                    }
                 }
                 android.view.MotionEvent.ACTION_UP -> {
-                    saveState()
+                    val elapsed = System.currentTimeMillis() - touchDownTime
+                    if (elapsed <= 200 && !isDragging) {
+                        onToggleCamera?.invoke()
+                    } else if (isDragging) {
+                        saveState()
+                    }
                 }
             }
             return true

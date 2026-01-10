@@ -99,14 +99,13 @@ fun DeviceMonitorScreen(
         }
     }
 
-    Scaffold(
-        containerColor = Color.Transparent
-    ) { innerPadding ->
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+                .fillMaxSize(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

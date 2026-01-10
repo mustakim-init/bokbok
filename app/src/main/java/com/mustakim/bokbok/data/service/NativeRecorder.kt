@@ -73,6 +73,7 @@ class NativeRecorder {
         modelPath: String,
         enableBleed: Boolean,
         enableNoise: Boolean,
+        enableStudioMaster: Boolean,
         micGain: Float,
         internalGain: Float,
         exportMic: Boolean,

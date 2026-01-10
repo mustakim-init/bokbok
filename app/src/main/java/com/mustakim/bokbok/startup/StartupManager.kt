@@ -74,29 +74,43 @@ object StartupManager {
      * - Presence updates
      */
     fun registerDeferredTask(task: suspend () -> Unit) {
-        if (_currentStage.value == Stage.FULLY_INITIALIZED) {
-            // Already past Stage 2, execute immediately on IO
-            startupScope.launch { task() }
-        } else {
-            stage2Tasks.add(task)
-            Log.d(TAG, "Registered deferred task (total: ${stage2Tasks.size})")
+        synchronized(stage2Tasks) {
+            if (_currentStage.value == Stage.FULLY_INITIALIZED) {
+                // Already past Stage 2, execute immediately on IO
+                startupScope.launch { task() }
+            } else {
+                stage2Tasks.add(task)
+                Log.d(TAG, "Registered deferred task (total: ${stage2Tasks.size})")
+            }
         }
     }
     
     private suspend fun executeStage2Tasks() {
-        Log.d(TAG, "Executing ${stage2Tasks.size} Stage 2 tasks...")
+        Log.d(TAG, "Executing Stage 2 tasks...")
         
-        stage2Tasks.forEach { task ->
-            try {
-                task()
-            } catch (e: Exception) {
-                Log.e(TAG, "Stage 2 task failed", e)
+        while (true) {
+            val tasksSnapshot = synchronized(stage2Tasks) {
+                if (stage2Tasks.isEmpty()) {
+                    // All tasks drained - switch to fully initialized state
+                    _currentStage.value = Stage.FULLY_INITIALIZED
+                    _isFirstLaunchComplete.value = true
+                    return@synchronized null
+                }
+                val snapshot = stage2Tasks.toList()
+                stage2Tasks.clear()
+                snapshot
+            } ?: break
+
+            Log.d(TAG, "Draining ${tasksSnapshot.size} tasks...")
+            tasksSnapshot.forEach { task ->
+                try {
+                    task()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Stage 2 task failed", e)
+                }
             }
         }
         
-        stage2Tasks.clear()
-        _currentStage.value = Stage.FULLY_INITIALIZED
-        _isFirstLaunchComplete.value = true
         Log.d(TAG, "Stage 2 complete: Fully Initialized")
     }
     
@@ -112,8 +126,10 @@ object StartupManager {
      * Reset for testing purposes
      */
     fun reset() {
-        _currentStage.value = Stage.UNINITIALIZED
-        _isFirstLaunchComplete.value = false
-        stage2Tasks.clear()
+        synchronized(stage2Tasks) {
+            _currentStage.value = Stage.UNINITIALIZED
+            _isFirstLaunchComplete.value = false
+            stage2Tasks.clear()
+        }
     }
 }

@@ -210,17 +210,11 @@ fun ScreenRecordTab(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = Color.Transparent
-        ) { paddingValues ->
-            PermissionGate(
-                onAllPermissionsGranted = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
-                    ) {
+        PermissionGate(
+            onAllPermissionsGranted = {
+                Column(
+                    modifier = Modifier.fillMaxSize()
+                ) {
                         PrimaryTabRow(
                             selectedTabIndex = selectedTabIndex,
                             containerColor = Color.Transparent,
@@ -364,7 +358,8 @@ fun ScreenRecordTab(
                                             recorderSettings["autoProcess"] as? Boolean ?: true,
                                             it,
                                             recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            recorderSettings["qualityMode"] as? Int ?: 1
+                                            recorderSettings["qualityMode"] as? Int ?: 1,
+                                            recorderSettings["studioMaster"] as? Boolean ?: true
                                         )}
                                     )
                                     ToggleSetting(
@@ -376,7 +371,8 @@ fun ScreenRecordTab(
                                             recorderSettings["autoProcess"] as? Boolean ?: true,
                                             recorderSettings["noiseReduction"] as? Boolean ?: true,
                                             it,
-                                            recorderSettings["qualityMode"] as? Int ?: 1
+                                            recorderSettings["qualityMode"] as? Int ?: 1,
+                                            recorderSettings["studioMaster"] as? Boolean ?: true
                                         )}
                                     )
                                     OutlinedButton(
@@ -961,7 +957,8 @@ fun ScreenRecordTab(
                                             autoProcess = it,
                                             noiseReduction = recorderSettings["noiseReduction"] as? Boolean ?: true,
                                             bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1
+                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
+                                            studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
                                         )
                                     }
                                 )
@@ -976,7 +973,8 @@ fun ScreenRecordTab(
                                             autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
                                             noiseReduction = it,
                                             bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1
+                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
+                                            studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
                                         )
                                     }
                                 )
@@ -991,7 +989,8 @@ fun ScreenRecordTab(
                                             autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
                                             noiseReduction = recorderSettings["noiseReduction"] as? Boolean ?: true,
                                             bleedReduction = it,
-                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1
+                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
+                                            studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
                                         )
                                     }
                                 )
@@ -1006,7 +1005,8 @@ fun ScreenRecordTab(
                                             autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
                                             noiseReduction = recorderSettings["noiseReduction"] as? Boolean ?: true,
                                             bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            qualityMode = if (name == "Quality") 1 else 0
+                                            qualityMode = if (name == "Quality") 1 else 0,
+                                            studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
                                         )
                                     }
                                 )
@@ -1037,10 +1037,15 @@ fun ScreenRecordTab(
                     }
                 }
             }
-        }
-    }
-})
-}
+                        }
+                }
+            }
+        )
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+        )
 
         // Countdown Overlay
         AnimatedVisibility(

@@ -7,18 +7,14 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,10 +29,10 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import java.io.File
 
 /**
  * Floating Watermark (Text or Image) during recording.
+ * Aligned with Kapture's clean overlay design and drag behavior.
  */
 class WatermarkOverlay(private val context: Context) : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -152,13 +148,15 @@ class WatermarkOverlay(private val context: Context) : LifecycleOwner, ViewModel
         private var initialY = 0
         private var initialTouchX = 0f
         private var initialTouchY = 0f
+        private var touchDownTime = 0L
+        private var isDragging = false
+        private var touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+        
         private var wm: WindowManager? = null
         private var lp: WindowManager.LayoutParams? = null
         private var onRelease: (() -> Unit)? = null
 
-        init {
-            addView(composeView)
-        }
+        init { addView(composeView) }
 
         fun initDrag(wm: WindowManager, lp: WindowManager.LayoutParams, onRelease: () -> Unit) {
             this.wm = wm
@@ -166,9 +164,7 @@ class WatermarkOverlay(private val context: Context) : LifecycleOwner, ViewModel
             this.onRelease = onRelease
         }
 
-        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
-            return true
-        }
+        override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean { return true }
 
         override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
             val lp = this.lp ?: return super.onTouchEvent(ev)
@@ -180,14 +176,24 @@ class WatermarkOverlay(private val context: Context) : LifecycleOwner, ViewModel
                     initialY = lp.y
                     initialTouchX = ev.rawX
                     initialTouchY = ev.rawY
+                    touchDownTime = System.currentTimeMillis()
+                    isDragging = false
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
-                    lp.x = (initialX + (ev.rawX - initialTouchX)).toInt()
-                    lp.y = (initialY + (ev.rawY - initialTouchY)).toInt()
-                    wm.updateViewLayout(this, lp)
+                    val dx = Math.abs(ev.rawX - initialTouchX)
+                    val dy = Math.abs(ev.rawY - initialTouchY)
+                    if (dx > touchSlop || dy > touchSlop) {
+                        isDragging = true
+                        lp.x = (initialX + (ev.rawX - initialTouchX)).toInt()
+                        lp.y = (initialY + (ev.rawY - initialTouchY)).toInt()
+                        wm.updateViewLayout(this, lp)
+                    }
                 }
                 android.view.MotionEvent.ACTION_UP -> {
-                    onRelease?.invoke()
+                    val elapsed = System.currentTimeMillis() - touchDownTime
+                    if (isDragging || elapsed > 200) {
+                        onRelease?.invoke()
+                    }
                 }
             }
             return true

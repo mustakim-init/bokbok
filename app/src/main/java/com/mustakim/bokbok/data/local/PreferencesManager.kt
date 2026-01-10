@@ -37,6 +37,7 @@ class PreferencesManager @Inject constructor(
         private val NOISE_REDUCTION_KEY = booleanPreferencesKey("recorder_noise_reduction")
         private val BLEED_REDUCTION_KEY = booleanPreferencesKey("recorder_bleed_reduction")
         private val QUALITY_MODE_KEY = intPreferencesKey("recorder_quality_mode")
+        private val STUDIO_MASTER_KEY = booleanPreferencesKey("recorder_studio_master")
         
         // Capture Settings
         private val REC_WIDTH_KEY = intPreferencesKey("rec_width")
@@ -110,6 +111,7 @@ class PreferencesManager @Inject constructor(
             "noiseReduction" to (preferences[NOISE_REDUCTION_KEY] ?: true),
             "bleedReduction" to (preferences[BLEED_REDUCTION_KEY] ?: true),
             "qualityMode" to (preferences[QUALITY_MODE_KEY] ?: 1),
+            "studioMaster" to (preferences[STUDIO_MASTER_KEY] ?: true),
             "exportMicOnly" to (preferences[REC_EXPORT_MIC_KEY] ?: false),
             "exportInternalOnly" to (preferences[REC_EXPORT_INTERNAL_KEY] ?: false),
             "autoStopDuration" to (preferences[AUTO_STOP_DURATION_KEY] ?: 0),
@@ -174,13 +176,15 @@ class PreferencesManager @Inject constructor(
         autoProcess: Boolean,
         noiseReduction: Boolean,
         bleedReduction: Boolean,
-        qualityMode: Int
+        qualityMode: Int,
+        studioMaster: Boolean
     ) {
         context.dataStore.edit { preferences ->
             preferences[AUTO_PROCESS_KEY] = autoProcess
             preferences[NOISE_REDUCTION_KEY] = noiseReduction
             preferences[BLEED_REDUCTION_KEY] = bleedReduction
             preferences[QUALITY_MODE_KEY] = qualityMode
+            preferences[STUDIO_MASTER_KEY] = studioMaster
         }
     }
 

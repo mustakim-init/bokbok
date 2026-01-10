@@ -21,6 +21,7 @@ public:
         
         bool enableBleedReduction = false;
         bool enableNoiseReduction = false;
+        bool enableStudioMaster = false;
         float micGain = 1.0f;
         float internalGain = 1.0f;
         int qualityMode = 1; 

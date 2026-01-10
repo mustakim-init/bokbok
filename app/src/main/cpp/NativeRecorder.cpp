@@ -470,6 +470,7 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         jstring jModelPath,
         jboolean enableBleedReduction,
         jboolean enableNoiseReduction,
+        jboolean enableStudioMaster,
         jfloat micGain,
         jfloat internalGain,
         jboolean exportMicOnly,
@@ -490,6 +491,7 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
     config.modelPath = modelPath;
     config.enableBleedReduction = enableBleedReduction;
     config.enableNoiseReduction = enableNoiseReduction;
+    config.enableStudioMaster = enableStudioMaster;
     config.micGain = micGain;
     config.internalGain = internalGain;
     config.exportMicOnly = exportMicOnly;

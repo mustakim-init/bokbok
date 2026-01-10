@@ -253,16 +253,14 @@ fun GameBoostScreen(
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 0.dp)
-                        .padding(top = 8.dp),
+                        .padding(horizontal = 8.dp, vertical = 0.dp),
                     color = MaterialTheme.colorScheme.background,
                     shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)
                 ) {
                     HorizontalPager(
                         state = pagerState,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = 16.dp),
+                            .fillMaxSize(),
                         beyondViewportPageCount = 1, // Reduced to save memory
                         key = { tabs[it] }
                     ) { page ->

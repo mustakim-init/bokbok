@@ -147,19 +147,18 @@ bool PostProcessor::process(const Config& config) {
         }
 
         size_t samplesThisChunk = intRead;
-
-        // --- STABLE INTERNAL NORMALIZATION (FOR AEC REF ONLY) ---
-        float currentIntSumSq = 0.0001f;
-        for (size_t i = 0; i < samplesThisChunk; i++) {
-            float iv = (float)intBuf[i] / 32768.f;
-            currentIntSumSq += iv * iv;
-        }
-        float currentIntRMS = std::sqrt(currentIntSumSq / samplesThisChunk);
-        movingIntRMS = (1.0f - ALPHA) * movingIntRMS + ALPHA * currentIntRMS;
-        float intRefGain = TARGET_RMS / std::max(movingIntRMS, 0.001f);
-        
         std::vector<int16_t> intAecRef(samplesThisChunk);
         std::vector<int16_t> micProcessingBuf(samplesThisChunk);
+
+        // --- STAGE 1: Internal Normalization (Reference only) ---
+        float intRefGain = 1.0f;
+        if (config.enableStudioMaster) {
+            float currentIntRMS = 0;
+            for (int16_t s : intBuf) currentIntRMS += std::abs(s);
+            currentIntRMS /= (samplesThisChunk + 1);
+            movingIntRMS = (1.0f - ALPHA) * movingIntRMS + ALPHA * currentIntRMS;
+            intRefGain = TARGET_RMS / std::max(movingIntRMS, 0.001f);
+        }
         
         for (size_t i = 0; i < samplesThisChunk; i++) {
             float ivNormalized = (float)intBuf[i] * intRefGain;
@@ -169,59 +168,48 @@ bool PostProcessor::process(const Config& config) {
             micProcessingBuf[i] = micBuf[i];
         }
 
-        // PASS 1: Pure Linear AEC (Zero-Muffled Subtraction)
+        // --- STAGE 2: AEC3 Bleed Removal (Layer 1) ---
         if (config.enableBleedReduction && aec3_) {
             aec3_->AnalyzeInternal(intAecRef.data(), samplesThisChunk);
             aec3_->ProcessMic(micProcessingBuf.data(), samplesThisChunk);
         }
 
-        // PASS 2: Bridge Normalizer (Loudness Restoration)
-        float preDfnSumSq = 0.0001f;
-        for (size_t i = 0; i < samplesThisChunk; i++) {
-            float cv = (float)micProcessingBuf[i] / 32768.f;
-            preDfnSumSq += cv * cv;
-        }
-        float preDfnRMS = std::sqrt(preDfnSumSq / samplesThisChunk);
-        float bridgeGain = TARGET_RMS / std::max(preDfnRMS, 0.001f);
-        if (bridgeGain > 10.0f) bridgeGain = 10.0f;
-
-        for (size_t i = 0; i < samplesThisChunk; i++) {
-            float g = (float)micProcessingBuf[i] * bridgeGain;
-            if (g > 32767.f) g = 32767.f; if (g < -32768.f) g = -32768.f;
-            micProcessingBuf[i] = (int16_t)g;
-        }
-
-        // PASS 3: Clarity EQ (Pro 2-Stage Master)
-        // Stage 1: Anti-Boxy Dip (Target 300Hz, -4dB) - Removes "muffled" boxiness
-        // Stage 2: Presence Shelf (Target 3.5kHz+, +6dB) - Adds "air" and sparkle
-        
-        // Anti-Boxy (Stage 1) - Simple Peaking-style dip
-        const float b0_a = 0.95f, b1_a = -1.82f, b2_a = 0.88f;
-        const float a1_a = -1.82f, a2_a = 0.83f;
-        
-        // Presence (Stage 2)
-        const float b0_p = 1.25f, b1_p = -1.15f, b2_p = 0.45f;
-        const float a1_p = -1.15f, a2_p = 0.45f;
-        
-        static float x1_a=0, x2_a=0, y1_a=0, y2_a=0; // Anti-boxy states
-        static float x1_p=0, x2_p=0, y1_p=0, y2_p=0; // Presence states
-
-        for (size_t i = 0; i < samplesThisChunk; i++) {
-            float x = (float)micProcessingBuf[i];
+        // --- STAGE 3: Studio Master Bridge (Loudness Restoration) ---
+        if (config.enableStudioMaster) {
+            float preDfnRMS = 0;
+            for (int16_t s : micProcessingBuf) preDfnRMS += std::abs(s);
+            preDfnRMS /= (samplesThisChunk + 1);
             
-            // Apply Anti-Boxy Dip
-            float y_a = b0_a*x + b1_a*x1_a + b2_a*x2_a - a1_a*y1_a - a2_a*y2_a;
-            x2_a = x1_a; x1_a = x; y2_a = y1_a; y1_a = y_a;
-            
-            // Apply Presence Shelf
-            float y_p = b0_p*y_a + b1_p*x1_p + b2_p*x2_p - a1_p*y1_p - a2_p*y2_p;
-            x2_p = x1_p; x1_p = y_a; y2_p = y1_p; y1_p = y_p;
-            
-            if (y_p > 32767.f) y_p = 32767.f; if (y_p < -32768.f) y_p = -32768.f;
-            micProcessingBuf[i] = (int16_t)y_p;
+            float bridgeGain = TARGET_RMS / std::max(preDfnRMS, 0.001f);
+            if (bridgeGain > 10.0f) bridgeGain = 10.0f;
+            for (size_t i = 0; i < samplesThisChunk; i++) {
+                float g = (float)micProcessingBuf[i] * bridgeGain;
+                if (g > 32767.f) g = 32767.f; if (g < -32768.f) g = -32768.f;
+                micProcessingBuf[i] = (int16_t)g;
+            }
         }
 
-        // PASS 4: AI Polishing (DeepFilterNet)
+        // --- STAGE 4: Clarity EQ (Presence + Anti-Boxy) ---
+        if (config.enableStudioMaster) {
+            const float b0_a = 0.95f, b1_a = -1.82f, b2_a = 0.88f; // Anti-Boxy
+            const float a1_a = -1.82f, a2_a = 0.83f;
+            const float b0_p = 1.25f, b1_p = -1.15f, b2_p = 0.45f; // Presence
+            const float a1_p = -1.15f, a2_p = 0.45f;
+            static float x1_a=0, x2_a=0, y1_a=0, y2_a=0;
+            static float x1_p=0, x2_p=0, y1_p=0, y2_p=0;
+
+            for (size_t i = 0; i < samplesThisChunk; i++) {
+                float x = (float)micProcessingBuf[i];
+                float y_a = b0_a*x + b1_a*x1_a + b2_a*x2_a - a1_a*y1_a - a2_a*y2_a;
+                x2_a = x1_a; x1_a = x; y2_a = y1_a; y1_a = y_a;
+                float y_p = b0_p*y_a + b1_p*x1_p + b2_p*x2_p - a1_p*y1_p - a2_p*y2_p;
+                x2_p = x1_p; x1_p = y_a; y2_p = y1_p; y1_p = y_p;
+                if (y_p > 32767.f) y_p = 32767.f; if (y_p < -32768.f) y_p = -32768.f;
+                micProcessingBuf[i] = (int16_t)y_p;
+            }
+        }
+
+        // --- STAGE 5: AI Polishing (DeepFilterNet Layer 2) ---
         deepFilter_.process(
             micProcessingBuf.data(), 
             samplesThisChunk, 
@@ -231,18 +219,25 @@ bool PostProcessor::process(const Config& config) {
             config.enableNoiseReduction
         );
 
-        // PASS 5: Broadcast Compressor + Limiter
+        // --- STAGE 6: Broadcast Dynamics (Comp + Limit) + Mix ---
+        std::vector<int16_t> mixBuf(samplesThisChunk); // New buffer for the final mix
         for (size_t i = 0; i < samplesThisChunk; i++) {
-            float voice = (float)outChunk[i] * config.micGain;
-            
-            // --- Compress (4:1 Ratio, Soft Knee) ---
-            float env = std::abs(voice) / 32768.f;
-            float targetGain = (env > 0.1f) ? (0.1f + (env - 0.1f) * 0.25f) / env : 1.0f;
-            compGain = (targetGain < compGain) ? (compGain * (1.0f - COMP_ATTACK) + targetGain * COMP_ATTACK) 
-                                               : (compGain * (1.0f - COMP_RELEASE) + targetGain * COMP_RELEASE);
-            voice *= compGain;
+            float processedMic = (float)outChunk[i];
 
-            // --- SYNC FIX: Pull delayed internal audio ---
+            if (config.enableStudioMaster) {
+                // Compressor (Soft-Knee)
+                float env = std::abs(processedMic / 32768.0f);
+                float targetGain = (env > 0.15f) ? (0.15f + (env - 0.15f) * 0.25f) / env : 1.0f;
+                float factor = (targetGain < compGain) ? COMP_ATTACK : COMP_RELEASE;
+                compGain = (1.0f - factor) * compGain + factor * targetGain;
+                processedMic *= compGain;
+
+                // Safety Limiter
+                if (processedMic > 32000.0f) processedMic = 32000.0f;
+                if (processedMic < -32000.0f) processedMic = -32000.0f;
+            }
+
+            // --- FINAL MIXING ---
             float gameOrig = (float)intBuf[i];
             float gameToMix = gameOrig;
             if (totalLatencySamples > 0) {
@@ -250,22 +245,18 @@ bool PostProcessor::process(const Config& config) {
                 internalDelayLine[delayWriteIdx] = (int16_t)gameOrig;
                 delayWriteIdx = (delayWriteIdx + 1) % totalLatencySamples;
             }
-            float game = gameToMix * config.internalGain;
 
-            float mix = voice + game;
-
-            // PASS 6: Brickwall Limiter (Safety)
-            if (mix > 30000.0f) mix = 30000.0f + (mix - 30000.0f) * 0.1f; // Soft-clip
-            if (mix < -30000.0f) mix = -30000.0f + (mix + 30000.0f) * 0.1f;
+            // Combine Mic (Gained) + Internal (Gained)
+            float mixed = (processedMic * config.micGain) + (gameToMix * config.internalGain);
             
-            if (mix > 32760.f) mix = 32760.f;
-            if (mix < -32760.f) mix = -32760.f;
-            
-            outChunk[i] = (int16_t)mix;
+            // Final Brickwall to avoid file-level clip
+            if (mixed > 32767.0f) mixed = 32767.0f;
+            if (mixed < -32768.0f) mixed = -32768.0f;
+            mixBuf[i] = (int16_t)mixed;
         }
 
         // Write to temp file
-        mixOut.write(reinterpret_cast<char*>(outChunk.data()), samplesThisChunk * sizeof(int16_t));
+        mixOut.write(reinterpret_cast<char*>(mixBuf.data()), samplesThisChunk * sizeof(int16_t));
         processedSamples += samplesThisChunk;
 
         if (onProgress && totalSamples > 0 && (processedSamples % (samplesThisChunk * 10) == 0)) {

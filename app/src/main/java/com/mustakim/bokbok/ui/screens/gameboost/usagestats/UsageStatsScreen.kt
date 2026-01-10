@@ -94,72 +94,66 @@ fun UsageStatsScreen(
             viewModel.loadDataIfNeeded()
         }
 
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxSize()
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    // Header Card (Now scrollable)
-                    item {
-                        UsageStatsHeader(
-                            totalScreenTime = uiState.totalScreenTime,
-                            currentDate = uiState.currentDate,
-                            intervalType = uiState.intervalType,
-                            onNextDate = { viewModel.onNextDate() },
-                            onPrevDate = { viewModel.onPreviousDate() }
-                        )
-                    }
+                // Header Card (Now scrollable)
+                item {
+                    UsageStatsHeader(
+                        totalScreenTime = uiState.totalScreenTime,
+                        currentDate = uiState.currentDate,
+                        intervalType = uiState.intervalType,
+                        onNextDate = { viewModel.onNextDate() },
+                        onPrevDate = { viewModel.onPreviousDate() }
+                    )
+                }
 
-                    // Controls Row (Now scrollable)
-                    item {
-                        UsageControls(
-                            intervalType = uiState.intervalType,
-                            sortOrder = uiState.sortOrder,
-                            onIntervalChanged = { viewModel.onIntervalChanged(it) },
-                            onSortOrderChanged = { viewModel.onSortOrderChanged(it) }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
+                // Controls Row (Now scrollable)
+                item {
+                    UsageControls(
+                        intervalType = uiState.intervalType,
+                        sortOrder = uiState.sortOrder,
+                        onIntervalChanged = { viewModel.onIntervalChanged(it) },
+                        onSortOrderChanged = { viewModel.onSortOrderChanged(it) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
-                    if (uiState.isLoading) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
-                            }
+                if (uiState.isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
                         }
-                    } else if (uiState.usageList.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(200.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No usage data available",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                    }
+                } else if (uiState.usageList.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No usage data available",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    } else {
-                        items(uiState.usageList, key = { it.packageName }) { item ->
-                            UsageStatsItem(usageInfo = item)
-                        }
+                    }
+                } else {
+                    items(uiState.usageList, key = { it.packageName }) { item ->
+                        UsageStatsItem(usageInfo = item)
                     }
                 }
             }

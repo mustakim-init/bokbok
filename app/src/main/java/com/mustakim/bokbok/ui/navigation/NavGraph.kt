@@ -393,5 +393,9 @@ fun NavGraph(
                 onBack = { navController.popBackStack() }
             )
         }
+
+        composable(route = NavRoutes.AICompanion.route) {
+            com.mustakim.bokbok.ui.screens.ai.AICompanionScreen(navController = navController)
+        }
     }
 }

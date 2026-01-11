@@ -48,6 +48,11 @@ object DataModule {
     }
 
     @Provides
+    fun provideAIConversationDao(database: BokBokDatabase): com.mustakim.bokbok.data.local.AIConversationDao {
+        return database.aiConversationDao()
+    }
+
+    @Provides
     @Singleton
     fun provideAppManagerRepository(@ApplicationContext context: Context, appDao: AppDao): AppManagerRepository {
         return AppManagerRepository(context, appDao)

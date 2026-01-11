@@ -33,6 +33,26 @@ class GameBoostViewModel @Inject constructor() : ViewModel() {
     private val _shizukuActive = MutableStateFlow(true)
     val shizukuActive: StateFlow<Boolean> = _shizukuActive.asStateFlow()
 
+    private val _showShizukuWarning = MutableStateFlow(false)
+    val showShizukuWarning: StateFlow<Boolean> = _showShizukuWarning.asStateFlow()
+
+    companion object {
+        private var hasShownSessionWarning = false
+    }
+
+    init {
+        verifyShizukuStatus()
+        // If Shizuku is NOT active and we haven't shown the warning this session, show it.
+        if (!_shizukuActive.value && !hasShownSessionWarning) {
+            _showShizukuWarning.value = true
+        }
+    }
+
+    fun dismissShizukuWarning() {
+        _showShizukuWarning.value = false
+        hasShownSessionWarning = true
+    }
+
     fun onTabSelected(tab: GameBoostTab) {
         _selectedTab.value = tab
         verifyShizukuStatus()

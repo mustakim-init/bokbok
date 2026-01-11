@@ -10,6 +10,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -130,12 +131,13 @@ fun GameBoostScreen(
                                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             onClick = {
-                                // TODO: Navigate to GameBoost Settings
+                                navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.AICompanion.route)
                             }
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings"
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "AI Companion",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     },
@@ -188,19 +190,13 @@ fun GameBoostScreen(
                     }
                 }
 
+                val showShizukuDialog by viewModel.showShizukuWarning.collectAsState()
                 val shizukuActive by viewModel.shizukuActive.collectAsState()
-                var showShizukuDialog by remember { mutableStateOf(false) }
-
-                LaunchedEffect(shizukuActive) {
-                    if (!shizukuActive) {
-                        showShizukuDialog = true
-                    }
-                }
 
                 if (showShizukuDialog && !shizukuActive) {
                     AlertDialog(
                         modifier = Modifier.padding(28.dp),
-                        onDismissRequest = { showShizukuDialog = false },
+                        onDismissRequest = { viewModel.dismissShizukuWarning() },
                         icon = {
                             Icon(
                                 imageVector = Icons.Default.Warning,
@@ -228,20 +224,19 @@ fun GameBoostScreen(
                                     if (intent != null) {
                                         context.startActivity(intent)
                                     } else {
-                                        // Open Play Store if not installed? Or just show message
                                         val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))
                                         context.startActivity(playStoreIntent)
                                     }
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "Could not open Shizuku", Toast.LENGTH_SHORT).show()
                                 }
-                                showShizukuDialog = false
+                                viewModel.dismissShizukuWarning()
                             }) {
                                 Text("Open Shizuku")
                             }
                         },
                         dismissButton = {
-                            TextButton(onClick = { showShizukuDialog = false }) {
+                            TextButton(onClick = { viewModel.dismissShizukuWarning() }) {
                                 Text("Dismiss")
                             }
                         },

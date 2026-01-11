@@ -18,6 +18,9 @@ sealed class NavRoutes(val route: String) {
     object Chats : NavRoutes("chats")
     object GameBoost : NavRoutes("game_boost")
 
+    // ============= AI =============
+    object AICompanion : NavRoutes("ai_companion")
+
     // ============= SECONDARY =============
     object Profile : NavRoutes("profile")
     object Settings : NavRoutes("settings")

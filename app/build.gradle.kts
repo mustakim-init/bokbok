@@ -51,6 +51,11 @@ android {
         buildConfigField("String", "TURN_FALLBACK_USERNAME", "\"$fallbackUser\"")
         buildConfigField("String", "TURN_FALLBACK_PASSWORD", "\"$fallbackPass\"")
 
+        // Gemini AI
+        val geminiApiKey = properties.getProperty("GEMINI_API_KEY") ?: properties.getProperty("gemini.api.key") ?: ""
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+
+
         externalNativeBuild {
             cmake {
                 arguments("-DANDROID_STL=c++_shared")
@@ -233,4 +238,7 @@ dependencies {
 
     // NanoHTTPD (for Wi-Fi File Sharing)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    // Gemini AI SDK
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 }

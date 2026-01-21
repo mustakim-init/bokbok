@@ -62,6 +62,11 @@ bool PostProcessor::process(const Config& config) {
     ProgressCallback onProgress = onProgress_;
 
     LOGI("Starting Post-Processing (DeepFilterNet %s)...", config.exportMicOnly ? "Mic-Only" : "Mix");
+    LOGI("Config: micGain=%.2f intGain=%.2f SM=%s Bleed=%s Noise=%s", 
+         config.micGain, config.internalGain, 
+         config.enableStudioMaster ? "ON" : "OFF",
+         config.enableBleedReduction ? "ON" : "OFF",
+         config.enableNoiseReduction ? "ON" : "OFF");
     shouldCancel_.store(false);
 
     // 1. Open Streams (Simplified - No Pre-Alignment)
@@ -75,8 +80,12 @@ bool PostProcessor::process(const Config& config) {
 
     // Prepare model - only if noise reduction is enabled
     if (config.enableNoiseReduction) {
-        if (!deepFilter_.init(modelPath, config.sampleRate)) {
+        deepFilter_ = std::make_unique<DeepFilterNet>();
+        if (!deepFilter_->init(modelPath, config.sampleRate)) {
             LOGE("Failed to load DFN models from %s", modelPath.c_str());
+            // Optionally disable noise reduction if init fails?
+            // For now, we keep it enabled but DeepFilterNet::process has !isLoaded_ check which is good, 
+            // but we must be careful not to dereference null later if init completely failed to allocate (unlikely with make_unique).
         } else {
              LOGI("DeepFilterNet models loaded.");
         }
@@ -91,7 +100,8 @@ bool PostProcessor::process(const Config& config) {
     // Chunk size: 1s buffer
     const size_t CHUNK_SAMPLES = config.sampleRate / 2; // 0.5s for responsiveness
     std::vector<int16_t> micBuf(CHUNK_SAMPLES);
-    std::vector<int16_t> intBuf(CHUNK_SAMPLES);
+    std::vector<int16_t> intBuf(CHUNK_SAMPLES * config.internalChannels);
+    std::vector<int16_t> intMono(CHUNK_SAMPLES); // For AI/AEC reference
     
     // Float buffers for processing
     std::vector<float> micFloat(CHUNK_SAMPLES);
@@ -106,6 +116,16 @@ bool PostProcessor::process(const Config& config) {
         return false;
     }
 
+    std::ofstream micExportOut;
+    if (config.exportMicOnly && !config.micExportPath.empty()) {
+        micExportOut.open(config.micExportPath + ".pcm.tmp", std::ios::binary);
+    }
+
+    std::ofstream intExportOut;
+    if (config.exportInternalOnly && !config.internalExportPath.empty()) {
+        intExportOut.open(config.internalExportPath + ".pcm.tmp", std::ios::binary);
+    }
+
     // Get file size for progress
     intFile.seekg(0, std::ios::end);
     size_t totalSamples = intFile.tellg() / sizeof(int16_t);
@@ -117,13 +137,18 @@ bool PostProcessor::process(const Config& config) {
     LOGI("Processing: Streaming Loop (Stable RMS + Dynamic Sync)...");
     // --- STUDIO MASTER CHAIN STATES ---
     float compGain = 1.0f;    // Compressor state
+    float smoothedBridgeGain = 1.0f; // Smoothed mic normalization
     const float COMP_ATTACK = 0.05f; // Fast attack
     const float COMP_RELEASE = 0.005f; // Slower release for smooth "Broadcast" sound
 
+    // EQ Filter States (Reset per recording)
+    float x1_a=0, x2_a=0, y1_a=0, y2_a=0;
+    float x1_p=0, x2_p=0, y1_p=0, y2_p=0;
+
     // --- STABLE GAIN & SYNC STATES (Restored) ---
     const float ALPHA = 0.01f;
-    float movingIntRMS = 0.1f;
-    const float TARGET_RMS = 0.1f;
+    float movingIntRMS = 500.0f;    // Initial sensible value for 16-bit PCM
+    const float TARGET_RMS = 3276.0f; // Targeting ~10% of 16-bit full scale (+/- 32768)
     
     size_t aecLatency = config.enableBleedReduction ? 480 : 0;
     size_t dfnLatency = config.enableNoiseReduction ? 480 : 0;
@@ -133,130 +158,143 @@ bool PostProcessor::process(const Config& config) {
     size_t delayWriteIdx = 0;
     size_t processedSamples = 0;
 
+    LOGI("Processing Start: InternalChannels=%d SampleRate=%d", config.internalChannels, config.sampleRate);
+
     while (!shouldCancel_.load()) {
         // Read Internal (Master Clock)
-        intFile.read(reinterpret_cast<char*>(intBuf.data()), CHUNK_SAMPLES * sizeof(int16_t));
-        size_t intRead = intFile.gcount() / sizeof(int16_t);
-        if (intRead == 0) break;
+        size_t intReadSize = CHUNK_SAMPLES * config.internalChannels;
+        intFile.read(reinterpret_cast<char*>(intBuf.data()), intReadSize * sizeof(int16_t));
+        size_t intReadSamples = intFile.gcount() / sizeof(int16_t);
+        size_t framesRead = intReadSamples / config.internalChannels;
+        if (framesRead == 0) break;
 
         // Read Mic (Strictly Aligned)
-        micFile.read(reinterpret_cast<char*>(micBuf.data()), CHUNK_SAMPLES * sizeof(int16_t));
+        micFile.read(reinterpret_cast<char*>(micBuf.data()), framesRead * sizeof(int16_t));
         size_t micRead = micFile.gcount() / sizeof(int16_t);
-        if (micRead < intRead) {
-            std::fill(micBuf.begin() + micRead, micBuf.begin() + intRead, 0);
+        if (micRead < framesRead) {
+            std::fill(micBuf.begin() + micRead, micBuf.begin() + framesRead, 0);
         }
 
-        size_t samplesThisChunk = intRead;
-        std::vector<int16_t> intAecRef(samplesThisChunk);
+        size_t samplesThisChunk = framesRead;
         std::vector<int16_t> micProcessingBuf(samplesThisChunk);
+        for (size_t i = 0; i < samplesThisChunk; i++) micProcessingBuf[i] = micBuf[i];
 
-        // --- STAGE 1: Internal Normalization (Reference only) ---
-        float intRefGain = 1.0f;
-        if (config.enableStudioMaster) {
-            float currentIntRMS = 0;
-            for (int16_t s : intBuf) currentIntRMS += std::abs(s);
-            currentIntRMS /= (samplesThisChunk + 1);
-            movingIntRMS = (1.0f - ALPHA) * movingIntRMS + ALPHA * currentIntRMS;
-            intRefGain = TARGET_RMS / std::max(movingIntRMS, 0.001f);
-        }
-        
-        for (size_t i = 0; i < samplesThisChunk; i++) {
-            float ivNormalized = (float)intBuf[i] * intRefGain;
-            if (ivNormalized > 32767.f) ivNormalized = 32767.f; 
-            if (ivNormalized < -32768.f) ivNormalized = -32768.f;
-            intAecRef[i] = (int16_t)ivNormalized;
-            micProcessingBuf[i] = micBuf[i];
+        // --- STAGE 1: Reference Preparation (Down-mix if Stereo) ---
+        // intMono is used for AEC and DeepFilterNet reference
+        if (config.internalChannels == 2) {
+            for (size_t i = 0; i < samplesThisChunk; i++) {
+                int32_t val = (int32_t)intBuf[i * 2] + (int32_t)intBuf[i * 2 + 1];
+                intMono[i] = (int16_t)(val / 2);
+            }
+        } else {
+            std::copy(intBuf.begin(), intBuf.begin() + samplesThisChunk, intMono.begin());
         }
 
         // --- STAGE 2: AEC3 Bleed Removal (Layer 1) ---
         if (config.enableBleedReduction && aec3_) {
-            aec3_->AnalyzeInternal(intAecRef.data(), samplesThisChunk);
+            aec3_->AnalyzeInternal(intMono.data(), samplesThisChunk);
             aec3_->ProcessMic(micProcessingBuf.data(), samplesThisChunk);
         }
 
-        // --- STAGE 3: Studio Master Bridge (Loudness Restoration) ---
-        if (config.enableStudioMaster) {
-            float preDfnRMS = 0;
-            for (int16_t s : micProcessingBuf) preDfnRMS += std::abs(s);
-            preDfnRMS /= (samplesThisChunk + 1);
-            
-            float bridgeGain = TARGET_RMS / std::max(preDfnRMS, 0.001f);
-            if (bridgeGain > 10.0f) bridgeGain = 10.0f;
-            for (size_t i = 0; i < samplesThisChunk; i++) {
-                float g = (float)micProcessingBuf[i] * bridgeGain;
-                if (g > 32767.f) g = 32767.f; if (g < -32768.f) g = -32768.f;
-                micProcessingBuf[i] = (int16_t)g;
-            }
-        }
+        // --- STAGE 3: (REMOVED) ---
+        // Pre-AI loudness normalization was removed because it caused harsh, 
+        // over-amplified audio. The post-AI compressor + makeup gain handles loudness instead.
 
-        // --- STAGE 4: Clarity EQ (Presence + Anti-Boxy) ---
-        if (config.enableStudioMaster) {
-            const float b0_a = 0.95f, b1_a = -1.82f, b2_a = 0.88f; // Anti-Boxy
-            const float a1_a = -1.82f, a2_a = 0.83f;
-            const float b0_p = 1.25f, b1_p = -1.15f, b2_p = 0.45f; // Presence
-            const float a1_p = -1.15f, a2_p = 0.45f;
-            static float x1_a=0, x2_a=0, y1_a=0, y2_a=0;
-            static float x1_p=0, x2_p=0, y1_p=0, y2_p=0;
-
-            for (size_t i = 0; i < samplesThisChunk; i++) {
-                float x = (float)micProcessingBuf[i];
-                float y_a = b0_a*x + b1_a*x1_a + b2_a*x2_a - a1_a*y1_a - a2_a*y2_a;
-                x2_a = x1_a; x1_a = x; y2_a = y1_a; y1_a = y_a;
-                float y_p = b0_p*y_a + b1_p*x1_p + b2_p*x2_p - a1_p*y1_p - a2_p*y2_p;
-                x2_p = x1_p; x1_p = y_a; y2_p = y1_p; y1_p = y_p;
-                if (y_p > 32767.f) y_p = 32767.f; if (y_p < -32768.f) y_p = -32768.f;
-                micProcessingBuf[i] = (int16_t)y_p;
-            }
-        }
 
         // --- STAGE 5: AI Polishing (DeepFilterNet Layer 2) ---
-        deepFilter_.process(
-            micProcessingBuf.data(), 
-            samplesThisChunk, 
-            outChunk.data(), 
-            config.enableBleedReduction ? intAecRef.data() : nullptr, 
-            config.enableBleedReduction, 
-            config.enableNoiseReduction
-        );
+        if (deepFilter_) {
+            deepFilter_->process(
+                micProcessingBuf.data(), 
+                samplesThisChunk, 
+                outChunk.data(), 
+                config.enableBleedReduction ? intMono.data() : nullptr, 
+                config.enableBleedReduction, 
+                config.enableNoiseReduction
+            );
+        } else {
+             // Fallback: Just copy input to output if DFN is not loaded but loop expects outChunk to be filled
+             std::copy(micProcessingBuf.begin(), micProcessingBuf.begin() + samplesThisChunk, outChunk.begin());
+        }
 
         // --- STAGE 6: Broadcast Dynamics (Comp + Limit) + Mix ---
-        std::vector<int16_t> mixBuf(samplesThisChunk); // New buffer for the final mix
+        std::vector<int16_t> mixBuf(samplesThisChunk * 2); // Final Mix is ALWAYS Stereo
         for (size_t i = 0; i < samplesThisChunk; i++) {
             float processedMic = (float)outChunk[i];
 
             if (config.enableStudioMaster) {
-                // Compressor (Soft-Knee)
+                // --- STAGE 5.5: Broadcast EQ (Post-AI) ---
+                // Gentle low-shelf boost for warmth, high-shelf for clarity
+                // Low-shelf: +3dB @ 150Hz, High-shelf: +2dB @ 4kHz (approx)
+                const float ls_b0 = 1.02f, ls_b1 = -1.92f, ls_b2 = 0.91f;
+                const float ls_a1 = -1.92f, ls_a2 = 0.93f;
+                const float hs_b0 = 1.04f, hs_b1 = -1.85f, hs_b2 = 0.82f;
+                const float hs_a1 = -1.85f, hs_a2 = 0.86f;
+
+                float x = processedMic;
+                float y_ls = ls_b0*x + ls_b1*x1_a + ls_b2*x2_a - ls_a1*y1_a - ls_a2*y2_a;
+                x2_a = x1_a; x1_a = x; y2_a = y1_a; y1_a = y_ls;
+                float y_hs = hs_b0*y_ls + hs_b1*x1_p + hs_b2*x2_p - hs_a1*y1_p - hs_a2*y2_p;
+                x2_p = x1_p; x1_p = y_ls; y2_p = y1_p; y1_p = y_hs;
+                processedMic = y_hs;
+
+                // --- STAGE 6: Broadcast Dynamics (Gentle Compressor + Limiter) ---
+                // Soft-Knee Compressor with higher threshold (0.4 = ~-8dB)
                 float env = std::abs(processedMic / 32768.0f);
-                float targetGain = (env > 0.15f) ? (0.15f + (env - 0.15f) * 0.25f) / env : 1.0f;
+                float threshold = 0.4f;
+                float ratio = 3.0f; // 3:1 ratio
+                float targetGain = 1.0f;
+                if (env > threshold) {
+                    targetGain = (threshold + (env - threshold) / ratio) / env;
+                }
                 float factor = (targetGain < compGain) ? COMP_ATTACK : COMP_RELEASE;
                 compGain = (1.0f - factor) * compGain + factor * targetGain;
                 processedMic *= compGain;
 
-                // Safety Limiter
+                // Makeup Gain (+6dB for broadcast loudness)
+                processedMic *= 2.0f;
+
+                // Safety Limiter (Soft Clip)
+                if (processedMic > 30000.0f) processedMic = 30000.0f + (processedMic - 30000.0f) * 0.1f;
+                if (processedMic < -30000.0f) processedMic = -30000.0f + (processedMic + 30000.0f) * 0.1f;
                 if (processedMic > 32000.0f) processedMic = 32000.0f;
                 if (processedMic < -32000.0f) processedMic = -32000.0f;
             }
 
-            // --- FINAL MIXING ---
-            float gameOrig = (float)intBuf[i];
-            float gameToMix = gameOrig;
-            if (totalLatencySamples > 0) {
-                gameToMix = (float)internalDelayLine[delayWriteIdx];
-                internalDelayLine[delayWriteIdx] = (int16_t)gameOrig;
-                delayWriteIdx = (delayWriteIdx + 1) % totalLatencySamples;
+            // Combine Mic (Mono processed) + Internal (Original)
+            // Final Mix is ALWAYS Stereo (2 channels) for compatibility
+            if (config.internalChannels == 2) {
+                float gameL = (float)intBuf[i * 2];
+                float gameR = (float)intBuf[i * 2 + 1];
+                
+                // Mix mono processed mic to both channels
+                float mixL = (processedMic * config.micGain) + (gameL * config.internalGain);
+                float mixR = (processedMic * config.micGain) + (gameR * config.internalGain);
+                
+                mixBuf[i * 2] = (int16_t)std::clamp(mixL, -32768.0f, 32767.0f);
+                mixBuf[i * 2 + 1] = (int16_t)std::clamp(mixR, -32768.0f, 32767.0f);
+            } else {
+                float gameMono = (float)intBuf[i];
+                float mixed = (processedMic * config.micGain) + (gameMono * config.internalGain);
+                int16_t val = (int16_t)std::clamp(mixed, -32768.0f, 32767.0f);
+                mixBuf[i * 2] = val;
+                mixBuf[i * 2 + 1] = val;
             }
-
-            // Combine Mic (Gained) + Internal (Gained)
-            float mixed = (processedMic * config.micGain) + (gameToMix * config.internalGain);
-            
-            // Final Brickwall to avoid file-level clip
-            if (mixed > 32767.0f) mixed = 32767.0f;
-            if (mixed < -32768.0f) mixed = -32768.0f;
-            mixBuf[i] = (int16_t)mixed;
         }
 
-        // Write to temp file
-        mixOut.write(reinterpret_cast<char*>(mixBuf.data()), samplesThisChunk * sizeof(int16_t));
+        // Write to temp file (Always Stereo)
+        mixOut.write(reinterpret_cast<char*>(mixBuf.data()), samplesThisChunk * 2 * sizeof(int16_t));
+        
+        // --- STAGE 7: Separate Track Exports (INCL. POLISH) ---
+        if (config.exportMicOnly && micExportOut.is_open()) {
+            // Write processed mono mic
+            micExportOut.write(reinterpret_cast<char*>(outChunk.data()), samplesThisChunk * sizeof(int16_t));
+        }
+
+        if (config.exportInternalOnly && intExportOut.is_open()) {
+            // Write original internal audio (stereo or mono as is)
+            intExportOut.write(reinterpret_cast<char*>(intBuf.data()), intReadSamples * sizeof(int16_t));
+        }
+
         processedSamples += samplesThisChunk;
 
         if (onProgress && totalSamples > 0 && (processedSamples % (samplesThisChunk * 10) == 0)) {
@@ -267,12 +305,29 @@ bool PostProcessor::process(const Config& config) {
     micFile.close();
     intFile.close();
     mixOut.close();
+    if (micExportOut.is_open()) micExportOut.close();
+    if (intExportOut.is_open()) intExportOut.close();
     LOGI("Processing complete. %zu samples.", processedSamples);
 
     if (shouldCancel_.load()) return false;
 
-    // 4. Muxing
-    if (onProgress) onProgress(0.6f, "Muxing Final Video...");
+    // --- STAGE 8: Separate Track Muxing (M4A) ---
+    if (config.exportMicOnly && !config.micExportPath.empty()) {
+        std::string tempMicPCM = config.micExportPath + ".pcm.tmp";
+        if (onProgress) onProgress(0.85f, "Exporting Mic Track...");
+        encodeAudioOnly(tempMicPCM, config.micExportPath, config.sampleRate, config.audioBitrate, 1);
+        unlink(tempMicPCM.c_str());
+    }
+
+    if (config.exportInternalOnly && !config.internalExportPath.empty()) {
+        std::string tempIntPCM = config.internalExportPath + ".pcm.tmp";
+        if (onProgress) onProgress(0.9f, "Exporting Internal Track...");
+        encodeAudioOnly(tempIntPCM, config.internalExportPath, config.sampleRate, config.audioBitrate, config.internalChannels);
+        unlink(tempIntPCM.c_str());
+    }
+
+    // 4. Muxing Final Video
+    if (onProgress) onProgress(0.95f, "Muxing Final Video...");
     bool success = muxVideoWithAudioFromFd(tempMixPath, videoFd, finalOutputPath, config.sampleRate, config.audioBitrate);
     unlink(tempMixPath.c_str());
     return success;
@@ -320,6 +375,8 @@ bool PostProcessor::muxVideoWithAudioFromFd(
     AMediaMuxer* muxer = AMediaMuxer_new(fd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
     AMediaExtractor* extractor = AMediaExtractor_new();
     
+    // Ensure video FD is at the beginning
+    lseek(videoFd, 0, SEEK_SET);
     media_status_t err = AMediaExtractor_setDataSourceFd(extractor, videoFd, 0, st.st_size);
     if (err != AMEDIA_OK) {
         LOGE("Failed to set extractor data source FD: %d, error: %d", videoFd, err);
@@ -366,7 +423,7 @@ bool PostProcessor::muxVideoWithAudioFromFd(
     // AMEDIAFORMAT_KEY_AAC_PROFILE constant is for LC profile (2)
     AMediaFormat_setInt32(audioFormat, AMEDIAFORMAT_KEY_AAC_PROFILE, 2); 
     AMediaFormat_setInt32(audioFormat, AMEDIAFORMAT_KEY_SAMPLE_RATE, sampleRate);
-    AMediaFormat_setInt32(audioFormat, AMEDIAFORMAT_KEY_CHANNEL_COUNT, 1); // Mono output to match recording
+    AMediaFormat_setInt32(audioFormat, AMEDIAFORMAT_KEY_CHANNEL_COUNT, 2); // Stereo output for better compatibility
     AMediaFormat_setInt32(audioFormat, AMEDIAFORMAT_KEY_BIT_RATE, audioBitrate);
     AMediaCodec_configure(audioCodec, audioFormat, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
     media_status_t startStatus = AMediaCodec_start(audioCodec);
@@ -425,13 +482,17 @@ bool PostProcessor::muxVideoWithAudioFromFd(
             if (idx >= 0) {
                 size_t bufSize;
                 uint8_t* buf = AMediaCodec_getInputBuffer(audioCodec, idx, &bufSize);
+                
+                // mixFile is already Stereo (2 channels), so we read directly
                 mixFile.read(reinterpret_cast<char*>(buf), bufSize);
                 size_t read = mixFile.gcount();
+                
                 if (read > 0) {
-                    // PTS Calculation: (Samples / SampleRate) * 1,000,000 us
-                    // We must offset audio by the first video PTS to maintain A/V sync
+                    // PTS Calculation
                     int64_t audioOffset = (firstVideoPts > 0) ? firstVideoPts : 0;
-                    int64_t pts = audioOffset + ((bytesProcessed / sizeof(int16_t)) * 1000000LL / sampleRate);
+                    // bytesProcessed is in Stereo bytes
+                    int64_t pts = audioOffset + ((bytesProcessed / (2 * sizeof(int16_t))) * 1000000LL / sampleRate);
+                    
                     AMediaCodec_queueInputBuffer(audioCodec, idx, 0, read, pts, 0);
                     bytesProcessed += read;
                     didSomething = true;
@@ -455,8 +516,12 @@ bool PostProcessor::muxVideoWithAudioFromFd(
             didSomething = true;
         } else if (idx >= 0) {
             if (muxerStarted && info.size > 0) {
-                 // PTS safety check? 
                  uint8_t* buf = AMediaCodec_getOutputBuffer(audioCodec, idx, nullptr);
+                 // Diagnostic check for non-zero encoded data
+                 static int muxLogCounter = 0;
+                 if (muxLogCounter++ % 100 == 0) {
+                     LOGI("MuxAudio: PTS=%lld size=%d flags=%d", (long long)info.presentationTimeUs, info.size, info.flags);
+                 }
                  AMediaMuxer_writeSampleData(muxer, muxerAudioTrackIdx, buf, &info);
             }
             if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
@@ -536,6 +601,92 @@ bool PostProcessor::muxVideoWithAudioFromFd(
         LOGE("muxVideoWithAudioFromFile: Muxer never started or audio failed. Returning false.");
         return false;
     }
+    return true;
+}
+
+bool PostProcessor::encodeAudioOnly(
+    const std::string& pcmPath,
+    const std::string& outputPath,
+    int sampleRate,
+    int audioBitrate,
+    int numChannels
+) {
+    LOGI("Encoding Audio Only: %s -> %s (%d channels)", pcmPath.c_str(), outputPath.c_str(), numChannels);
+    
+    std::ifstream pcmFile(pcmPath, std::ios::binary | std::ios::ate);
+    size_t totalBytes = pcmFile.tellg();
+    pcmFile.seekg(0, std::ios::beg);
+    
+    if (totalBytes == 0 || totalBytes == (size_t)-1) {
+        LOGE("PCM file is empty or missing: %s", pcmPath.c_str());
+        return false;
+    }
+
+    int fd = open(outputPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    if (fd < 0) return false;
+
+    AMediaMuxer* muxer = AMediaMuxer_new(fd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
+    AMediaCodec* codec = AMediaCodec_createEncoderByType("audio/mp4a-latm");
+    AMediaFormat* format = AMediaFormat_new();
+    AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, "audio/mp4a-latm");
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_AAC_PROFILE, 2); 
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_SAMPLE_RATE, sampleRate);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_CHANNEL_COUNT, numChannels);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, audioBitrate);
+    
+    AMediaCodec_configure(codec, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
+    AMediaCodec_start(codec);
+
+    bool eosInput = false;
+    bool eosOutput = false;
+    int trackIdx = -1;
+    size_t bytesRead = 0;
+    std::vector<uint8_t> buffer(64 * 1024);
+
+    while (!eosOutput && !shouldCancel_.load()) {
+        if (!eosInput) {
+            ssize_t idx = AMediaCodec_dequeueInputBuffer(codec, 0);
+            if (idx >= 0) {
+                size_t bufSize;
+                uint8_t* buf = AMediaCodec_getInputBuffer(codec, idx, &bufSize);
+                pcmFile.read(reinterpret_cast<char*>(buf), bufSize);
+                size_t read = pcmFile.gcount();
+                if (read > 0) {
+                    int64_t pts = (bytesRead / (numChannels * sizeof(int16_t))) * 1000000LL / sampleRate;
+                    AMediaCodec_queueInputBuffer(codec, idx, 0, read, pts, 0);
+                    bytesRead += read;
+                } else {
+                    AMediaCodec_queueInputBuffer(codec, idx, 0, 0, 0, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+                    eosInput = true;
+                }
+            }
+        }
+
+        AMediaCodecBufferInfo info;
+        ssize_t idx = AMediaCodec_dequeueOutputBuffer(codec, &info, 0);
+        if (idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
+            AMediaFormat* newFmt = AMediaCodec_getOutputFormat(codec);
+            trackIdx = AMediaMuxer_addTrack(muxer, newFmt);
+            AMediaMuxer_start(muxer);
+            AMediaFormat_delete(newFmt);
+        } else if (idx >= 0) {
+            if (trackIdx >= 0 && info.size > 0) {
+                uint8_t* outBuf = AMediaCodec_getOutputBuffer(codec, idx, nullptr);
+                AMediaMuxer_writeSampleData(muxer, trackIdx, outBuf, &info);
+            }
+            if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) eosOutput = true;
+            AMediaCodec_releaseOutputBuffer(codec, idx, false);
+        }
+    }
+
+    AMediaCodec_stop(codec);
+    AMediaCodec_delete(codec);
+    AMediaFormat_delete(format);
+    if (trackIdx >= 0) AMediaMuxer_stop(muxer);
+    AMediaMuxer_delete(muxer);
+    close(fd);
+    pcmFile.close();
+    
     return true;
 }
 

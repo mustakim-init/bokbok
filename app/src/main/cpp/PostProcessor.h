@@ -27,7 +27,10 @@ public:
         int qualityMode = 1; 
         bool exportMicOnly = false;
         bool exportInternalOnly = false;
+        std::string micExportPath;
+        std::string internalExportPath;
         int numChannels = 1;
+        int internalChannels = 1; // 1 for mono, 2 for stereo
         int sampleRate = 48000;
         int audioBitrate = 128000;
     };
@@ -48,7 +51,7 @@ public:
 
 private:
     std::atomic<bool> shouldCancel_{false};
-    DeepFilterNet deepFilter_;
+    std::unique_ptr<DeepFilterNet> deepFilter_;
     std::unique_ptr<Aec3Processor> aec3_;  // AEC3 for bleed reduction
     ProgressCallback onProgress_;
 
@@ -60,6 +63,13 @@ private:
         const std::string& outputPath,
         int sampleRate,
         int audioBitrate
+    );
+    bool encodeAudioOnly(
+        const std::string& pcmPath,
+        const std::string& outputPath,
+        int sampleRate,
+        int audioBitrate,
+        int numChannels
     );
 };
 

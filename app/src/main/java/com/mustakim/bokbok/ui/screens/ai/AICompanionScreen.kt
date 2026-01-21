@@ -7,10 +7,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,9 +45,11 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -56,9 +61,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -66,8 +73,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +106,71 @@ fun AICompanionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val selectedImage by viewModel.selectedImage.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
+    val isSpeaking by viewModel.isSpeaking.collectAsState()
+    val isVoiceModeEnabled by viewModel.isVoiceModeEnabled.collectAsState()
+    val ttsMode by viewModel.ttsMode.collectAsState()
+    val amplitude by viewModel.amplitude.collectAsState()
+    val showPermissionDialog by viewModel.showPermissionDialog.collectAsState()
+    val showOverlayPermissionDialog by viewModel.showOverlayPermissionDialog.collectAsState()
+    
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPermissionDialog() },
+            title = { Text("Accessibility Required") },
+            text = { Text("To use Voice Mode in the background, BokBok AI needs Accessibility permission. If Shizuku is not running, please enable it manually in Settings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissPermissionDialog()
+                    try {
+                        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }) {
+                    Text("Open Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPermissionDialog() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showOverlayPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPermissionDialog() },
+            title = { Text("Overlay Permission Required") },
+            text = { Text("BokBok AI needs permission to show the edge glow and mic button over other apps. Please enable 'Display over other apps'.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissPermissionDialog()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        try {
+                            val intent = android.content.Intent(
+                                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                android.net.Uri.parse("package:${context.packageName}")
+                            )
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                            context.startActivity(intent)
+                        }
+                    }
+                }) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPermissionDialog() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val listState = rememberLazyListState()
@@ -114,10 +188,9 @@ fun AICompanionScreen(
         }
     }
 
-    // Auto scroll to bottom (Index 0 in reverseLayout)
+    // Auto scroll to bottom
     LaunchedEffect(messages?.size, uiState) {
         if (messages != null && (messages!!.isNotEmpty() || uiState is CompanionUiState.Streaming)) {
-            // In reverseLayout, index 0 is at the bottom (newest message)
             listState.animateScrollToItem(0)
         }
     }
@@ -127,12 +200,10 @@ fun AICompanionScreen(
         onResult = { uri -> viewModel.selectImage(uri) }
     )
 
-    // Right-to-Left Drawer trick: Use CompositionLocal to flip the direction for the drawer
     CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
-                // Return to Ltr for drawer content so text isn't flipped
                 CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr) {
                     ModalDrawerSheet(
                         modifier = Modifier.fillMaxHeight().width(300.dp),
@@ -155,7 +226,6 @@ fun AICompanionScreen(
                 }
             }
         ) {
-            // Main Content - Back to Ltr
             CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr) {
                 Scaffold(
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -193,127 +263,216 @@ fun AICompanionScreen(
                         )
                     }
                 ) { padding ->
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
                             .background(MaterialTheme.colorScheme.surface)
                     ) {
-                        // Message List Area
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                        ) {
-                            if (messages == null) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator()
-                                }
-                            } else {
-                                LazyColumn(
-                                    state = listState,
-                                    reverseLayout = true,
-                                    contentPadding = PaddingValues(vertical = 16.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    // 0. Empty State (If no messages)
-                                    if (groupedMessages.isNullOrEmpty() && uiState is CompanionUiState.Idle) {
-                                        item {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(bottom = 100.dp) // Visual lift from bottom
-                                            ) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Message List Area
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            ) {
+                                if (messages == null) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator()
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        state = listState,
+                                        reverseLayout = true,
+                                        contentPadding = PaddingValues(bottom = 140.dp, top = 16.dp),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        if (groupedMessages.isNullOrEmpty() && uiState is CompanionUiState.Idle) {
+                                            item {
                                                 EmptyCompanionState(
                                                     onSuggestionClick = { viewModel.onInputChange(it) },
-                                                    modifier = Modifier.align(Alignment.Center)
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // 1. Loading / Streaming Indicators
-                                    when (val state = uiState) {
-                                        is CompanionUiState.Generating -> {
-                                            item(key = "generating_indicator") {
-                                                AIMessageBubble(
-                                                    message = com.mustakim.bokbok.data.model.AIMessage(
-                                                        conversationId = "generating",
-                                                        role = com.mustakim.bokbok.data.model.MessageRole.ASSISTANT,
-                                                        content = ""
-                                                    ),
-                                                    isGenerating = true
+                                                    modifier = Modifier.fillMaxWidth().padding(top = 100.dp)
                                                 )
                                             }
                                         }
 
-                                        is CompanionUiState.Streaming -> {
-                                            item(key = "streaming_indicator") {
-                                                AIMessageBubble(
-                                                    message = com.mustakim.bokbok.data.model.AIMessage(
-                                                        conversationId = "streaming",
-                                                        role = com.mustakim.bokbok.data.model.MessageRole.ASSISTANT,
-                                                        content = state.partialResponse
+                                        when (val state = uiState) {
+                                            is CompanionUiState.Generating -> {
+                                                item(key = "generating_indicator") {
+                                                    AIMessageBubble(
+                                                        message = com.mustakim.bokbok.data.model.AIMessage(
+                                                            conversationId = "generating",
+                                                            role = com.mustakim.bokbok.data.model.MessageRole.ASSISTANT,
+                                                            content = ""
+                                                        ),
+                                                        isGenerating = true
                                                     )
-                                                )
+                                                }
                                             }
-                                        }
 
-                                        is CompanionUiState.Error -> {
-                                            item(key = "error_indicator") {
-                                                Text(
-                                                    text = "Error: ${state.message}",
-                                                    color = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.padding(16.dp)
-                                                )
+                                            is CompanionUiState.Streaming -> {
+                                                item(key = "streaming_indicator") {
+                                                    AIMessageBubble(
+                                                        message = com.mustakim.bokbok.data.model.AIMessage(
+                                                            conversationId = "streaming",
+                                                            role = com.mustakim.bokbok.data.model.MessageRole.ASSISTANT,
+                                                            content = state.partialResponse
+                                                        )
+                                                    )
+                                                }
                                             }
+
+                                            is CompanionUiState.Error -> {
+                                                item(key = "error_indicator") {
+                                                    Text(
+                                                        text = "Error: ${state.message}",
+                                                        color = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.padding(16.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            else -> {}
                                         }
 
-                                        else -> {}
-                                    }
-
-                                    // 2. Messages (Newest first)
-                                    val reversedGroups = groupedMessages?.entries?.toList()?.reversed()
-                                    
-                                    reversedGroups?.forEach { (date, messageList) ->
-                                        items(
-                                            items = messageList.reversed(),
-                                            key = { it.id }
-                                        ) { message ->
-                                            AIMessageBubble(message = message)
-                                        }
-                                        
-                                        item(key = "header_$date") {
-                                            MessageDateHeader(date = date)
+                                        val reversedGroups = groupedMessages?.entries?.toList()?.reversed()
+                                        reversedGroups?.forEach { (date, messageList) ->
+                                            items(
+                                                items = messageList.reversed(),
+                                                key = { it.id }
+                                            ) { message ->
+                                                AIMessageBubble(message = message)
+                                            }
+                                            item(key = "header_$date") {
+                                                MessageDateHeader(date = date)
+                                            }
                                         }
                                     }
                                 }
                             }
+
+                            AIInputArea(
+                                inputText = inputText,
+                                onInputChange = viewModel::onInputChange,
+                                onSendMessage = viewModel::sendMessage,
+                                selectedImage = selectedImage,
+                                onSelectImage = {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                                onClearImage = viewModel::clearImage,
+                                isListening = isVoiceModeEnabled,
+                                onStartVoice = viewModel::toggleVoiceMode,
+                                ttsMode = ttsMode,
+                                onTtsModeChange = viewModel::setTtsMode
+                            )
                         }
 
-                        // Refined Input Area Component
-                        AIInputArea(
-                            inputText = inputText,
-                            onInputChange = viewModel::onInputChange,
-                            onSendMessage = viewModel::sendMessage,
-                            selectedImage = selectedImage,
-                            onSelectImage = {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                        // Premium Voice Interaction Overlay
+                        if (isVoiceModeEnabled && (isListening || isSpeaking)) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .background(
+                                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                                                MaterialTheme.colorScheme.surface
+                                            )
+                                        )
+                                    ),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    GeminiVisualizer(
+                                        amplitude = amplitude,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(140.dp)
                                     )
-                                )
-                            },
-                            onClearImage = viewModel::clearImage,
-                            isListening = isListening,
-                            onStartVoice = viewModel::startVoiceInput
-                        )
+                                    Text(
+                                        text = if (isListening) "I'm listening..." else "BokBok is speaking...",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(bottom = 32.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun GeminiVisualizer(
+    amplitude: Float,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition()
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        )
+    )
+
+    // Smoothly interpolate amplitude for visual stability
+    val animatedAmplitude by animateFloatAsState(
+        targetValue = amplitude.coerceIn(0f, 10000f) / 10000f,
+        animationSpec = tween(150),
+        label = "amplitude"
+    )
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val centerY = height / 2f
+        
+        val colors = listOf(
+            Color(0xFF4285F4), // Blue
+            Color(0xFFEA4335), // Red
+            Color(0xFFFBBC05), // Yellow
+            Color(0xFF34A853)  // Green
+        )
+
+        colors.forEachIndexed { index, color ->
+            val path = androidx.compose.ui.graphics.Path()
+            val speed = 1f + index * 0.3f
+            val frequency = 0.008f + index * 0.004f
+            val waveHeight = (height * 0.1f) + (animatedAmplitude * height * 0.4f)
+            
+            path.moveTo(0f, centerY)
+            for (x in 0..width.toInt() step 4) {
+                val xFloat = x.toFloat()
+                // Complex wave formula for "living" feel
+                val y = centerY + waveHeight * 
+                        kotlin.math.sin(xFloat * frequency + phase * speed + index) *
+                        kotlin.math.cos(xFloat * frequency * 0.5f + phase * 0.5f)
+                path.lineTo(xFloat, y)
+            }
+            
+            drawPath(
+                path = path,
+                color = color.copy(alpha = 0.5f),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = (4 + index).dp.toPx(),
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round
+                )
+            )
         }
     }
 }
@@ -381,17 +540,28 @@ fun AIInputArea(
     onSelectImage: () -> Unit,
     onClearImage: () -> Unit,
     isListening: Boolean,
-    onStartVoice: () -> Unit
+    onStartVoice: () -> Unit,
+    ttsMode: com.mustakim.bokbok.viewmodel.AICompanionViewModel.TtsMode,
+    onTtsModeChange: (com.mustakim.bokbok.viewmodel.AICompanionViewModel.TtsMode) -> Unit
 ) {
+    var showSettings by remember { mutableStateOf(false) }
+
+    if (showSettings) {
+        VoiceSettingsDialog(
+            ttsMode = ttsMode,
+            onTtsModeChange = onTtsModeChange,
+            onDismiss = { showSettings = false }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .navigationBarsPadding()
-            .imePadding() // Localized here for smooth content push
-            .padding(16.dp) // Proper visual padding on all sides
+            .imePadding()
+            .padding(16.dp)
     ) {
-        // Selected Image Preview
         if (selectedImage != null) {
             Box(
                 modifier = Modifier
@@ -421,7 +591,7 @@ fun AIInputArea(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp))
-                .padding(horizontal = 4.dp, vertical = 4.dp), // Thinner inner padding for the pill
+                .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
@@ -432,6 +602,18 @@ fun AIInputArea(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add Image",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            IconButton(
+                onClick = { showSettings = true },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Voice Settings",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
@@ -455,8 +637,7 @@ fun AIInputArea(
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     maxLines = 5,
-                    modifier = Modifier
-                        .fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
@@ -628,6 +809,153 @@ fun VoiceInputButton(
                 contentDescription = "Voice Input",
                 tint = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+@Composable
+fun VoiceSettingsDialog(
+    ttsMode: AICompanionViewModel.TtsMode,
+    onTtsModeChange: (AICompanionViewModel.TtsMode) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Voice Settings")
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Text-to-Speech Engine",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTtsModeChange(AICompanionViewModel.TtsMode.LEGACY) }
+                        .padding(vertical = 12.dp)
+                ) {
+                    RadioButton(
+                        selected = ttsMode == AICompanionViewModel.TtsMode.LEGACY,
+                        onClick = { onTtsModeChange(AICompanionViewModel.TtsMode.LEGACY) }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Standard (Legacy)",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "Fast, uses system engine",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
+                        .padding(vertical = 12.dp)
+                ) {
+                    RadioButton(
+                        selected = ttsMode == AICompanionViewModel.TtsMode.QUALITY,
+                        onClick = { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Sherpa-ONNX (Neural)",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "High quality, offline AI model",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Language Management",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                LanguageDownloadItem(
+                    langName = "English (US)",
+                    langCode = "en",
+                    viewModel = hiltViewModel()
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                LanguageDownloadItem(
+                    langName = "Bengali (Bangla)",
+                    langCode = "bn",
+                    viewModel = hiltViewModel()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        }
+    )
+}
+
+@Composable
+fun LanguageDownloadItem(
+    langName: String,
+    langCode: String,
+    viewModel: AICompanionViewModel
+) {
+    val downloadedLangs by viewModel.downloadedLanguages.collectAsState(initial = emptyList())
+    val isDownloaded = downloadedLangs.contains(langCode)
+    val downloadInfo by viewModel.getDownloadStatus(langCode).collectAsState(initial = null)
+    
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = langName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            if (downloadInfo != null && downloadInfo == androidx.work.WorkInfo.State.RUNNING) {
+                Text(text = "Downloading...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            } else if (isDownloaded) {
+                Text(text = "Ready", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34A853))
+            } else {
+                Text(text = "Not downloaded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        
+        if (!isDownloaded && downloadInfo != androidx.work.WorkInfo.State.RUNNING) {
+            Button(
+                onClick = { viewModel.downloadLanguage(langCode) },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Download", style = MaterialTheme.typography.labelMedium)
+            }
+        } else if (downloadInfo == androidx.work.WorkInfo.State.RUNNING) {
+            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF34A853), modifier = Modifier.size(24.dp))
         }
     }
 }

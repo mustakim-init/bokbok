@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -52,6 +54,10 @@ import com.mustakim.bokbok.model.RecordConfig
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.delay
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.res.painterResource
+import com.mustakim.bokbok.R
 
 /**
  * A floating HUD overlay for recording controls.
@@ -89,6 +95,47 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     init {
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+    }
+
+    fun setVisibility(visible: Boolean) {
+        hudContainer.visibility = if (visible) View.VISIBLE else View.GONE
+        drawingComposeView.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+    
+    private object KaptureDimens {
+        val MenuRadius = 20.dp
+        val BorderWidth = 0.7.dp
+        
+        val IconMainSize = 36.dp
+        val IconSecondarySize = 25.dp
+        val IconPadding = 5.5.dp
+        val IconSecondaryPadding = 3.5.dp
+        val DividerSpacer = 3.dp
+        
+        val MinimizedWidth = 5.dp
+        val MinimizedHeight = 36.dp
+    }
+    
+    private object KaptureColors {
+        val BackgroundDay = Color(0xD2FFFFFF) 
+        val BackgroundNight = Color(0xD2000000)
+        
+        val BorderDay = Color(0xFF808080)
+        val BorderNight = Color(0xFF5E5E5E)
+        
+        val IconDay = Color(0xFF2B2B2B)
+        val IconNight = Color(0xFFEDEDED)
+        
+        val IconSecondaryDay = Color(0xFF808080)
+        val IconSecondaryNight = Color(0xFF5E5E5E)
+        
+        val TextDay = Color(0xFF2B2B2B)
+        val TextNight = Color(0xFFEDEDED)
+        
+        val TextSecondaryDay = Color(0xFF5E5E5E)
+        val TextSecondaryNight = Color(0xFF979797)
+        
+        val StopBackground = Color(0xFFEB3B2E)
     }
 
     fun show(
@@ -147,6 +194,13 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
         }
 
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        
+        // Add drawing view FIRST so it is below the HUD
+        // Initially not touchable
+        drawingLayoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        windowManager.addView(drawingComposeView, drawingLayoutParams)
+        
+        // Add HUD view SECOND so it is on top
         windowManager.addView(hudContainer, hudLayoutParams)
 
         hudContainer.initDrag(windowManager, hudLayoutParams) { savePosition() }
@@ -169,24 +223,18 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
 
     private fun toggleDrawingMode(enabled: Boolean) {
         isDrawingModeEnabled = enabled
+        
+        // Just update flags; the view is already added at the bottom of the stack
         drawingLayoutParams.flags = if (enabled) {
+            // Touchable
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         } else {
+            // Not touchable
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         }
         
         try {
-            if (enabled) {
-                try {
-                    windowManager.addView(drawingComposeView, drawingLayoutParams)
-                } catch (e: Exception) {
-                    windowManager.updateViewLayout(drawingComposeView, drawingLayoutParams)
-                }
-            } else {
-                try {
-                    windowManager.removeView(drawingComposeView)
-                } catch (_: Exception) {}
-            }
+            windowManager.updateViewLayout(drawingComposeView, drawingLayoutParams)
         } catch (_: Exception) {}
     }
 
@@ -196,27 +244,18 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     
     private var currentColor by mutableStateOf(Color.Red)
     private var currentWidth by mutableFloatStateOf(4f)
-    
-    private var internalRms by mutableFloatStateOf(0f)
-    private var micRms by mutableFloatStateOf(0f)
 
-    fun updateLevels(levels: FloatArray) {
-        if (levels.size >= 4) {
-            micRms = levels[0]
-            internalRms = levels[2]
-        }
-    }
 
     private fun undo() {
         if (drawPaths.isNotEmpty()) {
-            val last = drawPaths.removeLast()
+            val last = drawPaths.removeAt(drawPaths.lastIndex)
             undonePaths.add(last)
         }
     }
 
     private fun redo() {
         if (undonePaths.isNotEmpty()) {
-            val last = undonePaths.removeLast()
+            val last = undonePaths.removeAt(undonePaths.lastIndex)
             drawPaths.add(last)
         }
     }
@@ -227,7 +266,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
             recentColors.remove(color)
         }
         recentColors.add(0, color)
-        if (recentColors.size > 5) recentColors.removeLast()
+        if (recentColors.size > 5) recentColors.removeAt(recentColors.lastIndex)
     }
     
     private fun captureDrawingLayer() {
@@ -326,7 +365,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                     modifier = Modifier.padding(vertical = 3.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    HUDContent(config, isVertical, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
+                    HUDItems(config, isVertical, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
                         togglePause = { 
                             isPaused = !isPaused
                             if (isPaused) onPauseCallback?.invoke() else onResumeCallback?.invoke()
@@ -344,7 +383,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                     modifier = Modifier.padding(horizontal = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    HUDContent(config, isVertical, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
+                    HUDItems(config, isVertical, isPaused, isMinimized, isDrawingMode, showShortcuts, elapsedSeconds,
                         togglePause = { 
                             isPaused = !isPaused
                             if (isPaused) onPauseCallback?.invoke() else onResumeCallback?.invoke()
@@ -362,7 +401,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     }
 
     @Composable
-    private fun HUDContent(
+    private fun HUDItems(
         config: RecordConfig,
         isVertical: Boolean,
         isPaused: Boolean,
@@ -385,24 +424,104 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
             return
         }
 
-        val kaptureIconColor = Color(0xFF2B2B2B)
-        val kaptureSecondaryIcon = Color(0xFF808080)
+        val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+        val iconColor = if (isDarkTheme) KaptureColors.IconNight else KaptureColors.IconDay
+        val iconSecondaryColor = if (isDarkTheme) KaptureColors.IconSecondaryNight else KaptureColors.IconSecondaryDay
         
         val items = mutableListOf<@Composable () -> Unit>()
 
-        // 1. Stop Button
+        // 1. Padding + Stop Button
+        // Added a 4dp spacer at the start to prevent the button from hugging the edge
+        items.add { 
+            Spacer(modifier = if (isVertical) Modifier.height(4.dp) else Modifier.width(4.dp))
+        }
+
         items.add {
-            IconButton(
-                onClick = { hide(); onStopCallback?.invoke() }, 
+            Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .background(Color(0xFFEB3B2E), RoundedCornerShape(20.dp))
+                    .size(KaptureDimens.IconMainSize) // 36dp circle
+                    .background(KaptureColors.StopBackground, CircleShape)
+                    .clickable { hide(); onStopCallback?.invoke() },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Stop, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                // Centered white square
+                androidx.compose.foundation.Canvas(modifier = Modifier.size(14.dp)) {
+                    drawRoundRect(color = Color.White, cornerRadius = CornerRadius(2.dp.toPx()))
+                }
             }
         }
 
-        // 2. Timer
+        // Helper for Dividers (Transparent Spacer)
+        val Divider = @Composable {
+            if (isVertical) {
+                Spacer(Modifier.height(KaptureDimens.DividerSpacer))
+            } else {
+                Spacer(Modifier.width(KaptureDimens.DividerSpacer))
+            }
+        }
+
+        // 2. Tools
+        if (config.showPauseResumeOnMenu) {
+            items.add { 
+                KaptureIconBtn(
+                    icon = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, 
+                    tint = if (isPaused) Color(0xFF4CAF50) else iconColor, 
+                    size = KaptureDimens.IconMainSize,
+                    padding = KaptureDimens.IconPadding,
+                    onClick = togglePause
+                ) 
+            }
+        }
+        
+        if (config.showCameraButtonOnMenu || config.showFacecam) {
+            items.add { 
+                KaptureIconBtn(
+                    icon = Icons.Default.Videocam, 
+                    tint = iconColor,
+                    size = KaptureDimens.IconMainSize,
+                    padding = KaptureDimens.IconPadding,
+                    onClick = { onToggleFacecamCallback?.invoke() }
+                ) 
+            }
+        }
+        
+        if (config.showDrawButtonOnMenu) {
+            items.add { 
+                KaptureIconBtn(
+                    icon = Icons.Default.Edit, 
+                    tint = if (isDrawingMode) Color(0xFF2196F3) else iconColor,
+                    size = KaptureDimens.IconMainSize,
+                    padding = KaptureDimens.IconPadding,
+                    onClick = toggleDrawing
+                ) 
+            }
+        }
+        
+        if (config.showScreenshotButtonOnMenu) {
+            items.add { 
+                KaptureIconBtn(
+                    icon = Icons.Default.Screenshot, 
+                    tint = iconColor,
+                    size = KaptureDimens.IconMainSize,
+                    padding = KaptureDimens.IconPadding,
+                    onClick = { onTakeScreenshotCallback?.invoke() }
+                ) 
+            }
+        }
+
+        if (config.showShortcuts && config.shortcuts.isNotEmpty()) {
+             items.add {
+                KaptureIconBtn(
+                    icon = Icons.Default.Launch,
+                    tint = if (showShortcuts) Color(0xFFEB3B2E) else iconColor,
+                    size = KaptureDimens.IconMainSize,
+                    padding = KaptureDimens.IconPadding,
+                    onClick = toggleShortcuts
+                )
+             }
+        }
+
+        // 3. Time
         if (config.showTimeOnMenu) {
             items.add {
                 val autoStopSeconds = config.autoStopDurationMinutes * 60L
@@ -410,123 +529,77 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
 
                 Column(
                     modifier = Modifier.padding(
-                        horizontal = if (isVertical) 0.dp else 12.dp,
+                        horizontal = if (isVertical) 0.dp else 4.dp, 
                         vertical = if (isVertical) 4.dp else 0.dp
                     ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).background(if (isPaused) Color.Yellow else Color.Red, CircleShape))
-                        Text(formatTime(elapsedSeconds), color = Color(0xFF2B2B2B), fontSize = if (isVertical) 12.sp else 13.sp, fontWeight = FontWeight.Medium)
-                    }
+                    Text(
+                        text = formatTime(elapsedSeconds),
+                        color = if (isDarkTheme) KaptureColors.TextNight else KaptureColors.TextDay,
+                        fontSize = if (isVertical) 12.sp else 13.sp,
+                        fontWeight = FontWeight.Bold 
+                    )
                     
                     if (remainingSeconds >= 0) {
                         Text(
-                            "Ends in: ${formatTime(remainingSeconds)}", 
-                            color = if (remainingSeconds < 60) Color.Red else Color(0xFF5E5E5E),
-                            fontSize = 9.sp
+                            "/ ${formatTime(remainingSeconds)}", 
+                            color = if (isDarkTheme) KaptureColors.TextSecondaryNight else KaptureColors.TextSecondaryDay,
+                            fontSize = if (isVertical) 10.sp else 11.sp
                         )
                     }
-                    
-                    if (!isMinimized) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        AudioLevelMeters(micRms, internalRms, isVertical)
-                    }
                 }
             }
         }
 
-        // 3. Shortcuts
-        if (showShortcuts && config.shortcuts.isNotEmpty()) {
-            config.shortcuts.forEach { pkg ->
-                items.add {
-                    IconButton(onClick = { launchApp(pkg) }, modifier = Modifier.size(36.dp)) {
-                        val icon = remember { getAppIcon(pkg) }
-                        if (icon != null) {
-                            androidx.compose.foundation.Image(bitmap = icon, contentDescription = null, modifier = Modifier.size(24.dp).alpha(0.8f))
-                        } else {
-                            Icon(Icons.Default.Launch, null, tint = Color(0xFF808080), modifier = Modifier.size(24.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Configurable Tools
-        if (config.showPauseResumeOnMenu) {
-            items.add { SmallHudButton(if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, if (isPaused) Color(0xFF4CAF50) else kaptureIconColor, togglePause) }
-        }
-        if (config.showCameraButtonOnMenu) {
-            items.add { SmallHudButton(Icons.Default.PhotoCamera, kaptureIconColor) { onToggleFacecamCallback?.invoke() } }
-        }
-        if (config.showScreenshotButtonOnMenu) {
-            items.add { SmallHudButton(Icons.Default.CameraAlt, kaptureIconColor) { onTakeScreenshotCallback?.invoke() } }
-        }
-        if (config.showDrawButtonOnMenu) {
-            items.add { SmallHudButton(Icons.Default.Edit, if (isDrawingMode) Color(0xFF2196F3) else kaptureIconColor, toggleDrawing) }
-        }
-        
-        if (config.useWatermarkText || config.useWatermarkImage) {
-            items.add { SmallHudButton(Icons.Default.WaterDrop, kaptureIconColor) { onToggleWatermarkCallback?.invoke() } }
-        }
-        
-        val currentOrientationModeState = remember { mutableIntStateOf(0) }
+        // 4. Minimize (Chevron)
         items.add {
-            SmallHudButton(
-                icon = when(currentOrientationModeState.intValue) {
-                    1 -> Icons.Default.ScreenLockPortrait
-                    2 -> Icons.Default.ScreenLockLandscape
-                    else -> Icons.Default.ScreenRotation
-                },
-                tint = if (currentOrientationModeState.intValue == 0) kaptureIconColor else Color(0xFF2196F3)
-            ) {
-                currentOrientationModeState.intValue = (currentOrientationModeState.intValue + 1) % 3
-                android.widget.Toast.makeText(context, when(currentOrientationModeState.intValue) {
-                    1 -> "Locked: Portrait"
-                    2 -> "Locked: Landscape"
-                    else -> "Orientation: Auto"
-                }, android.widget.Toast.LENGTH_SHORT).show()
-            }
+            KaptureIconBtn(
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight, 
+                tint = iconSecondaryColor,
+                size = KaptureDimens.IconSecondarySize,
+                padding = 1.dp, 
+                onClick = toggleMinimize
+            )
+        }
+        
+        // 5. Close Button (Restored per user request)
+        items.add {
+            KaptureIconBtn(
+                icon = Icons.Default.Close, 
+                tint = iconSecondaryColor,
+                size = KaptureDimens.IconSecondarySize,
+                padding = 3.dp,
+                onClick = { hide() }
+            )
         }
 
-        // 5. System Controls
-        if (config.showShortcuts && config.shortcuts.isNotEmpty()) {
-            items.add { SmallHudButton(Icons.Default.Launch, if (showShortcuts) Color(0xFFEB3B2E) else kaptureIconColor, toggleShortcuts) }
-        }
-        items.add { SmallHudButton(Icons.Default.Remove, kaptureSecondaryIcon, toggleMinimize) }
-        items.add { SmallHudButton(Icons.Default.Close, kaptureSecondaryIcon, { hide() }) }
-
+        // Add items with dividers
         items.forEachIndexed { index, item ->
-            if (index > 0) {
-                if (isVertical) {
-                    Box(Modifier.fillMaxWidth().height(0.7.dp).background(Color(0xFFE8E8E8)))
-                } else {
-                    Box(Modifier.fillMaxHeight().width(0.7.dp).background(Color(0xFFE8E8E8)))
-                }
-            }
             item()
+            if (index < items.lastIndex) {
+                 Divider()
+            }
         }
-
+        
+        // Drawing Palette Overlay (Keep existing logic)
         AnimatedVisibility(
             visible = isDrawingMode,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            Column(
+              Column(
                 modifier = Modifier.padding(8.dp).width(IntrinsicSize.Min),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Box(Modifier.fillMaxWidth().height(0.7.dp).background(Color(0xFFE8E8E8)))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     IconButton(onClick = { undo() }, enabled = drawPaths.isNotEmpty()) {
-                        Icon(Icons.Default.Undo, null, tint = if (drawPaths.isNotEmpty()) kaptureIconColor else kaptureSecondaryIcon.copy(0.5f))
+                        Icon(Icons.Default.Undo, null, tint = if (drawPaths.isNotEmpty()) iconColor else iconSecondaryColor.copy(0.5f))
                     }
                     IconButton(onClick = { redo() }, enabled = undonePaths.isNotEmpty()) {
-                        Icon(Icons.Default.Redo, null, tint = if (undonePaths.isNotEmpty()) kaptureIconColor else kaptureSecondaryIcon.copy(0.5f))
+                        Icon(Icons.Default.Redo, null, tint = if (undonePaths.isNotEmpty()) iconColor else iconSecondaryColor.copy(0.5f))
                     }
                     IconButton(onClick = { captureDrawingLayer() }) {
                         Icon(Icons.Default.CameraAlt, null, tint = Color(0xFFEB3B2E))
@@ -537,13 +610,13 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                     (recentColors + listOf(Color.Red, Color.Green, Color.Blue, Color.Yellow, Color.White, Color.Cyan, Color.Magenta)).distinct().take(10).forEach { color ->
                         Box(
                             modifier = Modifier.size(24.dp).background(color, CircleShape)
-                                .border(width = if (currentColor == color) 2.dp else 0.dp, color = kaptureIconColor, shape = CircleShape)
+                                .border(width = if (currentColor == color) 2.dp else 0.dp, color = iconColor, shape = CircleShape)
                                 .clickable { selectColor(color) }
                         )
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.LineWeight, null, tint = kaptureIconColor, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.LineWeight, null, tint = iconColor, modifier = Modifier.size(16.dp))
                     androidx.compose.material3.Slider(
                         value = currentWidth,
                         onValueChange = { currentWidth = it },
@@ -603,34 +676,23 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     }
 
     @Composable
-    private fun SmallHudButton(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color = Color(0xFF2B2B2B), onClick: () -> Unit) {
-        IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
-            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        }
-    }
-
-    @Composable
-    private fun AudioLevelMeters(mic: Float, internal: Float, isVertical: Boolean) {
-        val micLevel by animateFloatAsState(targetValue = mic.coerceIn(0f, 1f), animationSpec = tween(100), label = "")
-        val intLevel by animateFloatAsState(targetValue = internal.coerceIn(0f, 1f), animationSpec = tween(100), label = "")
-        
-        if (isVertical) {
-            Row(modifier = Modifier.width(32.dp).height(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                LevelBar(micLevel, Modifier.weight(1f), Color(0xFF00E676))
-                LevelBar(intLevel, Modifier.weight(1f), Color(0xFF2979FF))
-            }
-        } else {
-            Column(modifier = Modifier.width(32.dp).height(4.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                LevelBar(micLevel, Modifier.fillMaxWidth(), Color(0xFF00E676))
-                LevelBar(intLevel, Modifier.fillMaxWidth(), Color(0xFF2979FF))
-            }
-        }
-    }
-
-    @Composable
-    private fun LevelBar(level: Float, modifier: Modifier, color: Color) {
-        Box(modifier = modifier.background(Color.White.copy(0.1f), RoundedCornerShape(1.dp))) {
-            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(level).background(color, RoundedCornerShape(1.dp)))
+    private fun KaptureIconBtn(
+        icon: androidx.compose.ui.graphics.vector.ImageVector, 
+        tint: Color, 
+        size: Dp,
+        padding: Dp,
+        onClick: () -> Unit
+    ) {
+        IconButton(
+            onClick = onClick, 
+            modifier = Modifier.size(size)
+        ) {
+            Icon(
+                imageVector = icon, 
+                contentDescription = null, 
+                tint = tint, 
+                modifier = Modifier.fillMaxSize().padding(padding) 
+            )
         }
     }
 

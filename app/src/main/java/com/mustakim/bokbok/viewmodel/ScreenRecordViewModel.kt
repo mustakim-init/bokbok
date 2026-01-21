@@ -71,8 +71,6 @@ class ScreenRecordViewModel @Inject constructor(
     private val _processingProgress = MutableStateFlow<Map<Long, Float>>(emptyMap())
     val processingProgress = _processingProgress.asStateFlow()
 
-    private val _audioLevels = MutableStateFlow(floatArrayOf(0f, 0f, 0f, 0f))
-    val audioLevels = _audioLevels.asStateFlow()
 
     // Remote Models
     val modelState = modelRepository.modelState
@@ -109,9 +107,6 @@ class ScreenRecordViewModel @Inject constructor(
             }
             viewModelScope.launch {
                 serviceInstance.processingProgress.collect { _processingProgress.value = it }
-            }
-            viewModelScope.launch {
-                serviceInstance.audioLevels.collect { _audioLevels.value = it }
             }
             
             // Handle pending start request

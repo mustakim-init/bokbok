@@ -69,11 +69,6 @@ struct RecorderContext {
     bokbok::RawAudioWriter micWriter;
     bokbok::RawAudioWriter internalWriter;
     
-    // Audio level metering (Still needed for UI)
-    std::atomic<float> micRmsLevel{0.0f};
-    std::atomic<float> micPeakLevel{0.0f};
-    std::atomic<float> internalRmsLevel{0.0f};
-    std::atomic<float> internalPeakLevel{0.0f};
 
     std::atomic<bool> audioEnabled{false};
 };
@@ -309,7 +304,16 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioBuffer(
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
         JNIEnv* env, jobject thiz, jshortArray micData, jshortArray internalData, jint length) {
-    if (!gCtx || !gCtx->isRecording.load() || gCtx->isPaused.load()) return JNI_FALSE;
+    if (!gCtx || !gCtx->isRecording.load() || gCtx->isPaused.load()) {
+        static int dropLogCounter = 0;
+        if (dropLogCounter++ < 50) { 
+            LOGI("AudioWrite: DROPPED (isRecording=%s isPaused=%s)", 
+                 (gCtx && gCtx->isRecording.load()) ? "true" : "false",
+                 (gCtx && gCtx->isPaused.load()) ? "true" : "false");
+        }
+        return JNI_FALSE;
+    }
+
 
     jsize micLen = env->GetArrayLength(micData);
     jsize intLen = env->GetArrayLength(internalData);
@@ -318,37 +322,23 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
     jshort* internalSamples = (intLen > 0) ? env->GetShortArrayElements(internalData, nullptr) : nullptr;
 
     // 1. Write Raw Data (Only if array has enough data)
+    static int logThrottle = 0;
+    bool micWrote = false;
+    bool intWrote = false;
+
     if (gCtx->micWriter.isOpen() && micSamples && micLen >= length) {
         gCtx->micWriter.write(micSamples, length);
+        micWrote = true;
     }
     if (gCtx->internalWriter.isOpen() && internalSamples && intLen >= length) {
         gCtx->internalWriter.write(internalSamples, length);
+        intWrote = true;
     }
 
-    // 2. Calculate Levels for UI
-    float micSumSquares = 0.0f;
-    float micPeak = 0.0f;
-    float intSumSquares = 0.0f;
-    float intPeak = 0.0f;
-
-    if (micSamples && micLen >= length) {
-        for (int i = 0; i < length; i += 4) {
-            float s = std::abs(static_cast<float>(micSamples[i]));
-            micSumSquares += s * s;
-            if (s > micPeak) micPeak = s;
-        }
-        gCtx->micRmsLevel.store(std::sqrt(micSumSquares / (length / 4.0f + 1)));
-        gCtx->micPeakLevel.store(micPeak);
-    }
-
-    if (internalSamples && intLen >= length) {
-        for (int i = 0; i < length; i += 4) {
-            float s = std::abs(static_cast<float>(internalSamples[i]));
-            intSumSquares += s * s;
-            if (s > intPeak) intPeak = s;
-        }
-        gCtx->internalRmsLevel.store(std::sqrt(intSumSquares / (length / 4.0f + 1)));
-        gCtx->internalPeakLevel.store(intPeak);
+    if (logThrottle++ % 100 == 0) {
+        LOGI("AudioWrite: Mic=%s (%d samples) Int=%s (%d samples)", 
+             micWrote ? "OK" : "SKIP", (int)micLen,
+             intWrote ? "OK" : "SKIP", (int)intLen);
     }
 
     if (micSamples) env->ReleaseShortArrayElements(micData, micSamples, JNI_ABORT);
@@ -359,19 +349,8 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_getAudioLevels(JNIEnv* env, jobject) {
     jfloatArray result = env->NewFloatArray(4);
-    if (!gCtx) {
-        float zeros[4] = {0, 0, 0, 0};
-        env->SetFloatArrayRegion(result, 0, 4, zeros);
-        return result;
-    }
-    
-    float levels[4] = {
-        gCtx->micRmsLevel.load(),
-        gCtx->micPeakLevel.load(),
-        gCtx->internalRmsLevel.load(),
-        gCtx->internalPeakLevel.load()
-    };
-    env->SetFloatArrayRegion(result, 0, 4, levels);
+    float zeros[4] = {0, 0, 0, 0};
+    env->SetFloatArrayRegion(result, 0, 4, zeros);
     return result;
 }
 
@@ -467,6 +446,8 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         jstring jMicPath,
         jstring jInternalPath,
         jstring jOutputPath,
+        jstring jMicExportPath,
+        jstring jInternalExportPath,
         jstring jModelPath,
         jboolean enableBleedReduction,
         jboolean enableNoiseReduction,
@@ -475,12 +456,15 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         jfloat internalGain,
         jboolean exportMicOnly,
         jboolean exportInternalOnly,
+        jboolean isMono,
         jint audioSampleRate,
         jint audioBitrate
 ) {
     const char* micPath = env->GetStringUTFChars(jMicPath, nullptr);
     const char* internalPath = env->GetStringUTFChars(jInternalPath, nullptr);
     const char* outputPath = env->GetStringUTFChars(jOutputPath, nullptr);
+    const char* micExportPath = env->GetStringUTFChars(jMicExportPath, nullptr);
+    const char* internalExportPath = env->GetStringUTFChars(jInternalExportPath, nullptr);
     const char* modelPath = env->GetStringUTFChars(jModelPath, nullptr);
 
     bokbok::PostProcessor::Config config;
@@ -488,6 +472,8 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
     config.internalPath = internalPath;
     config.videoFd = videoFd;
     config.finalOutputPath = outputPath;
+    config.micExportPath = micExportPath;
+    config.internalExportPath = internalExportPath;
     config.modelPath = modelPath;
     config.enableBleedReduction = enableBleedReduction;
     config.enableNoiseReduction = enableNoiseReduction;
@@ -496,6 +482,8 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
     config.internalGain = internalGain;
     config.exportMicOnly = exportMicOnly;
     config.exportInternalOnly = exportInternalOnly;
+    config.internalChannels = isMono ? 1 : 2;
+    config.numChannels = 2; // We always want stereo output for the final MP4
     config.sampleRate = audioSampleRate;
     config.audioBitrate = audioBitrate;
 
@@ -504,15 +492,13 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         // Callback logic to Java could be re-implemented here if needed
     });
     
-    // Explicitly set numChannels to 1 for current Mono mode
-    bokbok::PostProcessor::Config configWithChannels = config;
-    configWithChannels.numChannels = 1;
-
-    bool success = processor.process(configWithChannels);
+    bool success = processor.process(config);
 
     env->ReleaseStringUTFChars(jMicPath, micPath);
     env->ReleaseStringUTFChars(jInternalPath, internalPath);
     env->ReleaseStringUTFChars(jOutputPath, outputPath);
+    env->ReleaseStringUTFChars(jMicExportPath, micExportPath);
+    env->ReleaseStringUTFChars(jInternalExportPath, internalExportPath);
     env->ReleaseStringUTFChars(jModelPath, modelPath);
     
     return success ? JNI_TRUE : JNI_FALSE;

@@ -88,6 +88,11 @@ class PreferencesManager @Inject constructor(
         
         // Wi-Fi Sharing
         private val WIFI_SHARE_REQUIRE_PASSWORD_KEY = booleanPreferencesKey("wifi_share_require_password")
+        
+        // AI - Hardware Identity Cache
+        private val CACHED_MODEL_NAME_KEY = stringPreferencesKey("ai_cached_model_name")
+        private val CACHED_SOC_NAME_KEY = stringPreferencesKey("ai_cached_soc_name")
+        private val AI_TTS_MODE_KEY = stringPreferencesKey("ai_tts_mode")
     }
 
     val selectedTheme: Flow<AppTheme> = context.dataStore.data.map { preferences ->
@@ -111,7 +116,7 @@ class PreferencesManager @Inject constructor(
             "noiseReduction" to (preferences[NOISE_REDUCTION_KEY] ?: true),
             "bleedReduction" to (preferences[BLEED_REDUCTION_KEY] ?: true),
             "qualityMode" to (preferences[QUALITY_MODE_KEY] ?: 1),
-            "studioMaster" to (preferences[STUDIO_MASTER_KEY] ?: true),
+            "studioMaster" to (preferences[STUDIO_MASTER_KEY] ?: false),
             "exportMicOnly" to (preferences[REC_EXPORT_MIC_KEY] ?: false),
             "exportInternalOnly" to (preferences[REC_EXPORT_INTERNAL_KEY] ?: false),
             "autoStopDuration" to (preferences[AUTO_STOP_DURATION_KEY] ?: 0),
@@ -254,6 +259,45 @@ class PreferencesManager @Inject constructor(
     suspend fun saveWifiSharePasswordRequired(required: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[WIFI_SHARE_REQUIRE_PASSWORD_KEY] = required
+        }
+    }
+
+    // AI - Hardware Cache
+    val deviceIdentity: Flow<Pair<String?, String?>> = context.dataStore.data.map { preferences ->
+        preferences[CACHED_MODEL_NAME_KEY] to preferences[CACHED_SOC_NAME_KEY]
+    }
+
+    suspend fun saveDeviceIdentity(model: String, soc: String) {
+        context.dataStore.edit { preferences ->
+            preferences[CACHED_MODEL_NAME_KEY] = model
+            preferences[CACHED_SOC_NAME_KEY] = soc
+        }
+    }
+
+    val aiTtsMode: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[AI_TTS_MODE_KEY] ?: "LEGACY"
+    }
+
+    suspend fun saveAiTtsMode(mode: String) {
+        context.dataStore.edit { preferences ->
+            preferences[AI_TTS_MODE_KEY] = mode
+        }
+    }
+
+    // AI - Downloaded Languages
+    private val DOWNLOADED_LANGS_KEY = stringPreferencesKey("ai_downloaded_langs")
+
+    val downloadedLanguages: Flow<List<String>> = context.dataStore.data.map { preferences ->
+        preferences[DOWNLOADED_LANGS_KEY]?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+    }
+
+    suspend fun addDownloadedLanguage(langCode: String) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[DOWNLOADED_LANGS_KEY]?.split(",")?.toMutableList() ?: mutableListOf()
+            if (!current.contains(langCode)) {
+                current.add(langCode)
+                preferences[DOWNLOADED_LANGS_KEY] = current.joinToString(",")
+            }
         }
     }
 

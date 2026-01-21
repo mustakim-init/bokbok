@@ -70,6 +70,8 @@ class NativeRecorder {
         micPath: String,
         internalPath: String,
         outputPath: String,
+        micExportPath: String,   // Added
+        internalExportPath: String, // Added
         modelPath: String,
         enableBleed: Boolean,
         enableNoise: Boolean,
@@ -78,6 +80,7 @@ class NativeRecorder {
         internalGain: Float,
         exportMic: Boolean,
         exportInternal: Boolean,
+        isMono: Boolean,
         audioSampleRate: Int,
         audioBitrate: Int
     ): Boolean

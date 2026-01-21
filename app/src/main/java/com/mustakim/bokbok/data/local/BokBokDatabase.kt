@@ -22,9 +22,10 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         com.mustakim.bokbok.data.local.entity.UsageStatsEntity::class,
         com.mustakim.bokbok.data.local.entity.RecordingEntity::class,
         com.mustakim.bokbok.data.model.AIMessage::class,
-        com.mustakim.bokbok.data.model.AISession::class
+        com.mustakim.bokbok.data.model.AISession::class,
+        com.mustakim.bokbok.data.model.AIFact::class
     ],
-    version = 9,
+    version = 11,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GeneralTypeConverters::class)

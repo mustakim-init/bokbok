@@ -11,12 +11,15 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaScannerConnection
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.media.ImageReader
+import android.graphics.PixelFormat
 import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.mustakim.bokbok.MainActivity
 import com.mustakim.bokbok.R
@@ -126,11 +129,6 @@ class ScreenRecordService : Service() {
 
     private val _processingProgress = MutableStateFlow<Map<Long, Float>>(emptyMap())
     val processingProgress = _processingProgress.asStateFlow()
-
-    private val _audioLevels = MutableStateFlow(floatArrayOf(0f, 0f, 0f, 0f))
-    val audioLevels = _audioLevels.asStateFlow()
-
-    private var audioLevelsJob: Job? = null
 
     // DisplayListener for orientation changes
     private val displayListener = object : DisplayManager.DisplayListener {
@@ -270,30 +268,6 @@ class ScreenRecordService : Service() {
             // Set the audio mix ratio from user configuration
             nativeRecorder.setMixRatio(config.internalAudioRatio, config.micAudioRatio)
 
-            // 2. Start Audio Capture (Kotlin -> NDK)
-            if (config.includeMic || config.includeInternal) {
-                // Determine if we need to force internal audio for AEC reference
-                var forceInternalRef = false
-                try {
-                    val settings = runBlocking(Dispatchers.IO) { preferencesManager.recorderSettings.first() }
-                    val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
-                    // Force internal if bleed reduction is enabled and we are recording from mic
-                    if (bleedReduction && config.includeMic && !config.includeInternal) {
-                        forceInternalRef = true
-                        Timber.i("Forcing internal audio capture for AEC reference (Bleed Reduction ON)")
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to read bleedReduction setting")
-                }
-
-                audioCaptureManager.startCapture(
-                    includeMic = config.includeMic, 
-                    includeInternal = config.includeInternal, 
-                    forceInternalRef = forceInternalRef,
-                    mediaProjection = mediaProjection
-                )
-            }
-
             // 3. Get Surface and Start VirtualDisplay
             val surface = nativeRecorder.getInputSurface()
             if (surface == null) {
@@ -318,9 +292,34 @@ class ScreenRecordService : Service() {
             }
             
             // 4. Start Audio Level Polling
-            startAudioLevelPolling()
 
             if (nativeRecorder.start()) {
+                // 5. Start Audio Capture (Kotlin -> NDK) ONLY AFTER native recorder has started
+                // This ensures gCtx->isRecording is true before we start writing samples.
+                if (config.includeMic || config.includeInternal) {
+                    // Determine if we need to force internal audio for AEC reference
+                    var forceInternalRef = false
+                    try {
+                        val settings = runBlocking(Dispatchers.IO) { preferencesManager.recorderSettings.first() }
+                        val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
+                        // Force internal if bleed reduction is enabled and we are recording from mic
+                        if (bleedReduction && config.includeMic && !config.includeInternal) {
+                            forceInternalRef = true
+                            Timber.i("Forcing internal audio capture for AEC reference (Bleed Reduction ON)")
+                        }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to read bleedReduction setting")
+                    }
+
+                    audioCaptureManager.startCapture(
+                        includeMic = config.includeMic, 
+                        includeInternal = config.includeInternal, 
+                        forceInternalRef = forceInternalRef,
+                        mediaProjection = mediaProjection,
+                        isMono = config.isMono
+                    )
+                }
+
                 // Update notification with recording state and actions
                 updateNotification("Recording Screen...", showPause = true)
                 
@@ -548,9 +547,6 @@ class ScreenRecordService : Service() {
         val recordedPath = _lastRecordingPath.value
         val startTime = recordStartTime
         
-        audioLevelsJob?.cancel()
-        _audioLevels.value = floatArrayOf(0f, 0f, 0f, 0f)
-        
         nativeRecorder.stop()
         cleanupResources()
         
@@ -651,6 +647,16 @@ class ScreenRecordService : Service() {
             delay(200) 
             
             if (originalFile.renameTo(tempInputVideo)) {
+                // Prepare separate audio export paths if enabled
+                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "BokBok/Audio")
+                if ((exportMic || exportInternal) && !musicDir.exists()) {
+                    musicDir.mkdirs()
+                }
+                
+                val baseFilename = originalFile.nameWithoutExtension
+                val micExportPath = if (exportMic) File(musicDir, "${baseFilename}_mic.m4a").absolutePath else ""
+                val internalExportPath = if (exportInternal) File(musicDir, "${baseFilename}_internal.m4a").absolutePath else ""
+
                 nativeRecorder.onProgressUpdate = { progress, msg ->
                     val percent = (progress * 100).toInt()
                     updateNotification("Processing: $percent% - $msg", showPause = false)
@@ -674,6 +680,8 @@ class ScreenRecordService : Service() {
                         micPath = micPath,
                         internalPath = intPath,
                         outputPath = path,
+                        micExportPath = micExportPath,
+                        internalExportPath = internalExportPath,
                         modelPath = modelRepository.getModelDirectory(),
                         enableBleed = bleedReduction, 
                         enableNoise = noiseReduction, 
@@ -682,6 +690,7 @@ class ScreenRecordService : Service() {
                         internalGain = internalGain,
                         exportMic = exportMic,
                         exportInternal = exportInternal,
+                        isMono = currentRecordConfig.isMono,
                         audioSampleRate = currentRecordConfig.audioSampleRate,
                         audioBitrate = currentRecordConfig.audioBitrate
                     )
@@ -703,9 +712,25 @@ class ScreenRecordService : Service() {
                     File(micPath).delete()
                     File(intPath).delete()
                     recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSED, path)
-                    MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(path), arrayOf("video/mp4")) { _, _ ->
-                        Timber.i("MediaScanner completed: $path")
+                    
+                    val filesToScan = mutableListOf(path)
+                    if (micExportPath.isNotEmpty() && File(micExportPath).exists()) {
+                        filesToScan.add(micExportPath)
                     }
+                    if (internalExportPath.isNotEmpty() && File(internalExportPath).exists()) {
+                        filesToScan.add(internalExportPath)
+                    }
+
+                    MediaScannerConnection.scanFile(this@ScreenRecordService, filesToScan.toTypedArray(), null) { p, _ ->
+                        Timber.i("MediaScanner completed: $p")
+                    }
+
+                    if (micExportPath.isNotEmpty() || internalExportPath.isNotEmpty()) {
+                        autoStopHandler.post {
+                            Toast.makeText(this@ScreenRecordService, "Audio exports saved to Music/BokBok", Toast.LENGTH_LONG).show()
+                        }
+                    }
+
                     showCapturedNotification(path)
                 } else {
                     Timber.e("Processing failed! Restoring original video.")
@@ -730,22 +755,6 @@ class ScreenRecordService : Service() {
     }
 
 
-    private fun startAudioLevelPolling() {
-        audioLevelsJob?.cancel()
-        audioLevelsJob = CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
-            while (isActive && _isRecording.value) {
-                if (!_isPaused.value) {
-                    val levels = nativeRecorder.getAudioLevels()
-                    _audioLevels.value = levels
-                    recordingOverlay?.updateLevels(levels)
-                } else {
-                    _audioLevels.value = floatArrayOf(0f, 0f, 0f, 0f)
-                    recordingOverlay?.updateLevels(floatArrayOf(0f, 0f, 0f, 0f))
-                }
-                delay(AUDIO_LEVEL_POLL_MS)
-            }
-        }
-    }
 
     fun pauseRecording() {
         if (!_isRecording.value || _isPaused.value) return
@@ -770,39 +779,97 @@ class ScreenRecordService : Service() {
     }
 
     fun takeScreenshot() {
-        val surface = nativeRecorder.getInputSurface() ?: return
+        val vd = virtualDisplay ?: return
         val config = currentConfig ?: return
+        val originalSurface = nativeRecorder.getInputSurface() ?: return
         
-        // Use a Handler to run on the main thread as PixelCopy requires it
-        Handler(Looper.getMainLooper()).post {
-            val bitmap = Bitmap.createBitmap(config.width, config.height, Bitmap.Config.ARGB_8888)
-            val handlerThread = android.os.HandlerThread("PixelCopyHelper")
+        // Hide overlays
+        recordingOverlay?.setVisibility(false)
+        facecamOverlay?.setVisibility(false)
+        textWatermarkOverlay?.setVisibility(false)
+        imageWatermarkOverlay?.setVisibility(false)
+        
+        // Small delay to ensure they are gone from the frame
+        autoStopHandler.postDelayed({
+            val imageReader = ImageReader.newInstance(config.width, config.height, PixelFormat.RGBA_8888, 1)
+            val handlerThread = android.os.HandlerThread("ScreenshotThread")
             handlerThread.start()
+            val handler = Handler(handlerThread.looper)
             
-            try {
-                PixelCopy.request(
-                    surface,
-                    bitmap,
-                    { result ->
-                        if (result == PixelCopy.SUCCESS) {
-                            saveScreenshot(bitmap)
-                        }
-                        handlerThread.quitSafely()
-                    },
-                    Handler(handlerThread.getLooper())
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "PixelCopy request failed")
-                handlerThread.quitSafely()
-            }
-        }
+            var captured = false
+            imageReader.setOnImageAvailableListener({ reader ->
+                if (captured) return@setOnImageAvailableListener
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                captured = true
+                
+                try {
+                    val planes = image.planes
+                    val buffer = planes[0].buffer
+                    val pixelStride = planes[0].pixelStride
+                    val rowStride = planes[0].rowStride
+                    val rowPadding = rowStride - pixelStride * config.width
+                    
+                    val bitmap = Bitmap.createBitmap(
+                        config.width + rowPadding / pixelStride,
+                        config.height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    bitmap.copyPixelsFromBuffer(buffer)
+                    
+                    val finalBitmap = if (rowPadding > 0) {
+                        Bitmap.createBitmap(bitmap, 0, 0, config.width, config.height)
+                    } else {
+                        bitmap
+                    }
+                    
+                    saveScreenshot(finalBitmap)
+                } catch (e: Exception) {
+                    Timber.e(e, "ImageReader screenshot processing failed")
+                } finally {
+                    image.close()
+                    // Restore original surface immediately
+                    vd.setSurface(originalSurface)
+                    
+                    // Show overlays again on Main Thread
+                    autoStopHandler.post {
+                        recordingOverlay?.setVisibility(true)
+                        facecamOverlay?.setVisibility(true)
+                        textWatermarkOverlay?.setVisibility(true)
+                        imageWatermarkOverlay?.setVisibility(true)
+                    }
+                    
+                    reader.close()
+                    handlerThread.quitSafely()
+                }
+            }, handler)
+            
+            // Swap display surface to ImageReader
+            vd.setSurface(imageReader.surface)
+            
+            // Safety timeout
+            handler.postDelayed({
+                if (!captured) {
+                    vd.setSurface(originalSurface)
+                    autoStopHandler.post {
+                        recordingOverlay?.setVisibility(true)
+                        facecamOverlay?.setVisibility(true)
+                        textWatermarkOverlay?.setVisibility(true)
+                        imageWatermarkOverlay?.setVisibility(true)
+                    }
+                    
+                    imageReader.close()
+                    handlerThread.quitSafely()
+                    Timber.w("Screenshot timeout")
+                }
+            }, 1000)
+        }, 150) // Wait for overlays to hide
     }
 
     private fun saveScreenshot(bitmap: Bitmap) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                val bokbokDir = File(moviesDir, "BokBok/Screenshots").apply { mkdirs() }
+                val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val bokbokDir = File(picturesDir, "BokBok/Screenshots").apply { mkdirs() }
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val file = File(bokbokDir, "BokBok_SS_$timestamp.png")
                 
@@ -812,6 +879,10 @@ class ScreenRecordService : Service() {
                 
                 MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(file.absolutePath), arrayOf("image/png")) { _, _ -> }
                 Timber.i("Screenshot saved: ${file.absolutePath}")
+                
+                autoStopHandler.post {
+                    android.widget.Toast.makeText(this@ScreenRecordService, "Screenshot saved to Pictures/BokBok", android.widget.Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to save screenshot")
             }

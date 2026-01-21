@@ -194,6 +194,8 @@ class AppManagerRepository @Inject constructor(
                 // Grant Usage Stats permission
                 executeShellCommand("pm grant $pkg android.permission.PACKAGE_USAGE_STATS")
                 executeShellCommand("appops set $pkg android:get_usage_stats allow")
+                // Grant Overlay permission (SYSTEM_ALERT_WINDOW)
+                executeShellCommand("appops set $pkg android:system_alert_window allow")
                 Result.success(Unit)
             } else {
                 Result.failure(SecurityException("Shizuku permission not granted"))

@@ -10,12 +10,21 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -88,6 +97,7 @@ import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsVoice
 import androidx.compose.material.icons.filled.Speed
@@ -98,6 +108,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TimerOff
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideoSettings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeDown
@@ -129,6 +140,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -177,7 +189,6 @@ fun ScreenRecordTab(
     val recorderSettings by viewModel.recorderSettings.collectAsState(initial = emptyMap())
     val installedApps by viewModel.installedApps.collectAsState()
     val processingProgress by viewModel.processingProgress.collectAsState()
-    val audioLevels by viewModel.audioLevels.collectAsState()
     val modelState by viewModel.modelState.collectAsState()
     val modelDownloadProgress by viewModel.modelDownloadProgress.collectAsState()
     val wifiIpAddress by viewModel.wifiIpAddress.collectAsState()
@@ -257,44 +268,12 @@ fun ScreenRecordTab(
                                         verticalArrangement = Arrangement.spacedBy(20.dp),
                                         contentPadding = PaddingValues(bottom = 32.dp, top = 20.dp)
                                     ) {
-                                        item {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text(
-                                                    text = "Engine State",
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                
-                                                val isServiceBound by viewModel.isServiceBound.collectAsState()
-                                                if (!isServiceBound) {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
-                                                        Spacer(modifier = Modifier.width(8.dp))
-                                                        Text("Connecting...", style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                } else {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Box(modifier = Modifier.size(8.dp).background(Color.Green, CircleShape))
-                                                        Spacer(modifier = Modifier.width(8.dp))
-                                                        Text("Ready", style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                }
-                                            }
-                                        }
-
-
-                                        // Recording Status Card (Controller)
+                                        // Recording Status Controller
                                         item {
                                             RecordingStatusCard(
                                                 isRecording = isRecording,
                                                 isPaused = isPaused,
                                                 config = config,
-                                                audioLevels = audioLevels,
                                                 onStartStop = {
                                                     if (isRecording) {
                                                         viewModel.stopRecording()
@@ -345,85 +324,6 @@ fun ScreenRecordTab(
 
                         item { OverlaySettingsGroup(config, viewModel) }
 
-                        // AI Audio Processing Section
-                        item {
-                            SettingsGroup(title = "AI Audio Processing", icon = Icons.Default.Psychology) {
-                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.READY) {
-                                    ToggleSetting(
-                                        title = "AI Noise Reduction",
-                                        subtitle = "Uses DeepFilterNet to remove background noise",
-                                        icon = Icons.Default.GraphicEq,
-                                        checked = recorderSettings["noiseReduction"] as? Boolean ?: true,
-                                        onCheckedChange = { viewModel.updateRecorderSettings(
-                                            recorderSettings["autoProcess"] as? Boolean ?: true,
-                                            it,
-                                            recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            recorderSettings["qualityMode"] as? Int ?: 1,
-                                            recorderSettings["studioMaster"] as? Boolean ?: true
-                                        )}
-                                    )
-                                    ToggleSetting(
-                                        title = "Game Bleed Reduction",
-                                        subtitle = "Lowers mic volume when game is loud",
-                                        icon = Icons.Default.VolumeDown,
-                                        checked = recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                        onCheckedChange = { viewModel.updateRecorderSettings(
-                                            recorderSettings["autoProcess"] as? Boolean ?: true,
-                                            recorderSettings["noiseReduction"] as? Boolean ?: true,
-                                            it,
-                                            recorderSettings["qualityMode"] as? Int ?: 1,
-                                            recorderSettings["studioMaster"] as? Boolean ?: true
-                                        )}
-                                    )
-                                    OutlinedButton(
-                                        onClick = { viewModel.deleteModels() },
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                                    ) {
-                                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Delete AI Models (Free up space)")
-                                    }
-                                } else {
-                                    // Download Card
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        tonalElevation = 2.dp
-                                    ) {
-                                        Column(modifier = Modifier.padding(16.dp)) {
-                                            Text("Enhance Your Voice", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text("Download DeepFilterNet models (~50 MB) to enable professional-grade noise suppression and isolation.", style = MaterialTheme.typography.bodyMedium)
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                            
-                                            if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.DOWNLOADING) {
-                                                LinearProgressIndicator(
-                                                    progress = { modelDownloadProgress },
-                                                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text("Downloading... ${(modelDownloadProgress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
-                                            } else {
-                                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.ERROR) {
-                                                    Text("Download Failed. Check internet.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
-                                                    Spacer(modifier = Modifier.height(8.dp))
-                                                }
-                                                Button(
-                                                    onClick = { viewModel.downloadModels() },
-                                                    modifier = Modifier.align(Alignment.End)
-                                                ) {
-                                                    Icon(Icons.Default.Download, null)
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text("Download Models")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
 
                         item {
                             val customProfiles by viewModel.customProfiles.collectAsState(initial = emptyList())
@@ -668,7 +568,7 @@ fun ScreenRecordTab(
                                 )
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 ToggleSetting(
-                                    icon = Icons.Default.CameraFront,
+                                    icon = Icons.Default.Videocam,
                                     title = "Facecam Overlay",
                                     checked = config.showFacecam,
                                     onCheckedChange = { viewModel.updateConfig(config.copy(showFacecam = it)) }
@@ -923,17 +823,6 @@ fun ScreenRecordTab(
                             }
                         }
 
-                        item {
-                            SettingsGroup(title = "Output Settings", icon = Icons.Default.Save) {
-                                ToggleSetting(
-                                    icon = Icons.Default.HighQuality,
-                                    title = "HEVC Encoding",
-                                    subtitle = "Higher quality, smaller file size",
-                                    checked = config.useHevc,
-                                    onCheckedChange = { viewModel.updateConfig(config.copy(useHevc = it)) }
-                                )
-                            }
-                        }
 
                         item {
                             Text(
@@ -964,25 +853,9 @@ fun ScreenRecordTab(
                                 )
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 ToggleSetting(
-                                    icon = Icons.Default.Hearing,
-                                    title = "AI Noise Reduction",
-                                    subtitle = "Remove background noise (Offline RNNoise)",
-                                    checked = recorderSettings["noiseReduction"] as? Boolean ?: true,
-                                    onCheckedChange = { 
-                                        viewModel.updateRecorderSettings(
-                                            autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
-                                            noiseReduction = it,
-                                            bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
-                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
-                                            studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
-                                        )
-                                    }
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                ToggleSetting(
                                     icon = Icons.Default.RecordVoiceOver,
                                     title = "Voice Isolation",
-                                    subtitle = "Remove game bleed from mic (Neural)",
+                                    subtitle = "Remove game bleed from mic (Software)",
                                     checked = recorderSettings["bleedReduction"] as? Boolean ?: true,
                                     onCheckedChange = { 
                                         viewModel.updateRecorderSettings(
@@ -994,6 +867,74 @@ fun ScreenRecordTab(
                                         )
                                     }
                                 )
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                // AI Section integrated into Engine
+                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.READY) {
+                                    ToggleSetting(
+                                        icon = Icons.Default.Hearing,
+                                        title = "AI Noise Reduction",
+                                        subtitle = "Remove background noise (DeepFilterNet)",
+                                        checked = recorderSettings["noiseReduction"] as? Boolean ?: true,
+                                        onCheckedChange = { 
+                                            viewModel.updateRecorderSettings(
+                                                autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
+                                                noiseReduction = it,
+                                                bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
+                                                qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
+                                                studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
+                                            )
+                                        }
+                                    )
+                                    OutlinedButton(
+                                        onClick = { viewModel.deleteModels() },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Delete AI Models", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                } else {
+                                    // Compact Download Card (Integrated)
+                                    Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text("Enable AI Enhancement", style = MaterialTheme.typography.titleSmall)
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text("Download DeepFilterNet (~50MB) for neural noise suppression.", style = MaterialTheme.typography.bodySmall)
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                
+                                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.DOWNLOADING) {
+                                                    LinearProgressIndicator(
+                                                        progress = { modelDownloadProgress },
+                                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                                                    )
+                                                    Text("Downloading... ${(modelDownloadProgress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+                                                } else {
+                                                    Button(
+                                                        onClick = { viewModel.downloadModels() },
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        shape = RoundedCornerShape(8.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text("Download Models")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 SettingPicker(
                                     icon = Icons.Default.Hardware,
@@ -1007,6 +948,22 @@ fun ScreenRecordTab(
                                             bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
                                             qualityMode = if (name == "Quality") 1 else 0,
                                             studioMaster = recorderSettings["studioMaster"] as? Boolean ?: true
+                                        )
+                                    }
+                                )
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                ToggleSetting(
+                                    icon = Icons.Default.GraphicEq,
+                                    title = "Studio Master",
+                                    subtitle = "Professional EQ & Dynamics suite",
+                                    checked = recorderSettings["studioMaster"] as? Boolean ?: false,
+                                    onCheckedChange = { 
+                                        viewModel.updateRecorderSettings(
+                                            autoProcess = recorderSettings["autoProcess"] as? Boolean ?: true,
+                                            noiseReduction = recorderSettings["noiseReduction"] as? Boolean ?: true,
+                                            bleedReduction = recorderSettings["bleedReduction"] as? Boolean ?: true,
+                                            qualityMode = recorderSettings["qualityMode"] as? Int ?: 1,
+                                            studioMaster = it
                                         )
                                     }
                                 )
@@ -1127,7 +1084,6 @@ fun RecordingStatusCard(
     isRecording: Boolean,
     isPaused: Boolean,
     config: RecordConfig,
-    audioLevels: FloatArray = floatArrayOf(0f, 0f, 0f, 0f),
     onStartStop: () -> Unit,
     onPauseResume: () -> Unit
 ) {
@@ -1141,45 +1097,34 @@ fun RecordingStatusCard(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (isRecording) 20.dp.toPx() else 8.dp.toPx()
-                spotShadowColor = if (isRecording) Color.Red.copy(alpha = 0.5f) else Color.Transparent
             },
-        shape = RoundedCornerShape(28.dp),
-        color = Color.Transparent, // Using background brush instead
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 2.dp
     ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            when {
-                                isPaused -> MaterialTheme.colorScheme.tertiaryContainer
-                                isRecording -> MaterialTheme.colorScheme.primaryContainer
-                                else -> MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            MaterialTheme.colorScheme.surface
-                        )
-                    )
-                )
-                .padding(20.dp)
+        Column(
+            modifier = Modifier.padding(24.dp)
         ) {
+            // Main Control Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(56.dp)
                         .clip(CircleShape)
                         .background(
-                            if (isRecording) Color.Red else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                            if (isRecording) MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (isRecording) Icons.Default.FiberManualRecord else Icons.Default.Videocam,
                         contentDescription = null,
-                        tint = if (isRecording) Color.White else MaterialTheme.colorScheme.primary
+                        tint = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
                     )
                 }
                 
@@ -1187,17 +1132,14 @@ fun RecordingStatusCard(
                 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = when {
-                            isPaused -> "Recording Paused"
-                            isRecording -> "Capturing Screen"
-                            else -> "Engine: High Performance"
-                        },
+                        text = if (isRecording) "Recording in Progress" else "Recorder: Ready",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = if (isRecording) "${config.resolutionName} • ${config.fps} FPS" 
-                               else "Tap start to begin capturing",
+                               else "Configure settings below and start",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1209,64 +1151,41 @@ fun RecordingStatusCard(
                         containerColor = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     ),
                     shape = RoundedCornerShape(16.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp),
-                    modifier = Modifier.graphicsLayer {
-                        // Subtle bounce for the button too
-                        scaleX = if (isRecording) 1.05f else 1f
-                        scaleY = if (isRecording) 1.05f else 1f
-                    }
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
                 ) {
                     Text(
                         text = if (isRecording) "Stop" else "Start",
-                        fontWeight = FontWeight.ExtraBold
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            AnimatedVisibility(visible = isRecording) {
+            // Expanded Controls when Recording (Pause/Resume)
+            AnimatedVisibility(
+                visible = isRecording,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
                 Column {
                     Spacer(modifier = Modifier.height(16.dp))
-                    Row(
+                    FilledTonalButton(
+                        onClick = onPauseResume,
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        shape = RoundedCornerShape(16.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = onPauseResume,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Icon(if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (isPaused) "Resume" else "Pause")
-                        }
-                        
-                        // Level Indicator in Card
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                val micRms = audioLevels.getOrElse(0) { 0f }
-                                val intRms = audioLevels.getOrElse(2) { 0f }
-                                
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("MIC", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    LevelMeter(micRms, Color(0xFF00E676))
-                                }
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("INT", style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    LevelMeter(intRms, Color(0xFF2979FF))
-                                }
-                            }
-                        }
+                        Icon(
+                            imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, 
+                            contentDescription = null, 
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = if (isPaused) "Resume Recording" else "Pause Recording",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
@@ -1274,24 +1193,6 @@ fun RecordingStatusCard(
     }
 }
 
-@Composable
-private fun LevelMeter(level: Float, color: Color) {
-    val levelAnim by animateFloatAsState(targetValue = level.coerceIn(0f, 1f), label = "")
-    Box(
-        modifier = Modifier
-            .width(40.dp)
-            .height(4.dp)
-            .clip(CircleShape)
-            .background(Color.Black.copy(0.1f))
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(levelAnim)
-                .background(color)
-        )
-    }
-}
 
 @Composable
 fun SettingsGroup(
@@ -1688,15 +1589,14 @@ fun RecordingsHistorySection(
             
             FilledTonalButton(
                 onClick = onToggleWifiShare,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = if (wifiIpAddress != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(Icons.Default.WifiTethering, null, modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.WifiTethering, null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(if (wifiIpAddress != null) "Sharing On" else "Wi-Fi Share", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    text = if (wifiIpAddress != null) "Sharing On" else "Wi-Fi Share",
+                    style = MaterialTheme.typography.labelMedium
+                )
             }
         }
         
@@ -1779,13 +1679,8 @@ fun RecordingHistoryCard(
                     .size(56.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(
-                        Brush.linearGradient(
-                            colors = if (isProcessed) {
-                                listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface)
-                            } else {
-                                listOf(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.surface)
-                            }
-                        )
+                        if (isProcessed) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.secondaryContainer
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -1911,12 +1806,14 @@ fun OverlaySettingsGroup(config: RecordConfig, viewModel: ScreenRecordViewModel)
             checked = config.showPauseResumeOnMenu,
             onCheckedChange = { viewModel.updateConfig(config.copy(showPauseResumeOnMenu = it)) }
         )
-        ToggleSetting(
-            title = "Show Camera Toggle",
-            icon = Icons.Default.CameraAlt,
-            checked = config.showCameraButtonOnMenu,
-            onCheckedChange = { viewModel.updateConfig(config.copy(showCameraButtonOnMenu = it)) }
-        )
+        if (!config.showFacecam) {
+            ToggleSetting(
+                title = "Show Camera Toggle",
+                icon = Icons.Default.Videocam,
+                checked = config.showCameraButtonOnMenu,
+                onCheckedChange = { viewModel.updateConfig(config.copy(showCameraButtonOnMenu = it)) }
+            )
+        }
         ToggleSetting(
             title = "Show Drawing Tools",
             icon = Icons.Default.Brush,
@@ -1925,7 +1822,7 @@ fun OverlaySettingsGroup(config: RecordConfig, viewModel: ScreenRecordViewModel)
         )
         ToggleSetting(
             title = "Show Screenshot",
-            icon = Icons.Default.PhotoCamera,
+            icon = Icons.Default.Screenshot,
             checked = config.showScreenshotButtonOnMenu,
             onCheckedChange = { viewModel.updateConfig(config.copy(showScreenshotButtonOnMenu = it)) }
         )

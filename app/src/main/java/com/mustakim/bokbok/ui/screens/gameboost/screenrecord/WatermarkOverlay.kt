@@ -54,6 +54,10 @@ class WatermarkOverlay(private val context: Context) : LifecycleOwner, ViewModel
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
     }
 
+    fun setVisibility(visible: Boolean) {
+        container.visibility = if (visible) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
     fun showText(text: String, color: Color = Color.White, backgroundColor: Color = Color.Black.copy(0.5f)) {
         show(isText = true, content = text, color = color, bgColor = backgroundColor)
     }

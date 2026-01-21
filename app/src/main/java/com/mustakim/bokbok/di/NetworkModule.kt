@@ -1,15 +1,20 @@
 package com.mustakim.bokbok.di
 
+import com.mustakim.bokbok.BuildConfig
+import com.mustakim.bokbok.data.api.GroqApi
 import com.mustakim.bokbok.data.api.ImgBBApi
 import com.mustakim.bokbok.data.repository.BackendService
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -58,5 +63,34 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(BackendService::class.java)
+    }
+
+    @Provides
+    @Singleton
+    @Named("GroqClient")
+    fun provideGroqOkHttpClient(loggingInterceptor: HttpLoggingInterceptor): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer ${BuildConfig.GROQ_API_KEY}")
+                    .build()
+                chain.proceed(request)
+            }
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideGroqApi(@Named("GroqClient") okHttpClient: OkHttpClient): GroqApi {
+        return Retrofit.Builder()
+            .baseUrl("https://api.groq.com/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(GroqApi::class.java)
     }
 }

@@ -8,10 +8,12 @@ import java.util.UUID
 data class AIMessage(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val conversationId: String,
-    val role: MessageRole, // USER, ASSISTANT
+    val role: MessageRole, // USER, ASSISTANT, TOOL, SYSTEM
     val content: String,
+    val name: String? = null, // Used for TOOL role
+    val toolCallId: String? = null, // Used for TOOL results
     val imageUri: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
-enum class MessageRole { USER, ASSISTANT }
+enum class MessageRole { USER, ASSISTANT, TOOL, SYSTEM }

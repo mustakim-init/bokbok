@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.mustakim.bokbok.data.model.AIMessage
 import com.mustakim.bokbok.data.model.AISession
+import com.mustakim.bokbok.data.model.AIFact
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -37,4 +38,14 @@ interface AIConversationDao {
 
     @Query("SELECT COUNT(*) FROM ai_messages WHERE conversationId = :sessionId")
     suspend fun getMessageCount(sessionId: String): Int
+
+    // Universal Memory (Facts)
+    @Query("SELECT * FROM ai_facts ORDER BY updatedAt DESC")
+    suspend fun getAllFacts(): List<AIFact>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFact(fact: AIFact)
+
+    @Query("DELETE FROM ai_facts WHERE `key` = :key")
+    suspend fun deleteFact(key: String)
 }

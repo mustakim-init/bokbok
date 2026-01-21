@@ -25,4 +25,5 @@
     <string name="widget_basic">Record (Basic)</string>
     <string name="widget_start">Start</string>
     <string name="widget_stop">Stop</string>
+    <string name="accessibility_description">BokBok AI Agent allows the AI to guide you through game tasks and automate complex phone optimizations by interacting with the screen.</string>
 </resources>

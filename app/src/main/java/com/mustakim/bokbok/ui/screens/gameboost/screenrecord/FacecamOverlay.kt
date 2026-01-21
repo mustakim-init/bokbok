@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -61,10 +63,14 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
     }
 
+    fun setVisibility(visible: Boolean) {
+        container.visibility = if (visible) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
     fun show(config: com.mustakim.bokbok.model.RecordConfig) {
         val savedX = prefs.getInt("pos_x", 100)
         val savedY = prefs.getInt("pos_y", 100)
-        val savedSize = prefs.getInt("size", 200.dpToPx(context))
+        val savedSize = prefs.getInt("size", 160.dpToPx(context))
 
         layoutParams = WindowManager.LayoutParams(
             savedSize,
@@ -119,15 +125,24 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
     private fun FacecamContent(config: com.mustakim.bokbok.model.RecordConfig) {
         val lensFacing by lensFacingState
         
-        Box(
+        val shape = if (config.facecamShape == "Circle") CircleShape else RoundedCornerShape(12.dp)
+        
+        Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .clip(if (config.facecamShape == "Circle") CircleShape else RoundedCornerShape(12.dp))
+                .padding(4.dp), // Tiny padding to prevent border clipping at edges
+            shape = shape,
+            color = Color.Black,
+            border = androidx.compose.foundation.BorderStroke(2.dp, Color.White),
+            tonalElevation = 8.dp,
+            shadowElevation = 4.dp
         ) {
-            CameraPreview(
-                lensFacing = lensFacing,
-                modifier = Modifier.fillMaxSize()
-            )
+            Box(modifier = Modifier.fillMaxSize().clip(shape)) {
+                CameraPreview(
+                    lensFacing = lensFacing,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 
@@ -138,7 +153,11 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
     ) {
         val context = LocalContext.current
         val lifecycleOwner = LocalLifecycleOwner.current
-        val previewView = remember { PreviewView(context) }
+        val previewView = remember { 
+            PreviewView(context).apply {
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            }
+        }
 
         LaunchedEffect(lensFacing) {
             val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -193,7 +212,7 @@ class FacecamOverlay(private val context: Context) : LifecycleOwner, ViewModelSt
                 val lp = lp ?: return false
                 val wm = wm ?: return false
                 val scaleFactor = detector.scaleFactor
-                val newSize = (lp.width * scaleFactor).toInt().coerceIn(100.dpToPx(context), 500.dpToPx(context))
+                val newSize = (lp.width * scaleFactor).toInt().coerceIn(40.dpToPx(context), 600.dpToPx(context))
                 lp.width = newSize
                 lp.height = newSize
                 wm.updateViewLayout(this@DraggableCameraContainer, lp)

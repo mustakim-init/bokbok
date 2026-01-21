@@ -51,10 +51,9 @@ android {
         buildConfigField("String", "TURN_FALLBACK_USERNAME", "\"$fallbackUser\"")
         buildConfigField("String", "TURN_FALLBACK_PASSWORD", "\"$fallbackPass\"")
 
-        // Gemini AI
-        val geminiApiKey = properties.getProperty("GEMINI_API_KEY") ?: properties.getProperty("gemini.api.key") ?: ""
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
-
+        // Groq AI
+        val groqApiKey = properties.getProperty("GROQ_API_KEY") ?: ""
+        buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
 
         externalNativeBuild {
             cmake {
@@ -104,6 +103,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/proguard/androidx-*.pro"
+            // Redundant packaging rules removed as duplicates are resolved by dependency cleanup
         }
     }
 
@@ -227,8 +227,10 @@ dependencies {
     // Oboe (for low-latency native audio)
     implementation("com.google.oboe:oboe:1.9.3")
 
-    // ONNX Runtime (for Neural Audio Processing)
-    // implementation("com.microsoft.onnxruntime:onnxruntime-android:1.16.3") // Manual integration used
+    // ONNX Runtime provided by Sherpa-ONNX AAR
+    
+    // Manual local AAR/JAR support (Primary for Sherpa-ONNX)
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
 
     // CameraX (for Facecam)
     val camerax_version = "1.3.1"
@@ -239,6 +241,6 @@ dependencies {
     // NanoHTTPD (for Wi-Fi File Sharing)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
 
-    // Gemini AI SDK
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    // Gemini AI SDK removed
+
 }

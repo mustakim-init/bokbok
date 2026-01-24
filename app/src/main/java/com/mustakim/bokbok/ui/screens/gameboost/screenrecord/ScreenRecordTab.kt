@@ -667,15 +667,15 @@ fun ScreenRecordTab(
                                 var showAppPicker by remember { mutableStateOf(false) }
                                 val installedApps by viewModel.installedApps.collectAsState()
                                 
+                                val autoLaunchLabel = remember(config.autoLaunchPackage, installedApps) {
+                                    if (config.autoLaunchPackage.isEmpty()) "Disabled"
+                                    else installedApps.find { it.packageName == config.autoLaunchPackage }?.label ?: config.autoLaunchPackage
+                                }
+                                
                                 SettingPicker(
                                     title = "Auto-Launch App",
                                     icon = Icons.Default.RocketLaunch,
-                                    value = if (config.autoLaunchPackage.isEmpty()) "Disabled" 
-                                            else try {
-                                                context.packageManager.getApplicationLabel(
-                                                    context.packageManager.getApplicationInfo(config.autoLaunchPackage, 0)
-                                                ).toString()
-                                            } catch (_: Exception) { "Unknown App" },
+                                    value = autoLaunchLabel,
                                     options = listOf("Select App...", "Disable"),
                                     onSelected = { 
                                         if (it == "Disable") viewModel.updateConfig(config.copy(autoLaunchPackage = ""))
@@ -1298,15 +1298,14 @@ private fun calculateResolution(context: Context, preset: String, orientationLoc
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppPickerDialog(
-    apps: List<android.content.pm.PackageInfo>,
+    apps: List<ScreenRecordViewModel.AppSelectionItem>,
     selectedPackages: List<String> = emptyList(),
     onAppSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val pm = LocalContext.current.packageManager
     var searchQuery by remember { mutableStateOf("") }
     val filteredApps = remember(searchQuery, apps) {
-        apps.filter { it.applicationInfo?.loadLabel(pm).toString().contains(searchQuery, ignoreCase = true) }
+        apps.filter { it.label.contains(searchQuery, ignoreCase = true) || it.packageName.contains(searchQuery, ignoreCase = true) }
     }
 
     AlertDialog(
@@ -1334,25 +1333,38 @@ fun AppPickerDialog(
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val info = try { app.applicationInfo } catch (_: Exception) { null }
-                            val icon = info?.loadIcon(pm)
                             Box(
                                 modifier = Modifier
                                     .size(40.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.AppShortcut, 
-                                    null, 
-                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, 
-                                    modifier = Modifier.size(24.dp)
+                                coil.compose.AsyncImage(
+                                    model = com.mustakim.bokbok.utils.AppIcon(app.packageName),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize()
                                 )
+                                
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(info?.loadLabel(pm)?.toString() ?: "Unknown", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                                Text(app.label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                                 Text(app.packageName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }

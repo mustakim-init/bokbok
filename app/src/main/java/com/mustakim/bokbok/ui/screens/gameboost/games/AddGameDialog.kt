@@ -25,59 +25,32 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.ImageBitmap
-import com.mustakim.bokbok.utils.AppIconCache
-import androidx.core.graphics.drawable.toBitmap
-import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.mustakim.bokbok.utils.AppIcon
+import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddGameDialog(
+    viewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel,
     onDismiss: () -> Unit,
     onAddGame: (String) -> Unit
 ) {
     val context = LocalContext.current
-    val pm = context.packageManager
-    val scope = rememberCoroutineScope()
-    
-    var apps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val apps: List<com.mustakim.bokbok.viewmodel.GameSpaceViewModel.AddableApp> by viewModel.addableApps.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        scope.launch {
-            val installed = withContext(Dispatchers.IO) {
-                pm.getInstalledPackages(0).filter { pkg ->
-                    // Filter: Only include user-installed apps (NOT system apps)
-                    val appInfo = pkg.applicationInfo
-                    (appInfo != null) && (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0)
-                }.map { pkg ->
-                    AppInfo(
-                        packageName = pkg.packageName,
-                        label = pkg.applicationInfo?.loadLabel(pm)?.toString() ?: pkg.packageName,
-                        pkg = pkg
-                    )
-                }.sortedBy { it.label }
-            }
-            apps = installed
-            isLoading = false
-        }
+        viewModel.fetchAddableApps()
     }
 
     val filteredApps = remember(apps, searchQuery) {
@@ -114,7 +87,7 @@ fun AddGameDialog(
                 shape = RoundedCornerShape(16.dp)
             )
 
-            if (isLoading) {
+            if (apps.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -123,31 +96,22 @@ fun AddGameDialog(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 16.dp)
                 ) {
-                    items(filteredApps, key = { it.packageName }) { app ->
+                    items(
+                        items = filteredApps,
+                        key = { it.packageName }
+                    ) { app ->
                         ListItem(
                             headlineContent = { Text(app.label, fontWeight = FontWeight.SemiBold) },
                             supportingContent = { Text(app.packageName, style = MaterialTheme.typography.labelSmall) },
                             leadingContent = {
-                                // Shared Icon Cache Implementation
-                                var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
-                                LaunchedEffect(app.packageName) {
-                                    iconBitmap = AppIconCache.getIcon(context, app.packageName)
-                                }
-                                
-                                if (iconBitmap != null) {
-                                    androidx.compose.foundation.Image(
-                                        bitmap = iconBitmap!!,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                    )
-                                }
+                                AsyncImage(
+                                    model = AppIcon(app.packageName),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                )
                             },
                             modifier = Modifier.clickable { onAddGame(app.packageName) }
                         )
@@ -157,9 +121,3 @@ fun AddGameDialog(
         }
     }
 }
-
-private data class AppInfo(
-    val packageName: String,
-    val label: String,
-    val pkg: android.content.pm.PackageInfo
-)

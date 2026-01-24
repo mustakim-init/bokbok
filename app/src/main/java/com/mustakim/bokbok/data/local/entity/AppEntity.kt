@@ -31,6 +31,10 @@ data class AppEntity(
     val bloatwareWarning: String? = null,
     val bloatwareDescription: String? = null,
     
+    // Performance features
+    val category: Int = -1,
+    val isUserApp: Boolean = false,
+
     // App paths
     val apkPath: String = "",
     val dataPath: String = ""

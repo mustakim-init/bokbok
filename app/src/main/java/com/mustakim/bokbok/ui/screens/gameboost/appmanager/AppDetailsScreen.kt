@@ -78,7 +78,8 @@ import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
 import com.mustakim.bokbok.data.repository.AppManagerRepository
-import com.mustakim.bokbok.utils.AppIconCache
+import coil.compose.AsyncImage
+import com.mustakim.bokbok.utils.AppIcon
 import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
@@ -385,29 +386,11 @@ private fun AppHeaderSection(
                 .clip(RoundedCornerShape(20.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainer)
         ) {
-            val context = LocalContext.current
-            var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
-            
-            LaunchedEffect(app.packageName) {
-                iconBitmap = AppIconCache.getIcon(context, app.packageName)
-            }
-
-            if (iconBitmap != null) {
-                Image(
-                    bitmap = iconBitmap!!,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        imageVector = Icons.Default.Android,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            AsyncImage(
+                model = AppIcon(app.packageName),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         
         Spacer(modifier = Modifier.height(12.dp))

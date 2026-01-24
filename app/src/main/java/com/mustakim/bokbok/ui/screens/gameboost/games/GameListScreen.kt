@@ -233,6 +233,7 @@ fun GameListScreen(
 
     if (showAddDialog) {
         AddGameDialog(
+            viewModel = viewModel,
             onDismiss = { showAddDialog = false },
             onAddGame = { pkg -> 
                 viewModel.addGameManually(pkg)

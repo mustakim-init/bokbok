@@ -76,16 +76,17 @@ fun GameBoostScreen(
     val viewModelStoreOwner = remember(navController) {
         navController.getBackStackEntry(com.mustakim.bokbok.ui.navigation.NavRoutes.GameBoost.route)
     }
-
-    val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel(viewModelStoreOwner)
     
-    // 🚀 PERFORMANCE: Pre-instantiate ALL ViewModels BEFORE the pager.
-    // This ensures they're created once when the screen enters composition,
-    // not repeatedly inside the pager lambda during swipe animations.
+    // 🚀 PERFORMANCE (Eager Shared Initialization): 
+    // We instantiate ALL ViewModels at the root using the shared route scope.
+    // This allows smooth swiping because the ViewModels are ready.
+    // The "Entry Freeze" caused by this Eager loading is solved by Baseline Profiles (AOT Compilation).
+    val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel(viewModelStoreOwner)
     val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(viewModelStoreOwner)
     val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(viewModelStoreOwner)
     val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(viewModelStoreOwner)
     val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel = hiltViewModel(viewModelStoreOwner)
+    val securityViewModel: com.mustakim.bokbok.viewmodel.SecurityViewModel = hiltViewModel(viewModelStoreOwner)
 
     // Sync Pager state with ViewModel state
     LaunchedEffect(pagerState.currentPage) {
@@ -269,13 +270,11 @@ fun GameBoostScreen(
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
-                        // 🚀 PERFORMANCE: Deferred loading - only load data when tab is settled (not during swipe)
-                        val isSettled = !pagerState.isScrollInProgress && pagerState.currentPage == page
                         
                         when (tab) {
                             GameBoostTab.GAME_BOOST -> {
-                                LaunchedEffect(isSettled) {
-                                    if (isSettled) gameSpaceViewModel.loadDataIfNeeded()
+                                LaunchedEffect(Unit) {
+                                    gameSpaceViewModel.loadDataIfNeeded()
                                 }
                                 com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(
                                     viewModel = gameSpaceViewModel
@@ -283,15 +282,15 @@ fun GameBoostScreen(
                             }
 
                             GameBoostTab.APP_MANAGER -> {
-                                LaunchedEffect(isSettled) {
-                                    if (isSettled) appManagerViewModel.loadDataIfNeeded()
+                                LaunchedEffect(Unit) {
+                                    appManagerViewModel.loadDataIfNeeded()
                                 }
                                 AppManagerScreen(viewModel = appManagerViewModel)
                             }
 
                             GameBoostTab.USAGE_STATS -> {
-                                LaunchedEffect(isSettled) {
-                                    if (isSettled) usageStatsViewModel.loadDataIfNeeded()
+                                LaunchedEffect(Unit) {
+                                    usageStatsViewModel.loadDataIfNeeded()
                                 }
                                 UsageStatsScreen(viewModel = usageStatsViewModel)
                             }
@@ -308,8 +307,6 @@ fun GameBoostScreen(
                             }
 
                             GameBoostTab.SECURITY -> {
-                                // Deferred loading for performance
-                                val securityViewModel: com.mustakim.bokbok.viewmodel.SecurityViewModel = hiltViewModel(viewModelStoreOwner)
                                 com.mustakim.bokbok.ui.screens.gameboost.security.SecurityScreen(
                                     viewModel = securityViewModel
                                 )

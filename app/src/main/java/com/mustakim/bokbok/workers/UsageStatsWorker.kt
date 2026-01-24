@@ -24,7 +24,8 @@ import java.util.Calendar
 class UsageStatsWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val usageStatsDao: UsageStatsDao
+    private val usageStatsDao: UsageStatsDao,
+    private val appDao: com.mustakim.bokbok.data.local.dao.AppDao
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -79,8 +80,9 @@ class UsageStatsWorker @AssistedInject constructor(
             val wifiUsageMap = getNetworkUsageBatch(networkStatsManager, ConnectivityManager.TYPE_WIFI, startTime, endTime)
             val mobileUsageMap = getNetworkUsageBatch(networkStatsManager, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
 
-            // Batch fetch ApplicationInfo to avoid missing labels or slow lookups in loop
-            val installedApps = packageManager.getInstalledPackages(0).associateBy { it.packageName }
+            // 🚀 SMART SCAN: Use cached labels from AppDao to avoid Vivo theme engine exceptions
+            val cachedAppLabels = appDao.getAppsOneShot().associate { it.packageName to it.label }
+            val installedAppsUid = packageManager.getInstalledPackages(0).associate { it.packageName to it.applicationInfo?.uid }
 
             // Parallel processing for metadata to speed up huge lists
             val entities = usageMap.values.chunked(25).flatMap { chunk ->
@@ -89,11 +91,8 @@ class UsageStatsWorker @AssistedInject constructor(
                         async {
                             if (data.screenTime > 0 || data.timesOpened > 0) {
                                 try {
-                                    val packageInfo = installedApps[data.packageName] ?: return@async null
-                                    val appInfo = packageInfo.applicationInfo ?: return@async null
-                                    
-                                    val label = pmGetLabel(packageManager, appInfo)
-                                    val uid = appInfo.uid
+                                    val uid = installedAppsUid[data.packageName] ?: return@async null
+                                    val label = cachedAppLabels[data.packageName] ?: data.packageName
                                     
                                     val wifiData = wifiUsageMap[uid] ?: 0L
                                     val mobileData = mobileUsageMap[uid] ?: 0L
@@ -127,14 +126,6 @@ class UsageStatsWorker @AssistedInject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
             if (runAttemptCount < 3) Result.retry() else Result.failure()
-        }
-    }
-
-    private fun pmGetLabel(pm: PackageManager, info: android.content.pm.ApplicationInfo): String {
-        return try {
-            pm.getApplicationLabel(info).toString()
-        } catch (_: Exception) {
-            info.packageName
         }
     }
 

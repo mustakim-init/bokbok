@@ -36,13 +36,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.mustakim.bokbok.utils.AppIcon
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
-import com.mustakim.bokbok.utils.AppIconCache
-import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.data.model.AppUsageInfo
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,29 +69,15 @@ fun UsageStatsItem(
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val context = LocalContext.current
-                var iconBitmap by remember(usageInfo.packageName) { mutableStateOf<ImageBitmap?>(null) }
-                
-                LaunchedEffect(usageInfo.packageName) {
-                    iconBitmap = AppIconCache.getIcon(context, usageInfo.packageName)
-                }
-
-                if (iconBitmap != null) {
-                    Image(
-                        bitmap = iconBitmap!!,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    )
-                }
+                // Coil Async Image with custom AppIcon fetcher
+                AsyncImage(
+                    model = AppIcon(usageInfo.packageName),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
                 
                 Spacer(modifier = Modifier.width(16.dp))
                 

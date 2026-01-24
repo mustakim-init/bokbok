@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
@@ -58,6 +59,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.res.painterResource
 import com.mustakim.bokbok.R
+import coil.compose.AsyncImage
+import com.mustakim.bokbok.utils.AppIcon
 
 /**
  * A floating HUD overlay for recording controls.
@@ -519,6 +522,27 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
                     onClick = toggleShortcuts
                 )
              }
+             
+             if (showShortcuts) {
+                 config.shortcuts.forEach { pkg ->
+                     items.add {
+                         Box(
+                             modifier = Modifier
+                                 .size(KaptureDimens.IconMainSize)
+                                 .clip(CircleShape)
+                                 .background(Color.White.copy(alpha = 0.1f))
+                                 .clickable { launchApp(pkg) },
+                             contentAlignment = Alignment.Center
+                         ) {
+                             AsyncImage(
+                                 model = AppIcon(pkg),
+                                 contentDescription = null,
+                                 modifier = Modifier.fillMaxSize().padding(KaptureDimens.IconPadding)
+                             )
+                         }
+                     }
+                 }
+             }
         }
 
         // 3. Time
@@ -665,14 +689,8 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
     }
 
     private fun getAppIcon(pkg: String): ImageBitmap? {
-        return try {
-            val icon = context.packageManager.getApplicationIcon(pkg)
-            val bitmap = Bitmap.createBitmap(icon.intrinsicWidth, icon.intrinsicHeight, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            icon.setBounds(0, 0, canvas.width, canvas.height)
-            icon.draw(canvas)
-            bitmap.asImageBitmap()
-        } catch (_: Exception) { null }
+        // Redundant with Coil migration, keeping but tagging for removal or safe fallback if needed outside Compose
+        return null 
     }
 
     @Composable

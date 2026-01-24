@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.mustakim.bokbok.model.RecordingProfile
+import com.mustakim.bokbok.data.local.dao.AppDao
+import com.mustakim.bokbok.data.local.entity.AppEntity
 import kotlinx.coroutines.Dispatchers
 import timber.log.Timber
 import javax.inject.Inject
@@ -25,7 +27,8 @@ class ScreenRecordViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val recordingRepository: com.mustakim.bokbok.data.repository.RecordingRepository,
     private val modelRepository: com.mustakim.bokbok.data.repository.ModelRepository,
-    private val preferencesManager: com.mustakim.bokbok.data.local.PreferencesManager
+    private val preferencesManager: com.mustakim.bokbok.data.local.PreferencesManager,
+    private val appDao: AppDao
 ) : ViewModel() {
 
     private val _isServiceBound = MutableStateFlow(false)
@@ -44,7 +47,7 @@ class ScreenRecordViewModel @Inject constructor(
     private val _isRecording = MutableStateFlow(false)
     val isRecording = _isRecording.asStateFlow()
     
-    private val _installedApps = MutableStateFlow<List<android.content.pm.PackageInfo>>(emptyList())
+    private val _installedApps = MutableStateFlow<List<AppSelectionItem>>(emptyList())
     val installedApps = _installedApps.asStateFlow()
 
     private val _isPaused = MutableStateFlow(false)
@@ -174,13 +177,16 @@ class ScreenRecordViewModel @Inject constructor(
     private fun fetchInstalledApps() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val pm = context.packageManager
-                val apps = pm.getInstalledPackages(0).filter { 
-                    pm.getLaunchIntentForPackage(it.packageName) != null 
-                }.sortedBy { it.applicationInfo?.loadLabel(pm).toString() }
+                // 🚀 SMART SCAN: Use cached labels and launcher status from DB 
+                // to avoid Vivo theme engine exception storms.
+                val apps = appDao.getAppsOneShot()
+                    .filter { it.isInstalled }
+                    .map { AppSelectionItem(it.packageName, it.label) }
+                    .sortedBy { it.label.lowercase() }
+                
                 _installedApps.value = apps
             } catch (e: Exception) {
-                Timber.e(e, "Failed to fetch apps")
+                Timber.e(e, "Failed to fetch apps from DB")
             }
         }
     }
@@ -400,5 +406,7 @@ class ScreenRecordViewModel @Inject constructor(
             preferencesManager.deleteCustomProfile(name)
         }
     }
+
+    data class AppSelectionItem(val packageName: String, val label: String)
 }
 

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.mustakim.bokbok.data.local.dao.GameDao
+import com.mustakim.bokbok.data.local.entity.AppEntity
 import com.mustakim.bokbok.data.local.entity.GameEntity
 import com.mustakim.bokbok.data.model.GameItem
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,7 +27,8 @@ import javax.inject.Inject
 
 class GameRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val gameDao: GameDao
+    private val gameDao: GameDao,
+    private val appDao: com.mustakim.bokbok.data.local.dao.AppDao
 ) {
     private val packageManager = context.packageManager
 
@@ -35,75 +37,46 @@ class GameRepository @Inject constructor(
 
     fun getGames(): Flow<List<GameItem>> {
         return gameDao.getAllGames().map { entities ->
-            // Optimization: Cache installed app list for 1 minute to avoid heavy IPC on every flow emission.
-            // When user switches tabs or toggles a profile, the DB flow emits. 
-            // We don't want to re-scan 300+ apps just because a DB row changed.
-            val currentTime = System.currentTimeMillis()
-            if (cachedInstalledPackages == null || currentTime - lastPackageScanTime > 300000) { // 5 mins fallback
-                cachedInstalledPackages = packageManager.getInstalledPackages(0)
-                lastPackageScanTime = currentTime
-            }
-            
-            val installedApps = cachedInstalledPackages!!
             val entityMap = entities.associateBy { it.packageName }
             
-            // Optimization: Process games in parallel chunks to avoid sequential IPC lag
-            val entitiesList = installedApps.chunked(30).flatMap { chunk ->
-                coroutineScope {
-                    chunk.map { packageInfo ->
-                        async {
-                            val appInfo = packageInfo.applicationInfo ?: return@async null
-                            val packageName = packageInfo.packageName
-                            val entity = entityMap[packageName]
-                            
-                            val isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || 
-                                          (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-                            
-                            val shouldEvaluationAsGame = entity != null || isUserApp
-                            
-                            if (shouldEvaluationAsGame && entity?.isManuallyRemoved != true) {
-                                if (entity != null || isGame(packageInfo)) {
-                                    return@async GameItem(
-                                        packageName = packageName,
-                                        label = appInfo.loadLabel(packageManager).toString(),
-                                        isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
-                                        isUserAdded = entity?.isUserAdded ?: false,
-                                        installedTime = packageInfo.firstInstallTime,
-                                        apkSize = appInfo.sourceDir?.let { File(it).length() } ?: 0L,
-                                        optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
-                                        customSettingsJson = entity?.customSettingsJson ?: "{}"
-                                    )
-                                }
-                            }
-                            null
-                        }
-                    }.mapNotNull { it.await() }
-                }
+            // 🚀 SMART SCAN: Use cached app data from DB instead of live scan.
+            // This prevents Vivo theme engine exception storms and lags.
+            val allApps = appDao.getAppsOneShot().filter { it.isInstalled }
+            
+            allApps.mapNotNull { app ->
+                val entity = entityMap[app.packageName]
+                
+                // Keep if it's explicitly user-added, or if it's naturally a game and NOT removed
+                val shouldShow = entity?.isUserAdded == true || 
+                               (app.isUserApp && !app.isSystemApp && entity?.isManuallyRemoved != true && isGameLegacy(app.packageName, app.category))
+                
+                if (shouldShow) {
+                    GameItem(
+                        packageName = app.packageName,
+                        label = app.label, // Cached label
+                        isHiddenFromLauncher = entity?.isHiddenFromLauncher ?: false,
+                        isUserAdded = entity?.isUserAdded ?: false,
+                        installedTime = app.firstInstallTime,
+                        apkSize = app.apkSize,
+                        optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
+                        customSettingsJson = entity?.customSettingsJson ?: "{}"
+                    )
+                } else null
             }
-            entitiesList
         }.map { items -> 
-            items.sortedBy { it.label } 
+            items.sortedBy { it.label.lowercase() } 
         }.flowOn(Dispatchers.IO)
     }
 
-    fun invalidateCache() {
-        cachedInstalledPackages = null
-        lastPackageScanTime = 0
-    }
-
-    private fun isGame(packageInfo: PackageInfo): Boolean {
-        // 1. Play Store category (Android O+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (packageInfo.applicationInfo?.category == ApplicationInfo.CATEGORY_GAME) return true
-        }
-        // 2. Known game package prefixes
+    private fun isGameLegacy(packageName: String, category: Int): Boolean {
+        if (category == ApplicationInfo.CATEGORY_GAME) return true
         val prefixes = listOf(
             "com.miHoYo.", "com.tencent.", "com.supercell.",
             "com.king.", "com.ea.", "com.gameloft.", "com.roblox.",
             "com.mojang.", "com.activision.", "com.netease.", "com.garena.",
             "com.epicgames.", "com.riotgames.", "com.square_enix.", "com.bandainamcoent."
         )
-        return prefixes.any { packageInfo.packageName.startsWith(it, ignoreCase = true) }
+        return prefixes.any { packageName.startsWith(it, ignoreCase = true) }
     }
 
     suspend fun launchGame(packageName: String) {

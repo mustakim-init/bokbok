@@ -23,4 +23,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "BokBok"
-include(":app")
+include(":app", ":baselineprofile")

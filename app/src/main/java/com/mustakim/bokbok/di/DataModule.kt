@@ -66,8 +66,8 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun provideGameRepository(@ApplicationContext context: Context, gameDao: GameDao): GameRepository {
-        return GameRepository(context, gameDao)
+    fun provideGameRepository(@ApplicationContext context: Context, gameDao: GameDao, appDao: AppDao): GameRepository {
+        return GameRepository(context, gameDao, appDao)
     }
 
     @Provides

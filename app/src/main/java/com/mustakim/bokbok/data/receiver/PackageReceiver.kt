@@ -19,8 +19,7 @@ class PackageReceiver : BroadcastReceiver() {
             action == Intent.ACTION_PACKAGE_REMOVED || 
             action == Intent.ACTION_PACKAGE_REPLACED) {
             
-            android.util.Log.d("PackageReceiver", "Package change detected: $action. Invalidating cache.")
-            repository.invalidateCache()
+            android.util.Log.d("PackageReceiver", "Package change detected: $action. DB will be updated on next scan.")
         }
     }
 }

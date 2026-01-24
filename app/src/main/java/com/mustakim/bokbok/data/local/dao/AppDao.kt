@@ -30,4 +30,15 @@ interface AppDao {
 
     @Query("SELECT COUNT(*) FROM apps")
     suspend fun getAppCount(): Int
+
+    @Query("UPDATE apps SET apkPath = :apkPath, dataPath = :dataPath, apkSize = :apkSize, dataSize = :dataSize, cacheSize = :cacheSize, hasActivities = :hasLauncher WHERE packageName = :packageName")
+    suspend fun updateAppDetails(
+        packageName: String, 
+        apkPath: String, 
+        dataPath: String, 
+        apkSize: Long, 
+        dataSize: Long, 
+        cacheSize: Long, 
+        hasLauncher: Boolean
+    )
 }

@@ -1,49 +1,31 @@
 package com.mustakim.bokbok.ui.screens.gameboost.appmanager
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mustakim.bokbok.data.bloatware.RemovalSafety
+import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.AppItem
-import com.mustakim.bokbok.utils.AppIconCache
+import com.mustakim.bokbok.data.bloatware.RemovalSafety
+import com.mustakim.bokbok.utils.AppIcon
 import java.text.DecimalFormat
+import java.util.Locale
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -92,29 +74,14 @@ fun AppListItem(
         ) {
             // App Icon with selection indicator - async loading for performance
             Box {
-                val context = LocalContext.current
-                var iconBitmap by remember(app.packageName) { mutableStateOf<ImageBitmap?>(null) }
-                
-                LaunchedEffect(app.packageName) {
-                    iconBitmap = AppIconCache.getIcon(context, app.packageName)
-                }
-
-                if (iconBitmap != null) {
-                    Image(
-                        bitmap = iconBitmap!!,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    )
-                }
+                AsyncImage(
+                    model = AppIcon(app.packageName),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
                 
                 // Selection checkmark
                 if (app.isSelected) {
@@ -183,7 +150,7 @@ fun AppListItem(
                 ) {
                     // Size (Total: APK + Data + Cache)
                     val totalSize = app.apkSize + app.dataSize + app.cacheSize
-                    if (totalSize > 0) {
+                    if (totalSize > 0L) {
                         MetadataChip(text = formatFileSize(totalSize))
                     }
                     
@@ -210,17 +177,18 @@ fun AppListItem(
                     }
                     
                     // Bloatware type indicator
-                    app.bloatwareType?.let { type ->
-                        val typeLabel = when (type.lowercase()) {
+                    val bType = app.bloatwareType
+                    if (bType != null) {
+                        val typeLabel = when (bType.lowercase(Locale.ROOT)) {
                             "google" -> "Google"
                             "carrier" -> "Carrier"
                             "oem" -> "OEM"
                             "aosp" -> "AOSP"
                             else -> null
                         }
-                        typeLabel?.let {
+                        if (typeLabel != null) {
                             MetadataChip(
-                                text = it,
+                                text = typeLabel,
                                 color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f)
                             )
                         }

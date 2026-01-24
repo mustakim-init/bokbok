@@ -15,8 +15,4 @@
 local.properties
 .apk
 /app/release
-*.md
-.agent
-/.md
-.md
 google-services.json

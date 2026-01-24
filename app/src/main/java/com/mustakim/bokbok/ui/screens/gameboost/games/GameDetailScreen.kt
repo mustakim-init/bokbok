@@ -31,10 +31,9 @@ import com.mustakim.bokbok.data.model.*
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 import com.mustakim.bokbok.viewmodel.LaunchState
-import com.mustakim.bokbok.utils.AppIconCache
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.ImageBitmap
+import com.mustakim.bokbok.utils.AppIcon
 import org.json.JSONObject
+import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,21 +95,12 @@ fun GameDetailScreen(
                             color = MaterialTheme.colorScheme.surface,
                             tonalElevation = 2.dp
                         ) {
-                        val context = LocalContext.current
-                        var iconBitmap by remember(game.packageName) { mutableStateOf<ImageBitmap?>(null) }
-                        
-                        LaunchedEffect(game.packageName) {
-                            iconBitmap = AppIconCache.getIcon(context, game.packageName)
-                        }
-
-                        if (iconBitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = iconBitmap!!,
+                            AsyncImage(
+                                model = AppIcon(game.packageName),
                                 contentDescription = null,
                                 modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(12.dp)),
                                 contentScale = ContentScale.Fit
                             )
-                        }
                         }
                         Spacer(Modifier.height(16.dp))
                         Text(

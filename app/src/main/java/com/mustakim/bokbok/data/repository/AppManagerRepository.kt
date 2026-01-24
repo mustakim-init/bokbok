@@ -229,10 +229,36 @@ class AppManagerRepository @Inject constructor(
                     return Triple(storageStats.appBytes, storageStats.dataBytes, storageStats.cacheBytes)
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                // System.err log storm typically happens here on Vivo if not properly handled
             }
         }
         return null // Fallback to basic size
+    }
+
+    /**
+     * 🚀 ON-DEMAND ENRICHMENT: Fetch deep metadata only when needed.
+     * This avoids cold-start lag by delaying Binder-heavy operations (paths, sizes).
+     */
+    suspend fun fetchFullAppDetails(packageName: String) = withContext(Dispatchers.IO) {
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            val sizes = getAppSize(packageName) ?: Triple(0L, 0L, 0L)
+            
+            val hasLauncher = packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName),
+                0
+            ).isNotEmpty()
+
+            appDao.updateAppDetails(
+                packageName = packageName,
+                apkPath = appInfo.sourceDir ?: "",
+                dataPath = appInfo.dataDir ?: "",
+                apkSize = sizes.first,
+                dataSize = sizes.second,
+                cacheSize = sizes.third,
+                hasLauncher = hasLauncher
+            )
+        } catch (_: Exception) {}
     }
 
     suspend fun syncBloatwareDatabase(): Boolean = withContext(Dispatchers.IO) {

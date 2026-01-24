@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.google.services)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -75,6 +76,12 @@ android {
         debug {
             isMinifyEnabled = false
             isDebuggable = true
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
         }
     }
 
@@ -240,7 +247,8 @@ dependencies {
 
     // NanoHTTPD (for Wi-Fi File Sharing)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
-
-    // Gemini AI SDK removed
-
+    
+    // Baseline Profile
+    implementation(libs.androidx.profileinstaller)
+    "baselineProfile"(project(":baselineprofile"))
 }

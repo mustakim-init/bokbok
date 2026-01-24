@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.GameItem
 import com.mustakim.bokbok.data.model.OptimizationProfile
 import com.mustakim.bokbok.data.repository.GameRepository
+import com.mustakim.bokbok.data.local.dao.AppDao
+import com.mustakim.bokbok.data.local.entity.AppEntity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,7 +29,8 @@ enum class LaunchState {
 @HiltViewModel
 class GameSpaceViewModel @Inject constructor(
     private val repository: GameRepository,
-    private val application: Application // Inject Application context for services
+    private val application: Application,
+    private val appDao: com.mustakim.bokbok.data.local.dao.AppDao
 ) : androidx.lifecycle.ViewModel() {
 
     private val _launchState = MutableStateFlow(LaunchState.NONE)
@@ -44,6 +47,9 @@ class GameSpaceViewModel @Inject constructor(
 
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
+
+    private val _addableApps = MutableStateFlow<List<AddableApp>>(emptyList())
+    val addableApps: StateFlow<List<AddableApp>> = _addableApps.asStateFlow()
 
     // 🚀 PERFORMANCE: Track if initial data has already been loaded
     private var _hasLoadedInitialData = false
@@ -262,4 +268,16 @@ class GameSpaceViewModel @Inject constructor(
             repository.addGameManually(packageName)
         }
     }
+
+    fun fetchAddableApps() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val apps = appDao.getAppsOneShot()
+                .filter { it.isInstalled && (!it.isSystemApp || it.isUserApp) }
+                .map { AddableApp(it.packageName, it.label) }
+                .sortedBy { it.label.lowercase() }
+            _addableApps.value = apps
+        }
+    }
+
+    data class AddableApp(val packageName: String, val label: String)
 }

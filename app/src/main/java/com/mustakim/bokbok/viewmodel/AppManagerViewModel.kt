@@ -112,13 +112,14 @@ class AppManagerViewModel @Inject constructor(
     }
 
     fun loadDataIfNeeded() {
-        if (uiState.value.apps.isEmpty()) {
-            loadApps()
-        }
+        // Data is loaded automatically via Flow/Room. 
+        // No need to trigger a worker refresh just because state is initially empty.
     }
 
-    fun loadApps() {
-        repository.refreshApps()
+    fun loadApps(forceRefresh: Boolean = false) {
+        if (forceRefresh) {
+            repository.refreshApps()
+        }
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -134,6 +135,10 @@ class AppManagerViewModel @Inject constructor(
     }
 
     fun onAppClicked(app: AppItem) {
+        // 🚀 SMART SCAN ENRICHMENT: Fetch deep metadata (paths, sizes) on-demand
+        viewModelScope.launch {
+            repository.fetchFullAppDetails(app.packageName)
+        }
         // Open our custom details screen
         _selectedApp.value = app
     }
@@ -205,7 +210,7 @@ class AppManagerViewModel @Inject constructor(
     }
 
     fun onRefresh() {
-        loadApps()
+        loadApps(forceRefresh = true)
     }
 
     fun checkForDatabaseUpdates() {

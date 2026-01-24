@@ -51,6 +51,7 @@ import android.view.PixelCopy
 import android.graphics.Bitmap
 import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.FacecamOverlay
 import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.WatermarkOverlay
+import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.CountdownOverlay
 
 @AndroidEntryPoint
 class ScreenRecordService : Service() {
@@ -90,6 +91,7 @@ class ScreenRecordService : Service() {
     private var facecamOverlay: com.mustakim.bokbok.ui.screens.gameboost.screenrecord.FacecamOverlay? = null
     private var textWatermarkOverlay: WatermarkOverlay? = null
     private var imageWatermarkOverlay: WatermarkOverlay? = null
+    private var countdownOverlay: CountdownOverlay? = null
     private var currentConfig: RecordConfig? = null
     private var displayManager: DisplayManager? = null
     
@@ -167,27 +169,11 @@ class ScreenRecordService : Service() {
         if (_isRecording.value || _isCountingDown.value) return
         _errorMessage.value = null
 
-        if (config.useCountdown) {
-            kotlinx.coroutines.MainScope().launch {
-                _isCountingDown.value = true
-                for (i in 3 downTo 1) {
-                    _countdownValue.value = i
-                    kotlinx.coroutines.delay(1000)
-                }
-                _isCountingDown.value = false
-                performStartRecording(resultCode, data, config)
-            }
-        } else {
-            performStartRecording(resultCode, data, config)
-        }
-    }
-
-    private fun performStartRecording(resultCode: Int, data: Intent, config: RecordConfig) {
+        // 0. Start Foreground Service IMMEDIATELY (Required for robust countdown and backgrounding)
+        // We use MICROPHONE type early if needed, or just MEDIA_PROJECTION as a baseline
+        val notification = createNotification("Preparing for recording...", showActions = false)
         try {
-            // 0. Start Foreground Service FIRST (Required for API 34+)
-            val notification = createNotification("Preparing for recording...", showActions = false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // API 34+: Must declare both microphone AND mediaProjection
                 startForeground(
                     NOTIFICATION_ID, 
                     notification, 
@@ -198,6 +184,41 @@ class ScreenRecordService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to start foreground service")
+            // Fallback: we might still try to proceed but it's risky
+        }
+
+        if (config.useCountdown) {
+            _isCountingDown.value = true
+            countdownOverlay = CountdownOverlay(this) {
+                _isCountingDown.value = false
+                _countdownValue.value = 0
+                // Small delay to ensure the window is fully removed from WindowManager
+                // before the media projection starts capturing
+                kotlinx.coroutines.MainScope().launch {
+                    kotlinx.coroutines.delay(500)
+                    performStartRecording(resultCode, data, config)
+                }
+            }
+            countdownOverlay?.show(3)
+            
+            // Start a side-loop just to keep the service flow updated for any watchers (like UI)
+            kotlinx.coroutines.MainScope().launch {
+                for (i in 3 downTo 1) {
+                    _countdownValue.value = i
+                    kotlinx.coroutines.delay(1000)
+                }
+            }
+        } else {
+            performStartRecording(resultCode, data, config)
+        }
+    }
+
+    private fun performStartRecording(resultCode: Int, data: Intent, config: RecordConfig) {
+        try {
+            // Update Notification to Recording state
+            updateNotification("Recording screen...", showPause = true)
 
             // Adjust dimensions based on Orientation Lock
             var finalWidth = config.width
@@ -524,6 +545,9 @@ class ScreenRecordService : Service() {
             imageWatermarkOverlay?.hide()
             imageWatermarkOverlay = null
             
+            countdownOverlay?.hide()
+            countdownOverlay = null
+            
             // Final Polish Cleanup
             cleanupFinalPolish()
             
@@ -575,11 +599,20 @@ class ScreenRecordService : Service() {
                         videoPath = path,
                         micPath = micPath,
                         internalPath = intPath,
+                        width = recordConfig?.width ?: 1920,
+                        height = recordConfig?.height ?: 1080,
+                        audioSampleRate = recordConfig?.audioSampleRate ?: 48000,
+                        audioBitrate = recordConfig?.audioBitrate ?: 128000,
+                        isMono = recordConfig?.isMono ?: false,
                         durationMs = duration
                     )
 
                     if (autoProcess) {
-                        performProcessing(dbId, recordConfig?.micAudioRatio ?: 1.0f, recordConfig?.internalAudioRatio ?: 1.0f)
+                        try {
+                            performProcessing(dbId, recordConfig?.micAudioRatio ?: 1.0f, recordConfig?.internalAudioRatio ?: 1.0f)
+                        } finally {
+                            stopSelf()
+                        }
                     } else {
                         // Manual Mode
                         MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(path), arrayOf("video/mp4")) { _, uri ->
@@ -609,9 +642,6 @@ class ScreenRecordService : Service() {
         }
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Ensure foreground service is running for processing (not strictly required if we have a notification, but good for priority)
-                // Ensure foreground service is running for processing
-                updateNotification("Processing background task...", showPause = false)
                 performProcessing(id, micGain, internalGain)
             } catch (e: Exception) {
                 Timber.e(e, "Manual processing failed")
@@ -628,6 +658,18 @@ class ScreenRecordService : Service() {
         val intPath = recording.internalPath
 
         try {
+            // Ensure foreground service is running for processing if not recording
+            if (!_isRecording.value) {
+                val notification = createNotification("Processing recording...", showActions = false)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
+                updateNotification("Processing recording...", showActions = false)
+            }
+
             val settings = preferencesManager.recorderSettings.first()
             val noiseReduction = settings["noiseReduction"] as? Boolean ?: true
             val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
@@ -635,10 +677,11 @@ class ScreenRecordService : Service() {
             val exportMic = settings["exportMicOnly"] as? Boolean ?: false
             val exportInternal = settings["exportInternalOnly"] as? Boolean ?: false
             val studioMaster = settings["studioMaster"] as? Boolean ?: true
-
-            val currentRecordConfig = preferencesManager.recordConfig.first()
             
-            updateNotification("Processing recording...", showPause = false)
+            val audioSampleRate = recording.audioSampleRate
+            val audioBitrate = recording.audioBitrate
+            val isMono = recording.isMono
+            
             recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSING)
             
             val originalFile = File(path)
@@ -659,7 +702,7 @@ class ScreenRecordService : Service() {
 
                 nativeRecorder.onProgressUpdate = { progress, msg ->
                     val percent = (progress * 100).toInt()
-                    updateNotification("Processing: $percent% - $msg", showPause = false)
+                    updateNotification("Processing: $percent% - $msg", showActions = false)
                     
                     // Update flow for UI
                     _processingProgress.value = _processingProgress.value.toMutableMap().apply {
@@ -675,8 +718,8 @@ class ScreenRecordService : Service() {
                     
                     success = nativeRecorder.processRecording(
                         videoFd = videoFd,
-                        videoWidth = currentRecordConfig.width,
-                        videoHeight = currentRecordConfig.height,
+                        videoWidth = recording.width,
+                        videoHeight = recording.height,
                         micPath = micPath,
                         internalPath = intPath,
                         outputPath = path,
@@ -690,9 +733,9 @@ class ScreenRecordService : Service() {
                         internalGain = internalGain,
                         exportMic = exportMic,
                         exportInternal = exportInternal,
-                        isMono = currentRecordConfig.isMono,
-                        audioSampleRate = currentRecordConfig.audioSampleRate,
-                        audioBitrate = currentRecordConfig.audioBitrate
+                        isMono = isMono,
+                        audioSampleRate = audioSampleRate,
+                        audioBitrate = audioBitrate
                     )
                     
                     pfd.close() // Close FD after native processing is done
@@ -748,8 +791,15 @@ class ScreenRecordService : Service() {
             recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
             handleError("Processing failed: ${e.message}")
         } finally {
+            nativeRecorder.onProgressUpdate = null
             _processingProgress.value = _processingProgress.value.toMutableMap().apply {
                 remove(dbId)
+            }
+            // Explicitly remove notification and foreground status
+            if (!_isRecording.value) {
+                stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.cancel(NOTIFICATION_ID)
             }
         }
     }
@@ -1014,8 +1064,8 @@ class ScreenRecordService : Service() {
         manager.notify(notificationId, builder.build())
     }
     
-    private fun updateNotification(content: String, showPause: Boolean = false, showResume: Boolean = false) {
-        val notification = createNotification(content, showActions = true, showPause = showPause, showResume = showResume)
+    private fun updateNotification(content: String, showActions: Boolean = true, showPause: Boolean = false, showResume: Boolean = false) {
+        val notification = createNotification(content, showActions = showActions, showPause = showPause, showResume = showResume)
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, notification)
     }

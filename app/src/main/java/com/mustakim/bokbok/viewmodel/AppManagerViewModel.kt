@@ -100,7 +100,7 @@ class AppManagerViewModel @Inject constructor(
     }.flowOn(Dispatchers.Default)
     .stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
+        SharingStarted.Lazily,
         AppManagerUiState(isLoading = true)
     )
 

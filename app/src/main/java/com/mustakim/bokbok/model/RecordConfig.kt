@@ -20,7 +20,7 @@ data class RecordConfig(
     val useHevc: Boolean = true,
     val includeMic: Boolean = true,
     val includeInternal: Boolean = true,
-    val profile: RecordingProfile = RecordingProfile.CUSTOM,
+    val profile: RecordingProfile = RecordingProfile.DEFAULT,
     val useCountdown: Boolean = true,
     val showFacecam: Boolean = false,
     val exportMicOnly: Boolean = false,

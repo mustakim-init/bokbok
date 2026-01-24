@@ -114,6 +114,9 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WifiTethering
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -139,6 +142,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -158,6 +162,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -327,74 +332,33 @@ fun ScreenRecordTab(
 
                         item {
                             val customProfiles by viewModel.customProfiles.collectAsState(initial = emptyList())
+                            val selectedProfileName by viewModel.selectedProfileName.collectAsState()
                             var showSaveDialog by remember { mutableStateOf(false) }
-                            var profileNameToDelete by remember { mutableStateOf<String?>(null) }
+                            var showManageDialog by remember { mutableStateOf(false) }
 
-                            SettingsGroup(title = "Recording Profile", icon = Icons.Default.AutoAwesome) {
-                                // Built-in Preset Picker
-                                RecordingProfilePicker(
-                                    currentProfile = config.profile,
-                                    onProfileSelected = { viewModel.updateConfig(config.copy(profile = it)) }
-                                )
-                                
-                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                                
-                                // Custom Profiles Section
-                                Text(
-                                    "Custom Profiles",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                                )
+                            val profileOptions = remember(customProfiles) {
+                                listOf("Default") + customProfiles.map { it.name } + listOf("Add New Profile...", "Manage Profiles...")
+                            }
 
-                                // List of saved custom profiles
-                                if (customProfiles.isNotEmpty()) {
-                                    customProfiles.forEach { profile ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { viewModel.loadCustomProfile(profile) }
-                                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
-                                                Spacer(modifier = Modifier.width(12.dp))
-                                                Column {
-                                                    Text(profile.name, style = MaterialTheme.typography.bodyMedium)
-                                                    Text(
-                                                        "${profile.resolutionName} • ${profile.fps} FPS • ${if (profile.useHevc) "HEVC" else "H.264"}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
+                            SettingsGroup(title = "Recording Profile", icon = Icons.Default.DashboardCustomize) {
+                                SettingPicker(
+                                    title = "Active Profile",
+                                    icon = Icons.Default.AutoAwesome,
+                                    value = selectedProfileName ?: "Default",
+                                    options = profileOptions,
+                                    onSelected = { selected ->
+                                        when (selected) {
+                                            "Default" -> viewModel.updateConfig(config.copy(profile = com.mustakim.bokbok.model.RecordingProfile.DEFAULT), preserveProfileName = "Default")
+                                            "Add New Profile..." -> showSaveDialog = true
+                                            "Manage Profiles..." -> showManageDialog = true
+                                            else -> {
+                                                customProfiles.find { it.name == selected }?.let {
+                                                    viewModel.loadCustomProfile(it)
                                                 }
-                                            }
-                                            IconButton(onClick = { profileNameToDelete = profile.name }) {
-                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                                             }
                                         }
                                     }
-                                } else {
-                                    Text(
-                                        "No custom profiles saved yet",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                                    )
-                                }
-
-                                // Save Current as Profile Button
-                                OutlinedButton(
-                                    onClick = { showSaveDialog = true },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                                ) {
-                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Save Current Settings as Profile")
-                                }
+                                )
                             }
 
                             // Save Profile Dialog
@@ -437,25 +401,40 @@ fun ScreenRecordTab(
                                 )
                             }
 
-                            // Delete Confirmation Dialog
-                            profileNameToDelete?.let { name ->
+                            // Manage Profiles Dialog
+                            if (showManageDialog) {
                                 AlertDialog(
-                                    onDismissRequest = { profileNameToDelete = null },
-                                    title = { Text("Delete Profile") },
-                                    text = { Text("Are you sure you want to delete \"$name\"?") },
-                                    confirmButton = {
-                                        TextButton(
-                                            onClick = {
-                                                viewModel.deleteCustomProfile(name)
-                                                profileNameToDelete = null
+                                    onDismissRequest = { showManageDialog = false },
+                                    title = { Text("Manage Profiles") },
+                                    text = {
+                                        if (customProfiles.isEmpty()) {
+                                            Text("No custom profiles available.", style = MaterialTheme.typography.bodyMedium)
+                                        } else {
+                                            Column(modifier = Modifier.fillMaxWidth()) {
+                                                customProfiles.forEach { profile ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 4.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(profile.name, style = MaterialTheme.typography.bodyLarge)
+                                                        IconButton(onClick = { viewModel.deleteCustomProfile(profile.name) }) {
+                                                            Icon(
+                                                                Icons.Default.Delete,
+                                                                contentDescription = "Delete ${profile.name}",
+                                                                tint = MaterialTheme.colorScheme.error
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
-                                        ) {
-                                            Text("Delete", color = MaterialTheme.colorScheme.error)
                                         }
                                     },
-                                    dismissButton = {
-                                        TextButton(onClick = { profileNameToDelete = null }) {
-                                            Text("Cancel")
+                                    confirmButton = {
+                                        TextButton(onClick = { showManageDialog = false }) {
+                                            Text("Done")
                                         }
                                     }
                                 )
@@ -1004,40 +983,7 @@ fun ScreenRecordTab(
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
         )
 
-        // Countdown Overlay
-        AnimatedVisibility(
-            visible = isCountingDown,
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { /* Block touches but allow visual cancel if we add it */ },
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                    modifier = Modifier.size(120.dp),
-                    tonalElevation = 12.dp,
-                    shadowElevation = 8.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = countdownValue.toString(),
-                            style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-            }
-        }
+        // Countdown Overlay handled by ScreenRecordService (Floating)
     }
 }
 
@@ -1236,77 +1182,6 @@ fun SettingsGroup(
     }
 }
 
-@Composable
-fun RecordingProfilePicker(
-    currentProfile: com.mustakim.bokbok.model.RecordingProfile,
-    onProfileSelected: (com.mustakim.bokbok.model.RecordingProfile) -> Unit
-) {
-    androidx.compose.foundation.lazy.LazyRow(
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        items(com.mustakim.bokbok.model.RecordingProfile.values()) { profile ->
-            val isSelected = currentProfile == profile
-            
-            Box(
-                modifier = Modifier
-                    .width(160.dp)
-                    .height(100.dp)
-                    .expressiveClickable(
-                        initialRadius = 20.dp,
-                        pressedRadius = 28.dp
-                    ) { onProfileSelected(profile) }
-                    .background(
-                        if (isSelected) {
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary,
-                                    MaterialTheme.colorScheme.secondary
-                                )
-                            )
-                        } else {
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    MaterialTheme.colorScheme.surface
-                                )
-                            )
-                        }
-                    )
-                    .padding(16.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.Center, modifier = Modifier.fillMaxSize()) {
-                    Text(
-                        text = profile.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = profile.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        lineHeight = 14.sp
-                    )
-                }
-                
-                if (isSelected) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .align(Alignment.TopEnd)
-                            .padding(4.dp)
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun SettingPicker(
@@ -1329,22 +1204,29 @@ fun SettingPicker(
         Spacer(modifier = Modifier.width(16.dp))
         Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold
-        )
-        
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        onSelected(option)
-                        expanded = false
-                    }
-                )
+        Box {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+            
+            DropdownMenu(
+                expanded = expanded, 
+                onDismissRequest = { expanded = false },
+                offset = androidx.compose.ui.unit.DpOffset(x = 0.dp, y = 4.dp)
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onSelected(option)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
     }
@@ -1871,3 +1753,4 @@ fun OverlaySettingsGroup(config: RecordConfig, viewModel: ScreenRecordViewModel)
         }
     }
 }
+

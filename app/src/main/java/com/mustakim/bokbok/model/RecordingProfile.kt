@@ -1,7 +1,8 @@
 package com.mustakim.bokbok.model
 
 /**
- * Predefined recording profiles for different use cases.
+ * Recording profiles for screen recording.
+ * Now simplified to a single DEFAULT profile, allowing users to build their own custom ones.
  */
 enum class RecordingProfile(
     val title: String,
@@ -18,60 +19,19 @@ enum class RecordingProfile(
     val micRatio: Float = 1.0f,
     val internalRatio: Float = 1.0f
 ) {
-    GAMING(
-        title = "Pro Gaming",
-        description = "High FPS, high bitrate, internal audio priority.",
-        resolutionName = "1080p",
-        width = 1080,
-        height = 1920,
-        bitrate = 20_000_000,
-        bitrateName = "20 Mbps",
-        fps = 60,
-        useHevc = true,
-        includeMic = true,
-        includeInternal = true,
-        micRatio = 0.6f,
-        internalRatio = 1.0f
-    ),
-    VOICE_OVER(
-        title = "Voice Over",
-        description = "Balanced quality, microphone priority.",
+    DEFAULT(
+        title = "Default",
+        description = "Balanced high-quality settings for most use cases.",
         resolutionName = "1080p",
         width = 1080,
         height = 1920,
         bitrate = 12_000_000,
         bitrateName = "12 Mbps",
-        fps = 30,
-        useHevc = false,
+        fps = 60,
+        useHevc = true,
         includeMic = true,
         includeInternal = true,
         micRatio = 1.0f,
-        internalRatio = 0.4f
-    ),
-    EFFICIENCY(
-        title = "Battery Saver",
-        description = "Lower resolution and FPS to save power.",
-        resolutionName = "720p",
-        width = 720,
-        height = 1280,
-        bitrate = 6_000_000,
-        bitrateName = "6 Mbps",
-        fps = 30,
-        useHevc = true,
-        includeMic = true,
-        includeInternal = true
-    ),
-    CUSTOM(
-        title = "Custom",
-        description = "Use your own fine-tuned settings.",
-        resolutionName = "720p",
-        width = 720,
-        height = 1280,
-        bitrate = 8_000_000,
-        bitrateName = "8 Mbps",
-        fps = 60,
-        useHevc = false,
-        includeMic = true,
-        includeInternal = true
+        internalRatio = 1.0f
     )
 }

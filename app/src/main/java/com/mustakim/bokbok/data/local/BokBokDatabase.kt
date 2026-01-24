@@ -25,7 +25,7 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         com.mustakim.bokbok.data.model.AISession::class,
         com.mustakim.bokbok.data.model.AIFact::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GeneralTypeConverters::class)

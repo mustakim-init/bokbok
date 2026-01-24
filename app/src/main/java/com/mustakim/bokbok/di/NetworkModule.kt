@@ -93,4 +93,14 @@ object NetworkModule {
             .build()
             .create(GroqApi::class.java)
     }
+    @Provides
+    @Singleton
+    fun provideVirusTotalApi(okHttpClient: OkHttpClient): com.mustakim.bokbok.data.remote.VirusTotalApi {
+        return Retrofit.Builder()
+            .baseUrl("https://www.virustotal.com/api/v3/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(com.mustakim.bokbok.data.remote.VirusTotalApi::class.java)
+    }
 }

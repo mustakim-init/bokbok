@@ -71,6 +71,16 @@ class ScreenRecordViewModel @Inject constructor(
     private val _processingProgress = MutableStateFlow<Map<Long, Float>>(emptyMap())
     val processingProgress = _processingProgress.asStateFlow()
 
+    private val _selectedProfileName = MutableStateFlow<String?>("Default")
+    val selectedProfileName = _selectedProfileName.asStateFlow()
+
+    private fun setSelectedProfileName(name: String?) {
+        _selectedProfileName.value = name
+        viewModelScope.launch {
+            preferencesManager.saveSelectedProfileName(name)
+        }
+    }
+
 
     // Remote Models
     val modelState = modelRepository.modelState
@@ -139,6 +149,13 @@ class ScreenRecordViewModel @Inject constructor(
         viewModelScope.launch { 
             recorderSettings.collect { settings ->
                 isWifiPasswordRequired = settings["wifiShareRequirePassword"] as? Boolean ?: false
+            }
+        }
+        
+        // Load Selected Profile Name
+        viewModelScope.launch {
+            preferencesManager.selectedProfileName.collect { name ->
+                _selectedProfileName.value = name
             }
         }
     }
@@ -216,26 +233,42 @@ class ScreenRecordViewModel @Inject constructor(
         screenRecordServiceRef?.get()?.resumeRecording()
     }
 
-    fun updateConfig(newConfig: RecordConfig) {
-        // If any core setting is changed manually (not via profile), set profile to CUSTOM
+    fun updateConfig(newConfig: RecordConfig, preserveProfileName: String? = null) {
         val finalConfig = if (newConfig.profile != _config.value.profile) {
-            // Profile changed -> Apply profile settings
+            // Apply profile defaults if switching base profile types
+            val nameToSet = preserveProfileName ?: (if (newConfig.profile == RecordingProfile.DEFAULT) "Default" else null)
+            setSelectedProfileName(nameToSet)
             applyProfileToConfig(newConfig, newConfig.profile)
-        } else if (isConfigCustomized(newConfig, _config.value)) {
-            newConfig.copy(profile = RecordingProfile.CUSTOM)
         } else {
+            // No base profile change
+            if (preserveProfileName != null) {
+                setSelectedProfileName(preserveProfileName)
+            } else if (_selectedProfileName.value == "Default") {
+                // Keep "Default" selected even if settings change from its base values
+                // as "Default" is the base profile type now.
+            } else {
+                // If we were on a custom profile, any change should probably stay on it 
+                // but we need to update that profile's snapshot.
+                // UNLESS the user wants manual "Save" button. 
+                // Based on user feedback, they want it to "Save the actual one".
+            }
             newConfig
         }
 
         _config.value = finalConfig
         viewModelScope.launch {
             preferencesManager.saveRecordConfig(finalConfig)
+            
+            // Auto-save to custom profile if one is active (and not "Default")
+            val activeName = _selectedProfileName.value
+            if (activeName != null && activeName != "Default") {
+                val profile = com.mustakim.bokbok.model.CustomRecordingProfile.fromConfig(activeName, finalConfig)
+                preferencesManager.saveCustomProfile(profile)
+            }
         }
     }
 
     private fun applyProfileToConfig(config: RecordConfig, profile: RecordingProfile): RecordConfig {
-        if (profile == RecordingProfile.CUSTOM) return config
-        
         return config.copy(
             profile = profile,
             resolutionName = profile.resolutionName,
@@ -250,18 +283,6 @@ class ScreenRecordViewModel @Inject constructor(
             micAudioRatio = profile.micRatio,
             internalAudioRatio = profile.internalRatio
         )
-    }
-
-    private fun isConfigCustomized(new: RecordConfig, old: RecordConfig): Boolean {
-        return new.width != old.width ||
-               new.height != old.height ||
-               new.bitrate != old.bitrate ||
-               new.fps != old.fps ||
-               new.useHevc != old.useHevc ||
-               new.includeMic != old.includeMic ||
-               new.includeInternal != old.includeInternal ||
-               new.micAudioRatio != old.micAudioRatio ||
-               new.internalAudioRatio != old.internalAudioRatio
     }
     
     fun updateMixRatio(mic: Float, internal: Float) {
@@ -367,11 +388,15 @@ class ScreenRecordViewModel @Inject constructor(
     }
 
     fun loadCustomProfile(profile: com.mustakim.bokbok.model.CustomRecordingProfile) {
-        updateConfig(profile.applyTo(_config.value))
+        // Pass the profile name to updateConfig so it isn't cleared
+        updateConfig(profile.applyTo(_config.value), preserveProfileName = profile.name)
     }
 
     fun deleteCustomProfile(name: String) {
         viewModelScope.launch {
+            if (_selectedProfileName.value == name) {
+                setSelectedProfileName("Default")
+            }
             preferencesManager.deleteCustomProfile(name)
         }
     }

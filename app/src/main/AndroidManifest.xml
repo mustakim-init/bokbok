@@ -160,7 +160,10 @@
             android:name=".data.service.ScreenRecordService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection|microphone" />
+            android:foregroundServiceType="mediaProjection|microphone|specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Recording post-processing and audio synchronization" />
+        </service>
 
         <service
             android:name=".data.service.BokBokAgentService"

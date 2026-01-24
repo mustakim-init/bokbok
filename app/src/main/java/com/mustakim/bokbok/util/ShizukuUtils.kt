@@ -32,7 +32,7 @@ object ShizukuUtils {
         BokBokAgentService.getInstance() != null
     }
 
-    private suspend fun executeCommand(command: String): String = withContext(Dispatchers.IO) {
+    suspend fun executeCommand(command: String): String = withContext(Dispatchers.IO) {
         try {
             val binder = rikka.shizuku.Shizuku.getBinder()
             if (binder != null) {

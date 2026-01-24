@@ -54,6 +54,7 @@ import com.mustakim.bokbok.ui.screens.gameboost.appmanager.AppManagerScreen
 import com.mustakim.bokbok.ui.screens.gameboost.usagestats.UsageStatsScreen
 import com.mustakim.bokbok.ui.screens.gameboost.devicemonitor.DeviceMonitorScreen
 import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.ScreenRecordTab
+import com.mustakim.bokbok.ui.screens.gameboost.security.SecurityScreen
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,6 +78,14 @@ fun GameBoostScreen(
     }
 
     val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel(viewModelStoreOwner)
+    
+    // 🚀 PERFORMANCE: Pre-instantiate ALL ViewModels BEFORE the pager.
+    // This ensures they're created once when the screen enters composition,
+    // not repeatedly inside the pager lambda during swipe animations.
+    val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(viewModelStoreOwner)
+    val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(viewModelStoreOwner)
+    val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(viewModelStoreOwner)
+    val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel = hiltViewModel(viewModelStoreOwner)
 
     // Sync Pager state with ViewModel state
     LaunchedEffect(pagerState.currentPage) {
@@ -256,41 +265,33 @@ fun GameBoostScreen(
                         state = pagerState,
                         modifier = Modifier
                             .fillMaxSize(),
-                        beyondViewportPageCount = 1, // Reduced to save memory
+                        beyondViewportPageCount = 1, // 🚀 Pre-load adjacent tabs for smooth swiping
                         key = { tabs[it] }
                     ) { page ->
                         val tab = tabs[page]
+                        // 🚀 PERFORMANCE: Deferred loading - only load data when tab is settled (not during swipe)
+                        val isSettled = !pagerState.isScrollInProgress && pagerState.currentPage == page
+                        
                         when (tab) {
                             GameBoostTab.GAME_BOOST -> {
-                                val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel =
-                                    hiltViewModel(viewModelStoreOwner)
+                                LaunchedEffect(isSettled) {
+                                    if (isSettled) gameSpaceViewModel.loadDataIfNeeded()
+                                }
                                 com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(
                                     viewModel = gameSpaceViewModel
                                 )
                             }
 
                             GameBoostTab.APP_MANAGER -> {
-                                val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel =
-                                    hiltViewModel(viewModelStoreOwner)
-                                // 🚀 PERFORMANCE FIX: Wait for navigation to settle before starting heavy app scan
-                                val isSettled = !pagerState.isScrollInProgress && pagerState.currentPage == page
                                 LaunchedEffect(isSettled) {
-                                    if (isSettled) {
-                                        appManagerViewModel.loadDataIfNeeded()
-                                    }
+                                    if (isSettled) appManagerViewModel.loadDataIfNeeded()
                                 }
                                 AppManagerScreen(viewModel = appManagerViewModel)
                             }
 
                             GameBoostTab.USAGE_STATS -> {
-                                val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel =
-                                    hiltViewModel(viewModelStoreOwner)
-                                // 🚀 PERFORMANCE FIX: Wait for navigation to settle before querying Usage Stats
-                                val isSettled = !pagerState.isScrollInProgress && pagerState.currentPage == page
                                 LaunchedEffect(isSettled) {
-                                    if (isSettled) {
-                                        usageStatsViewModel.loadDataIfNeeded()
-                                    }
+                                    if (isSettled) usageStatsViewModel.loadDataIfNeeded()
                                 }
                                 UsageStatsScreen(viewModel = usageStatsViewModel)
                             }
@@ -300,11 +301,17 @@ fun GameBoostScreen(
                             }
 
                             GameBoostTab.SCREEN_RECORD -> {
-                                val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel =
-                                    hiltViewModel(viewModelStoreOwner)
                                 ScreenRecordTab(
                                     navController = navController,
                                     viewModel = screenRecordViewModel
+                                )
+                            }
+
+                            GameBoostTab.SECURITY -> {
+                                // Deferred loading for performance
+                                val securityViewModel: com.mustakim.bokbok.viewmodel.SecurityViewModel = hiltViewModel(viewModelStoreOwner)
+                                com.mustakim.bokbok.ui.screens.gameboost.security.SecurityScreen(
+                                    viewModel = securityViewModel
                                 )
                             }
 

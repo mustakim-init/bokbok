@@ -36,7 +36,7 @@ class DeviceMonitorViewModel @Inject constructor(
         isRefreshing = true
         
         monitoringJob?.cancel()
-        monitoringJob = viewModelScope.launch {
+        monitoringJob = viewModelScope.launch(Dispatchers.IO) { // Run on IO to unblock Main thread
             while (isActive) {
                 try {
                     // Ticks are every 2 seconds
@@ -45,8 +45,6 @@ class DeviceMonitorViewModel @Inject constructor(
                     val isProcessTick = tickCount % 4 == 0   // Every 8 seconds (top is VERY heavy)
 
                     // SEQUENCE UPDATES to avoid "Shizuku Storm"
-                    // Parallel async {} for shell commands causes massive frame drops on cold starts.
-                    // Sequential execution is safer and the 2s refresh still feels real-time.
                     val cpu = try { repository.getCpuInfo() } catch (_: Exception) { _uiState.value.cpuInfo }
                     val ram = try { repository.getRamInfo() } catch (_: Exception) { _uiState.value.ramInfo }
                     val gpu = try { repository.getGpuInfo() } catch (_: Exception) { _uiState.value.gpuInfo }

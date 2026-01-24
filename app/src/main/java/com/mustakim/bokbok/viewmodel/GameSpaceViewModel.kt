@@ -45,6 +45,9 @@ class GameSpaceViewModel @Inject constructor(
     private val _isSelectionMode = MutableStateFlow(false)
     val isSelectionMode: StateFlow<Boolean> = _isSelectionMode.asStateFlow()
 
+    // 🚀 PERFORMANCE: Track if initial data has already been loaded
+    private var _hasLoadedInitialData = false
+
     init {
         // Recovery Logic: If the app starts and find snapshots but the service isn't running,
         // it means we had a "messy" exit previously. Clean up.
@@ -55,14 +58,22 @@ class GameSpaceViewModel @Inject constructor(
         }
     }
 
+    // 🚀 PERFORMANCE: Called from UI when tab is settled, prevents redundant loads
+    fun loadDataIfNeeded() {
+        if (_hasLoadedInitialData) return
+        _hasLoadedInitialData = true
+        // Data is loaded via Flow subscription, just mark as loaded
+    }
+
+    // 🚀 PERFORMANCE: Use SharingStarted.Lazily to defer flow collection until first subscriber
     val games: StateFlow<List<GameItem>> = repository.getGames()
         .onEach { _isLoading.value = false }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val filteredGames: StateFlow<List<GameItem>> = combine(games, _searchQuery) { currentGames, query ->
         if (query.isBlank()) currentGames
         else currentGames.filter { it.label.contains(query, ignoreCase = true) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _selectedPackageName = MutableStateFlow<String?>(null)
     
@@ -119,10 +130,12 @@ class GameSpaceViewModel @Inject constructor(
                 // 1. Get profile and custom JSON
                 val profile = game.optimizationProfile
                 val customJson = game.customSettingsJson
-                val json = try { JSONObject(customJson) } catch (_: Exception) { JSONObject() }
-
-                // 2. Apply Tweaks on IO thread to ensure absolute UI smoothness (Profile Threading)
+                
+                // Move heavy JSON parsing and logic to IO
                 withContext(Dispatchers.IO) {
+                    val json = try { JSONObject(customJson) } catch (_: Exception) { JSONObject() }
+
+                    // 2. Apply Tweaks on IO thread to ensure absolute UI smoothness (Profile Threading)
                     // Kill background apps first if needed
                     val shouldKillApps = profile == OptimizationProfile.PERFORMANCE || json.optString("kill_bg_apps") == "true"
                     if (shouldKillApps) {

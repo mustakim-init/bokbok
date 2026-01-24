@@ -167,9 +167,11 @@ fun MainScaffold(
         }
     }
 
-    val onNavigate = remember(navController, currentRoute) {
+    // 🚀 PERFORMANCE: Don't include currentRoute in remember key - we check it inside
+    val onNavigate = remember(navController) {
         { route: String ->
-            if (currentRoute != route) {
+            val current = navController.currentBackStackEntry?.destination?.route
+            if (current != route) {
                 navController.navigate(route) {
                     popUpTo(NavRoutes.Lounge.route) {
                         saveState = true

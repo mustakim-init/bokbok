@@ -1,6 +1,8 @@
 package com.mustakim.bokbok.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,7 +15,8 @@ enum class GameBoostTab(val title: String) {
     APP_MANAGER("App Manager"),
     DEVICE_MONITOR("Device Monitor"),
     USAGE_STATS("Usage Stats"),
-    SCREEN_RECORD("Screen Record");
+    SCREEN_RECORD("Screen Record"),
+    SECURITY("Security");
     
     companion object {
         fun getByIndex(index: Int): GameBoostTab = entries.getOrElse(index) { GAME_BOOST }
@@ -64,10 +67,13 @@ class GameBoostViewModel @Inject constructor() : ViewModel() {
     }
 
     fun verifyShizukuStatus() {
-        _shizukuActive.value = try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
-            false
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val isActive = try {
+                Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) {
+                false
+            }
+            _shizukuActive.value = isActive
         }
     }
 }

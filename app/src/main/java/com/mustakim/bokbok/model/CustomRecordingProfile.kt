@@ -40,7 +40,7 @@ data class CustomRecordingProfile(
             micAudioRatio = micAudioRatio,
             internalAudioRatio = internalAudioRatio,
             isMono = isMono,
-            profile = RecordingProfile.CUSTOM
+            profile = RecordingProfile.DEFAULT
         )
     }
 

@@ -89,10 +89,15 @@ class PreferencesManager @Inject constructor(
         // Wi-Fi Sharing
         private val WIFI_SHARE_REQUIRE_PASSWORD_KEY = booleanPreferencesKey("wifi_share_require_password")
         
+        private val SELECTED_PROFILE_NAME_KEY = stringPreferencesKey("selected_profile_name")
+        
         // AI - Hardware Identity Cache
         private val CACHED_MODEL_NAME_KEY = stringPreferencesKey("ai_cached_model_name")
         private val CACHED_SOC_NAME_KEY = stringPreferencesKey("ai_cached_soc_name")
         private val AI_TTS_MODE_KEY = stringPreferencesKey("ai_tts_mode")
+
+        // Security
+        private val VIRUSTOTAL_API_KEY = stringPreferencesKey("virustotal_api_key")
     }
 
     val selectedTheme: Flow<AppTheme> = context.dataStore.data.map { preferences ->
@@ -142,7 +147,11 @@ class PreferencesManager @Inject constructor(
             exportInternalOnly = preferences[REC_EXPORT_INTERNAL_KEY] ?: false,
             autoStopDurationMinutes = preferences[AUTO_STOP_DURATION_KEY] ?: 0,
             autoStopBatteryLevel = preferences[AUTO_STOP_BATTERY_KEY] ?: 0,
-            profile = RecordingProfile.valueOf(preferences[REC_PROFILE_KEY] ?: RecordingProfile.CUSTOM.name),
+            profile = try {
+                RecordingProfile.valueOf(preferences[REC_PROFILE_KEY] ?: RecordingProfile.DEFAULT.name)
+            } catch (e: Exception) {
+                RecordingProfile.DEFAULT
+            },
             useWatermarkText = preferences[USE_WATERMARK_TEXT_KEY] ?: false,
             watermarkText = preferences[WATERMARK_TEXT_KEY] ?: "BokBok Screen Recorder",
             watermarkImagePath = preferences[WATERMARK_IMAGE_PATH_KEY] ?: "",
@@ -262,6 +271,20 @@ class PreferencesManager @Inject constructor(
         }
     }
 
+    val selectedProfileName: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[SELECTED_PROFILE_NAME_KEY]
+    }
+
+    suspend fun saveSelectedProfileName(name: String?) {
+        context.dataStore.edit { preferences ->
+            if (name == null) {
+                preferences.remove(SELECTED_PROFILE_NAME_KEY)
+            } else {
+                preferences[SELECTED_PROFILE_NAME_KEY] = name
+            }
+        }
+    }
+
     // AI - Hardware Cache
     val deviceIdentity: Flow<Pair<String?, String?>> = context.dataStore.data.map { preferences ->
         preferences[CACHED_MODEL_NAME_KEY] to preferences[CACHED_SOC_NAME_KEY]
@@ -343,5 +366,11 @@ class PreferencesManager @Inject constructor(
             profiles.removeAll { it.name == name }
             preferences[CUSTOM_PROFILES_KEY] = kotlinx.serialization.json.Json.encodeToString(profiles)
         }
+    }
+
+    val virustotalApiKey: Flow<String> = context.dataStore.data.map { it[VIRUSTOTAL_API_KEY] ?: "" }
+
+    suspend fun saveVirusTotalApiKey(key: String) {
+        context.dataStore.edit { it[VIRUSTOTAL_API_KEY] = key }
     }
 }

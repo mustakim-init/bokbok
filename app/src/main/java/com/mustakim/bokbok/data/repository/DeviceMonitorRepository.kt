@@ -404,7 +404,7 @@ class DeviceMonitorRepository @Inject constructor(
 
 
 
-    suspend fun getRamInfo(): RamInfo {
+    suspend fun getRamInfo(): RamInfo = withContext(Dispatchers.IO) {
         val memInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memInfo)
         
@@ -453,7 +453,7 @@ class DeviceMonitorRepository @Inject constructor(
         val swapUsed = swapTotal - swapFree
         val swapPercent = if (swapTotal > 0) (swapUsed.toFloat() / swapTotal.toFloat()) * 100f else 0f
 
-        return RamInfo(
+        RamInfo(
             totalMb = total,
             usedMb = used,
             availableMb = available,
@@ -570,7 +570,7 @@ class DeviceMonitorRepository @Inject constructor(
         )
     }
 
-    suspend fun getStorageInfo(): StorageInfo {
+    suspend fun getStorageInfo(): StorageInfo = withContext(Dispatchers.IO) {
         var totalGb = 0f
         var availableGb = 0f
         var usedGb = 0f
@@ -605,7 +605,7 @@ class DeviceMonitorRepository @Inject constructor(
         
         val percent = if (totalGb > 0) (usedGb / totalGb) * 100f else 0f
         
-        return StorageInfo(
+        StorageInfo(
             totalGb = totalGb,
             usedGb = usedGb,
             availableGb = availableGb,

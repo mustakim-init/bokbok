@@ -21,6 +21,11 @@ class RecordingRepository @Inject constructor(
         videoPath: String,
         micPath: String,
         internalPath: String,
+        width: Int,
+        height: Int,
+        audioSampleRate: Int,
+        audioBitrate: Int,
+        isMono: Boolean,
         durationMs: Long
     ): Long {
         val id = System.currentTimeMillis()
@@ -29,6 +34,11 @@ class RecordingRepository @Inject constructor(
             videoPath = videoPath,
             micPath = micPath,
             internalPath = internalPath,
+            width = width,
+            height = height,
+            audioSampleRate = audioSampleRate,
+            audioBitrate = audioBitrate,
+            isMono = isMono,
             durationMs = durationMs,
             status = RecordingStatus.PENDING
         )

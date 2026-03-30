@@ -48,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,14 +64,34 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.ui.theme.AppTheme
 import com.mustakim.bokbok.viewmodel.ThemeViewModel
+import com.mustakim.bokbok.viewmodel.AdbSetupViewModel
+import com.mustakim.bokbok.data.adb.ResurrectionSetupState
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     navController: NavHostController,
-    themeViewModel: ThemeViewModel
+    themeViewModel: ThemeViewModel,
+    adbSetupViewModel: AdbSetupViewModel
 ) {
     val selectedTheme by themeViewModel.selectedTheme.collectAsState()
+    val adbSetupState by adbSetupViewModel.setupState.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
     Scaffold(
@@ -178,29 +199,16 @@ fun SettingsScreen(
                 )
             }
 
-            // PRIVACY
+            // ADB RESURRECTION SECTION
             item {
-                SettingsSection(
-                    title = "Privacy & Security",
-                    icon = Icons.Default.Shield,
-                    iconTint = MaterialTheme.colorScheme.secondary,
-                    items = listOf(
-                        SettingsItem(
-                            title = "Who Can Call Me",
-                            subtitle = "Friends only",
-                            icon = Icons.Default.Person
-                        ),
-                        SettingsItem(
-                            title = "Online Status",
-                            subtitle = "Visible to everyone",
-                            icon = Icons.Default.Visibility
-                        ),
-                        SettingsItem(
-                            title = "Blocked Users",
-                            subtitle = "Manage blocked contacts",
-                            icon = Icons.Default.Lock
-                        )
-                    )
+                AdbResurrectionSection(
+                    setupState = adbSetupState,
+                    onStartSetup = { adbSetupViewModel.runSetup() },
+                    onStartPairing = { adbSetupViewModel.initiatePairing() },
+                    onSelfAuthorize = { adbSetupViewModel.selfAuthorizeViaShizuku() },
+                    onPairAction = { port, code -> adbSetupViewModel.submitPairingCode(port, code) },
+                    onResetSetup = { adbSetupViewModel.resetSetup() },
+                    onGetPublicKey = { adbSetupViewModel.getAdbPublicKey() }
                 )
             }
             
@@ -496,6 +504,296 @@ private fun SettingsRow(
                     .height(1.dp)
                     .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             )
+        }
+    }
+}
+
+@Composable
+fun AdbResurrectionSection(
+    setupState: ResurrectionSetupState,
+    onStartSetup: () -> Unit,
+    onStartPairing: () -> Unit,
+    onSelfAuthorize: () -> Unit,
+    onPairAction: (Int, String) -> Unit,
+    onResetSetup: () -> Unit,
+    onGetPublicKey: () -> String
+) {
+    val clipboardManager = LocalClipboardManager.current
+    
+    Column {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.BugReport,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "ADB Resurrection",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "Automatic reboot persistence",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+            ),
+            shape = RoundedCornerShape(20.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                when (setupState) {
+                    is ResurrectionSetupState.NotSetup -> {
+                        Text(
+                            text = "ADB Resurrection allows BokBok to automatically restart Shizuku and optimizations after every reboot.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Only show Self-Authorize if Shizuku is running
+                            val isShizukuRunning = remember {
+                                try { rikka.shizuku.Shizuku.getBinder() != null } catch (e: Exception) { false }
+                            }
+                            
+                            Button(
+                                onClick = onStartPairing,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.BugReport, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Wireless ADB Pairing (Recommended)")
+                            }
+
+                            if (isShizukuRunning) {
+                                OutlinedButton(
+                                    onClick = onSelfAuthorize,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Self-Authorize via Shizuku (Experimental)")
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = onStartSetup,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Connect (Already Authorized)")
+                            }
+                        }
+                    }
+                    is ResurrectionSetupState.Discovering -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Finding Wireless ADB...", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Text(
+                            text = "Make sure Wireless Debugging is enabled and 'Pair device with pairing code' is open if you clicked Pair.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    is ResurrectionSetupState.PairingCodeRequired -> {
+                        var code by remember { mutableStateOf("") }
+                        AlertDialog(
+                            onDismissRequest = onResetSetup,
+                            title = { Text("Enter Pairing Code") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Enter the 6-digit code shown in Wireless Debugging.")
+                                    OutlinedTextField(
+                                        value = code,
+                                        onValueChange = { if (it.length <= 6) code = it },
+                                        label = { Text("Pairing Code") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = { onPairAction(setupState.port, code) },
+                                    enabled = code.length == 6
+                                ) {
+                                    Text("Pair")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = onResetSetup) {
+                                    Text("Cancel")
+                                }
+                            }
+                        )
+                    }
+                    is ResurrectionSetupState.Connecting -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Connecting and deploying...", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    is ResurrectionSetupState.Active -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "Resurrection is Active",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF4CAF50)
+                            )
+                        }
+                        Text(
+                            text = "BokBok is now set to persist through reboots. If it stops working, you can reset and try again.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedButton(
+                            onClick = onResetSetup,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Reset Setup")
+                        }
+                    }
+                    is ResurrectionSetupState.Error -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                "Setup Failed",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        
+                        Text(
+                            text = "Device rejected connection. You must authorize this app to use ADB.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // Manual Auth Section
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "Manual Authorization (Permanent)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                "Run this command on a PC (with Wireless Debugging enabled) to trust this app forever:",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            val pubKey = onGetPublicKey()
+                            val command = "adb shell \"echo '$pubKey' >> /data/misc/adb/adb_keys\""
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(8.dp)
+                                    .clickable {
+                                        clipboardManager.setText(AnnotatedString(command))
+                                    }
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "adb shell \"echo '${pubKey.take(20)}...' >> /data/misc/adb/adb_keys\"",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = onStartPairing,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Try Again")
+                        }
+                    }
+                }
+                
+                // Info block
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.05f))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp).padding(top = 2.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Once paired, BokBok will use its own ADB bridge to keep optimizations active without needing a PC or manual Shizuku start.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

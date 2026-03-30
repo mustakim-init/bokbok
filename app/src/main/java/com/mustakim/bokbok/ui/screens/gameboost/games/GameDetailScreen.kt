@@ -2,8 +2,7 @@ package com.mustakim.bokbok.ui.screens.gameboost.games
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -18,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.core.graphics.drawable.toBitmap
 import com.mustakim.bokbok.data.model.*
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
@@ -34,6 +35,8 @@ import com.mustakim.bokbok.viewmodel.LaunchState
 import com.mustakim.bokbok.utils.AppIcon
 import org.json.JSONObject
 import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,24 +49,27 @@ fun GameDetailScreen(
         try { JSONObject(game.customSettingsJson) } catch(_: Exception) { JSONObject() }
     }
     
-    var infoTweak by remember { mutableStateOf<TweakDef?>(null) }
     val tweaksByCategory = remember { TweakCatalog.getFilteredTweaks().groupBy { it.category } }
     val launchState by viewModel.launchState.collectAsState()
+    val shizukuActive by viewModel.shizukuActive.collectAsState()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Power House", fontFamily = GoogleSansFlex, fontWeight = FontWeight.ExtraBold) },
+            TopAppBar(
+                title = { Text(game.label, fontFamily = GoogleSansFlex, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
@@ -71,7 +77,8 @@ fun GameDetailScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 32.dp)
@@ -132,61 +139,117 @@ fun GameDetailScreen(
                         ) {
                             Icon(Icons.Default.RocketLaunch, null)
                             Spacer(Modifier.width(12.dp))
-                            Text("IGNITE ENGINE", fontWeight = FontWeight.ExtraBold, fontFamily = GoogleSansFlex)
+                            Text("Launch Game", fontWeight = FontWeight.ExtraBold, fontFamily = GoogleSansFlex)
                         }
                     }
                 }
             }
 
-            // Profile Selector
+            // Maintenance & Performance
             item {
-                Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                val isCompiling by viewModel.isCompiling.collectAsState()
+                
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
                     Text(
-                        text = "Optimization Profile",
+                        text = "Maintenance & Performance",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 8.dp, bottom = 12.dp)
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp).fillMaxWidth()
                     )
                     
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
                         shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            OptimizationProfile.entries.forEach { profile ->
-                                val isSelected = game.optimizationProfile == profile
-                                val bgColor by animateColorAsState(
-                                    if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    label = ""
-                                )
-                                val contentColor by animateColorAsState(
-                                    if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    label = ""
-                                )
-
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(bgColor)
-                                        .clickable { viewModel.updateGameProfile(game.packageName, profile) },
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.secondaryContainer),
                                     contentAlignment = Alignment.Center
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Memory,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Pre-Optimize Engine (AOT)", fontWeight = FontWeight.Bold)
                                     Text(
-                                        text = profile.name.take(3).uppercase(), 
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = contentColor
+                                        "Force-compile code for maximum execution speed. Run this once per game update.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
+                            
+                            Spacer(Modifier.height(16.dp))
+                            
+                            Button(
+                                onClick = { viewModel.preOptimizeGame(game.packageName) },
+                                enabled = !isCompiling && shizukuActive,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary,
+                                    contentColor = MaterialTheme.colorScheme.onSecondary
+                                )
+                            ) {
+                                if (isCompiling) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onSecondary
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("OPTIMIZING...", fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.Build, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("RUN PRE-OPTIMIZATION", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            
+                            if (!shizukuActive) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Requires Shizuku for system-level optimization.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(start = 4.dp)
+                                )
+                            }
                         }
+                    }
+                }
+            }
+
+
+            // Stealth Mode (Moved Up)
+            item {
+                Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+                    Text(
+                        text = "Application Settings",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 4.dp).fillMaxWidth()
+                    )
+                    Box(modifier = Modifier.padding(vertical = 4.dp)) {
+                        TweakToggle(
+                            title = "Stealth Mode",
+                            description = "Hide from launcher system-wide",
+                            checked = game.isHiddenFromLauncher,
+                            onCheckedChange = { viewModel.toggleLauncherVisibility(game) }
+                        )
                     }
                 }
             }
@@ -213,33 +276,13 @@ fun GameDetailScreen(
                         TweakControl(
                             tweak = tweak,
                             value = value,
-                            onValueChange = { viewModel.updateCustomTweak(game.packageName, tweak.id, it) },
-                            onInfoClick = { infoTweak = tweak }
+                            isShizukuActive = shizukuActive,
+                            onValueChange = { viewModel.updateCustomTweak(game.packageName, tweak.id, it) }
                         )
                     }
                 }
             }
             
-            // App Settings
-            item {
-                Text(
-                    text = "Application Settings",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.ExtraBold,
-                    modifier = Modifier.padding(start = 32.dp, top = 12.dp, bottom = 4.dp).fillMaxWidth()
-                )
-            }
-            item {
-                Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)) {
-                    TweakToggle(
-                        title = "Stealth Mode",
-                        description = "Hide from launcher system-wide",
-                        checked = game.isHiddenFromLauncher,
-                        onCheckedChange = { viewModel.toggleLauncherVisibility(game) }
-                    )
-                }
-            }
         }
 
         // Launch Progress Overlay
@@ -267,9 +310,8 @@ fun GameDetailScreen(
                     
                     Text(
                         text = when(launchState) {
-                            LaunchState.OPTIMIZING -> "RECALIBRATING SYSTEM..."
-                            LaunchState.COMPILING -> "AOT ENGINE COMPILING..."
-                            LaunchState.LAUNCHING -> "IGNITING ENGINE..."
+                            LaunchState.OPTIMIZING -> "OPTIMIZING SYSTEM..."
+                            LaunchState.LAUNCHING -> "STARTING GAME..."
                             else -> ""
                         },
                         style = MaterialTheme.typography.titleMedium,
@@ -282,10 +324,7 @@ fun GameDetailScreen(
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        text = when(launchState) {
-                            LaunchState.COMPILING -> "This may take a minute for large games"
-                            else -> "Prepare for impact"
-                        },
+                        text = "Prepare for impact",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White.copy(alpha = 0.6f)
                     )
@@ -294,21 +333,21 @@ fun GameDetailScreen(
         }
     }
 
-    if (infoTweak != null) {
-        TweakInfoDialog(tweak = infoTweak!!, onDismiss = { infoTweak = null })
-    }
 }
 
 @Composable
 fun TweakControl(
     tweak: TweakDef,
     value: String,
-    onValueChange: (String) -> Unit,
-    onInfoClick: () -> Unit
+    isShizukuActive: Boolean,
+    onValueChange: (String) -> Unit
 ) {
+    val isLocked = tweak.requiresAdb && !isShizukuActive
+
     Surface(
+        modifier = Modifier.alpha(if (isLocked) 0.6f else 1f),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = if (isLocked) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 1.dp
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -324,7 +363,7 @@ fun TweakControl(
                         imageVector = when(tweak.category) {
                             "Display & Animation" -> Icons.Default.Animation
                             "GPU & Graphics" -> Icons.Default.Cyclone
-                            "AOT Compilation" -> Icons.Default.Memory
+                            "Memory & Processes" -> Icons.Default.Memory
                             else -> Icons.Default.Bolt
                         },
                         contentDescription = null,
@@ -336,20 +375,27 @@ fun TweakControl(
                 Spacer(Modifier.width(16.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(tweak.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            tweak.title, 
+                            fontWeight = FontWeight.Bold, 
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
                         if (tweak.requiresAdb) {
                             Surface(
-                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                color = MaterialTheme.colorScheme.errorContainer,
                                 shape = RoundedCornerShape(4.dp),
-                                modifier = Modifier.padding(start = 8.dp)
                             ) {
                                 Text(
                                     "ADB", 
-                                    fontSize = 9.sp, 
+                                    fontSize = 10.sp, 
                                     fontWeight = FontWeight.Black, 
-                                    modifier = Modifier.padding(horizontal = 4.dp),
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                             }
                         }
@@ -359,24 +405,47 @@ fun TweakControl(
                         style = MaterialTheme.typography.bodySmall, 
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (tweak.warning != null) {
-                        Icon(
-                            Icons.Default.Warning, 
-                            null, 
-                            modifier = Modifier.size(18.dp), 
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    IconButton(onClick = onInfoClick) {
-                        Icon(Icons.Outlined.Info, null, modifier = Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                    
+                    if (isLocked) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Lock, 
+                                null, 
+                                modifier = Modifier.size(14.dp), 
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Shizuku not running or permission missing",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else if (tweak.warning != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.PriorityHigh, 
+                                null, 
+                                modifier = Modifier.size(14.dp), 
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = tweak.warning,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
 
                 if (tweak.type == TweakType.TOGGLE) {
                     Switch(
+                        enabled = !isLocked,
                         checked = value == "true",
                         onCheckedChange = { onValueChange(it.toString()) }
                     )
@@ -385,23 +454,28 @@ fun TweakControl(
 
             if (tweak.type == TweakType.SELECT && tweak.options != null) {
                 Spacer(Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Use a scrollable Row to prevent button truncation on small screens
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     tweak.options.forEach { option ->
                         val isSelected = value == option
                         Surface(
                             modifier = Modifier
-                                .weight(1f)
+                                .widthIn(min = 60.dp)
                                 .height(40.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable { onValueChange(option) },
+                                .clickable(enabled = !isLocked) { onValueChange(option) },
                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
                                 Text(
                                     option, 
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -411,13 +485,34 @@ fun TweakControl(
 
             if (tweak.type == TweakType.INPUT) {
                 Spacer(Modifier.height(12.dp))
+                
+                // --- FIXED: Local state management for smooth typing ---
+                var text by remember(value) { mutableStateOf(value) }
+                val scope = rememberCoroutineScope()
+                var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
                 OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
+                    enabled = !isLocked,
+                    value = text,
+                    onValueChange = { newText ->
+                        text = newText
+                        // Debounce updates to avoid rapid DB writes and jitter
+                        debounceJob?.cancel()
+                        debounceJob = scope.launch {
+                            delay(500)
+                            onValueChange(newText)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Enter value...") },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = if (tweak.id.contains("wm_")) 
+                            androidx.compose.ui.text.input.KeyboardType.Number // Use Number for Size/Density
+                        else 
+                            androidx.compose.ui.text.input.KeyboardType.Text
+                    )
                 )
             }
         }

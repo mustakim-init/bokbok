@@ -206,7 +206,8 @@ fun NavGraph(
         }
 
         composable(NavRoutes.Settings.route) {
-            SettingsScreen(navController, themeViewModel)
+            val adbSetupViewModel: com.mustakim.bokbok.viewmodel.AdbSetupViewModel = hiltViewModel()
+            SettingsScreen(navController, themeViewModel, adbSetupViewModel)
         }
 
         composable(NavRoutes.BatteryOptimization.route) {
@@ -396,6 +397,48 @@ fun NavGraph(
 
         composable(route = NavRoutes.AICompanion.route) {
             com.mustakim.bokbok.ui.screens.ai.AICompanionScreen(navController = navController)
+        }
+
+        composable(
+            route = NavRoutes.AppDetails.route,
+            arguments = listOf(
+                navArgument("packageName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val packageName = backStackEntry.arguments?.getString("packageName") ?: ""
+            val viewModel: com.mustakim.bokbok.viewmodel.AppDetailsViewModel = hiltViewModel()
+            
+            // Initialize ViewModel with packageName
+            androidx.compose.runtime.LaunchedEffect(packageName) {
+                viewModel.setPackageName(packageName)
+            }
+
+            com.mustakim.bokbok.ui.screens.gameboost.appmanager.AppDetailsScreen(
+                navController = navController,
+                viewModel = viewModel
+            )
+        }
+
+        composable(
+            route = NavRoutes.GameDetail.route,
+            arguments = listOf(
+                navArgument("packageName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val packageName = backStackEntry.arguments?.getString("packageName") ?: ""
+            val viewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel()
+
+            // State to hold the specific game being viewed
+            val games by viewModel.games.collectAsState()
+            val game = remember(games, packageName) { games.find { it.packageName == packageName } }
+
+            game?.let {
+                com.mustakim.bokbok.ui.screens.gameboost.games.GameDetailScreen(
+                    game = it,
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
     }
 }

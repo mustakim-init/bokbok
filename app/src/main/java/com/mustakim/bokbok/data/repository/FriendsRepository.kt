@@ -150,10 +150,12 @@ class FriendsRepository @Inject constructor(
         // Base info from Firestore: friendship + User profile (no live status here)
         var baseFriends: List<FriendWithUser> = emptyList()
 
-        // Live status from RTDB
+        // Live status data
         val roomById = mutableMapOf<String, String?>()
         val onlineById = mutableMapOf<String, Boolean>()
-
+        
+        // Track individual status listeners to reconcile them
+        val statusListeners = mutableMapOf<String, ValueEventListener>()
 
         fun emitCombined() {
             if (baseFriends.isEmpty()) {
@@ -174,36 +176,8 @@ class FriendsRepository @Inject constructor(
             trySend(combined)
         }
 
-        // ✅ RTDB listener: /userStatus
-        val statusListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                roomById.clear()
-                onlineById.clear()
-
-                for (child in snapshot.children) {
-                    val uid = child.key ?: continue
-                    val roomId = child.child("currentRoomId").getValue(String::class.java)
-                    val online = child.child("online").getValue(Boolean::class.java) ?: false
-
-                    roomById[uid] = roomId
-                    onlineById[uid] = online
-                }
-                emitCombined()
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                // On permission / network errors, do NOT crash the app.
-                // Option 1: send empty list and just stop listening.
-                trySend(emptyList())
-
-                // Optionally close the flow quietly so collectors stop:
-                close()
-            }
-        }
-        userStatusRef.addValueEventListener(statusListener)
-
-        // ✅ Firestore listener: friendships + user profiles (OPTIMIZED)
-        val listener: ListenerRegistration = friendshipsCollection
+        // Firestore listener: friendships + user profiles
+        val firestoreListener: ListenerRegistration = friendshipsCollection
             .where(
                 com.google.firebase.firestore.Filter.or(
                     com.google.firebase.firestore.Filter.equalTo("userId1", currentUserId),
@@ -218,16 +192,45 @@ class FriendsRepository @Inject constructor(
                 }
 
                 val friendships = snapshot?.toObjects(Friendship::class.java) ?: emptyList()
+                val friendIds = friendships.map { it.getOtherUserId(currentUserId) }.toSet()
 
-                CoroutineScope(Dispatchers.IO).launch {
-                    // 1. Collect all friend IDs
-                    val friendIds = friendships.map { it.getOtherUserId(currentUserId) }
+                // ✅ FIX: Use the Flow's scope to avoid leaks
+                launch {
+                    // 1. Reconcile RTDB status listeners (per-friend instead of global root)
+                    // Remove listeners for users who are no longer friends
+                    val idsToRemove = statusListeners.keys.filter { it !in friendIds }
+                    idsToRemove.forEach { uid ->
+                        statusListeners[uid]?.let { userStatusRef.child(uid).removeEventListener(it) }
+                        statusListeners.remove(uid)
+                        roomById.remove(uid)
+                        onlineById.remove(uid)
+                    }
 
-                    // 2. Batch fetch profiles (uses cache internally)
-                    val profiles = userRepository.getUserProfiles(friendIds)
+                    // Add listeners for new friends
+                    friendIds.forEach { uid ->
+                        if (!statusListeners.containsKey(uid)) {
+                            val listener = object : ValueEventListener {
+                                override fun onDataChange(s: DataSnapshot) {
+                                    val roomId = s.child("currentRoomId").getValue(String::class.java)
+                                    val online = s.child("online").getValue(Boolean::class.java) ?: false
+                                    
+                                    roomById[uid] = roomId
+                                    onlineById[uid] = online
+                                    emitCombined()
+                                }
+                                override fun onCancelled(e: DatabaseError) {
+                                    android.util.Log.e("FriendsRepo", "Status listener cancelled for $uid", e.toException())
+                                }
+                            }
+                            userStatusRef.child(uid).addValueEventListener(listener)
+                            statusListeners[uid] = listener
+                        }
+                    }
+
+                    // 2. Refresh profile data
+                    val profiles = userRepository.getUserProfiles(friendIds.toList())
                     val profilesMap = profiles.associateBy { it.uid }
 
-                    // 3. Map back to FriendWithUser
                     val newBase = friendships.mapNotNull { friendship ->
                         val friendId = friendship.getOtherUserId(currentUserId)
                         val user = profilesMap[friendId]
@@ -235,7 +238,7 @@ class FriendsRepository @Inject constructor(
                             FriendWithUser(
                                 friendship = friendship,
                                 user = it,
-                                isOnline = false,
+                                isOnline = false, // Will be overridden in emitCombined
                                 currentRoomId = null
                             )
                         }
@@ -246,8 +249,12 @@ class FriendsRepository @Inject constructor(
             }
 
         awaitClose {
-            listener.remove()
-            userStatusRef.removeEventListener(statusListener)
+            firestoreListener.remove()
+            // Cleanup all individual status listeners
+            statusListeners.forEach { (uid, listener) ->
+                userStatusRef.child(uid).removeEventListener(listener)
+            }
+            statusListeners.clear()
         }
     }
 
@@ -274,8 +281,8 @@ class FriendsRepository @Inject constructor(
                 val friendships = snapshot?.toObjects(Friendship::class.java) ?: emptyList()
                 val incomingRequests = friendships.filter { it.requestedBy != currentUserId }
 
-                // FIXED: Use CoroutineScope
-                CoroutineScope(Dispatchers.IO).launch {
+                // FIXED: Use the Flow's launch scope to prevent leaks
+                launch {
                     val requestsWithSenders = incomingRequests.mapNotNull { friendship ->
                         val sender = userRepository.getUserProfile(friendship.requestedBy).getOrNull()
                         sender?.let { FriendRequest(friendship, it) }
@@ -305,8 +312,8 @@ class FriendsRepository @Inject constructor(
 
                 val friendships = snapshot?.toObjects(Friendship::class.java) ?: emptyList()
 
-                // FIXED: Use CoroutineScope
-                CoroutineScope(Dispatchers.IO).launch {
+                // FIXED: Use the Flow's launch scope to prevent leaks
+                launch {
                     val requestsWithRecipients = friendships.mapNotNull { friendship ->
                         val recipientId = friendship.getOtherUserId(currentUserId)
                         val recipient = userRepository.getUserProfile(recipientId).getOrNull()

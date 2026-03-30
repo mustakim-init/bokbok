@@ -27,6 +27,9 @@ android {
             useSupportLibrary = true
         }
 
+        // Strip unused languages to reduce APK size
+        resConfigs("en")
+
         // Read keys from local.properties
         val properties = Properties()
         properties.load(project.rootProject.file("local.properties").inputStream())
@@ -56,10 +59,17 @@ android {
         val groqApiKey = properties.getProperty("GROQ_API_KEY") ?: ""
         buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
 
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         externalNativeBuild {
             cmake {
-                arguments("-DANDROID_STL=c++_shared")
-                abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"  // ← add this
+                )
+                abiFilters("arm64-v8a")
             }
         }
     }
@@ -95,7 +105,9 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             freeCompilerArgs.addAll(
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
-                "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi"
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:stabilityConfigurationPath=${project.rootDir.absolutePath}/app/compose_stability.conf"
             )
         }
     }
@@ -247,7 +259,19 @@ dependencies {
 
     // NanoHTTPD (for Wi-Fi File Sharing)
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    // Bouncy Castle (for ADB key management)
+    implementation(libs.bouncycastle.prov)
+    implementation(libs.bouncycastle.pkix)
     
+    // Libadb (Pure Java ADB)
+    implementation(libs.libadb.android) {
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
+    }
+
+    // Hidden API Bypass (required by libadb-android for Conscrypt.exportKeyingMaterial)
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+
     // Baseline Profile
     implementation(libs.androidx.profileinstaller)
     "baselineProfile"(project(":baselineprofile"))

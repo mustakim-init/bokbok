@@ -26,4 +26,16 @@
     <string name="widget_start">Start</string>
     <string name="widget_stop">Stop</string>
     <string name="accessibility_description">BokBok AI Agent allows the AI to guide you through game tasks and automate complex phone optimizations by interacting with the screen.</string>
+
+    <!-- ADB Pairing -->
+    <string name="adb_pairing">ADB Pairing</string>
+    <string name="adb_pairing_monitoring">Monitoring for pairing service… Go to Wireless Debugging and tap \'Pair device with pairing code\'.</string>
+    <string name="adb_pairing_found">Pairing service found on port %1$d. Enter code to pair.</string>
+    <string name="adb_pairing_enter_code">Enter pairing code</string>
+    <string name="adb_pairing_code_label">6-digit code</string>
+    <string name="adb_pairing_in_progress">Pairing in progress…</string>
+    <string name="adb_pairing_success">Paired successfully!</string>
+    <string name="adb_pairing_failed">Pairing failed</string>
+    <string name="adb_pairing_stop">Stop</string>
+    <string name="adb_pairing_retry">Retry</string>
 </resources>

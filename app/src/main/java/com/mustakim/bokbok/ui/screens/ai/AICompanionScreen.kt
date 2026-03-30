@@ -58,6 +58,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -922,40 +923,58 @@ fun LanguageDownloadItem(
 ) {
     val downloadedLangs by viewModel.downloadedLanguages.collectAsState(initial = emptyList())
     val isDownloaded = downloadedLangs.contains(langCode)
-    val downloadInfo by viewModel.getDownloadStatus(langCode).collectAsState(initial = null)
+    val workInfo by viewModel.getDownloadStatus(langCode).collectAsState(initial = null)
     
-    Row(
+    val isDownloading = workInfo?.state == androidx.work.WorkInfo.State.RUNNING || 
+                        workInfo?.state == androidx.work.WorkInfo.State.ENQUEUED
+    val progress = workInfo?.progress?.getFloat("PROGRESS", 0f) ?: 0f
+    
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .padding(12.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = langName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-            if (downloadInfo != null && downloadInfo == androidx.work.WorkInfo.State.RUNNING) {
-                Text(text = "Downloading...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            } else if (isDownloaded) {
-                Text(text = "Ready", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34A853))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = langName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                if (isDownloading) {
+                    Text(text = "Downloading: ${progress.toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                } else if (isDownloaded) {
+                    Text(text = "Ready", style = MaterialTheme.typography.labelSmall, color = Color(0xFF34A853))
+                } else {
+                    Text(text = "Not downloaded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            
+            if (isDownloading) {
+                IconButton(onClick = { viewModel.cancelDownload(langCode) }) {
+                    Icon(imageVector = Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
+                }
+            } else if (!isDownloaded) {
+                Button(
+                    onClick = { viewModel.downloadLanguage(langCode) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(if (workInfo?.state == androidx.work.WorkInfo.State.CANCELLED) "Resume" else "Download", style = MaterialTheme.typography.labelMedium)
+                }
             } else {
-                Text(text = "Not downloaded", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF34A853), modifier = Modifier.size(24.dp))
             }
         }
         
-        if (!isDownloaded && downloadInfo != androidx.work.WorkInfo.State.RUNNING) {
-            Button(
-                onClick = { viewModel.downloadLanguage(langCode) },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                modifier = Modifier.height(32.dp),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Download", style = MaterialTheme.typography.labelMedium)
-            }
-        } else if (downloadInfo == androidx.work.WorkInfo.State.RUNNING) {
-            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-        } else {
-            Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Color(0xFF34A853), modifier = Modifier.size(24.dp))
+        if (isDownloading) {
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+            )
         }
     }
 }

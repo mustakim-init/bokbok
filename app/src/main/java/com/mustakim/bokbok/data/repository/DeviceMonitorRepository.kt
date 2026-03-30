@@ -16,9 +16,7 @@ import com.mustakim.bokbok.data.model.ProcessInfo
 import com.mustakim.bokbok.data.model.RamInfo
 import com.mustakim.bokbok.data.model.StorageBreakdown
 import com.mustakim.bokbok.data.model.StorageInfo
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.*
 import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
 import android.app.AppOpsManager
@@ -35,8 +33,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 
+import javax.inject.Singleton
+
+@Singleton
 class DeviceMonitorRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val configDao: com.mustakim.bokbok.data.local.dao.SystemConfigDao,
+    private val keepShell: com.mustakim.bokbok.data.shell.KeepShell,
+    private val daemonManager: com.mustakim.bokbok.data.shell.DaemonManager
 ) {
 
     private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -73,6 +77,94 @@ class DeviceMonitorRepository @Inject constructor(
     private var cachedSoCModel: String? = null
     private var cachedMaxPowerLevel: Int? = null
     private var cachedCpuMaxFreqs = mutableMapOf<Int, Long>()
+    
+    // Configuration cache to avoid redundant DB writes
+    private val persistedValues = mutableMapOf<String, String?>()
+    private var isShizukuAuthorizedCached: Boolean? = null
+
+    // Persistent storage keys
+    private object Keys {
+        const val GPU_LOAD_PATH = "gpu_load_path"
+        const val GPU_FREQ_PATH = "gpu_freq_path"
+        const val GPU_TEMP_PATH = "gpu_temp_path"
+        const val CPU_TEMP_PATH = "cpu_temp_path"
+        const val SOC_MODEL = "soc_model"
+        const val CPU_MAX_FREQS = "cpu_max_freqs"
+        const val GPU_RENDERER = "gpu_renderer"
+        const val GPU_MODEL = "gpu_model"
+        const val GPU_VENDOR = "gpu_vendor"
+        const val BATTERY_DESIGN_CAP = "battery_design_cap"
+        const val BATTERY_MAX_CAP = "battery_max_cap"
+    }
+
+    private var hasLoadedPersistentData = false
+
+    private suspend fun ensurePersistentDataLoaded() {
+        if (hasLoadedPersistentData) return
+        coroutineScope {
+            try {
+                // Initialize cache and working paths
+                persistedValues[Keys.GPU_LOAD_PATH] = configDao.getString(Keys.GPU_LOAD_PATH)
+                persistedValues[Keys.GPU_FREQ_PATH] = configDao.getString(Keys.GPU_FREQ_PATH)
+                persistedValues[Keys.GPU_TEMP_PATH] = configDao.getString(Keys.GPU_TEMP_PATH)
+                persistedValues[Keys.CPU_TEMP_PATH] = configDao.getString(Keys.CPU_TEMP_PATH)
+                persistedValues[Keys.SOC_MODEL] = configDao.getString(Keys.SOC_MODEL)
+                persistedValues[Keys.GPU_RENDERER] = configDao.getString(Keys.GPU_RENDERER)
+                persistedValues[Keys.GPU_MODEL] = configDao.getString(Keys.GPU_MODEL)
+                persistedValues[Keys.GPU_VENDOR] = configDao.getString(Keys.GPU_VENDOR)
+                persistedValues[Keys.CPU_MAX_FREQS] = configDao.getString(Keys.CPU_MAX_FREQS)
+                persistedValues[Keys.BATTERY_DESIGN_CAP] = configDao.getString(Keys.BATTERY_DESIGN_CAP)
+                persistedValues[Keys.BATTERY_MAX_CAP] = configDao.getString(Keys.BATTERY_MAX_CAP)
+                
+                workingGpuLoadPath = persistedValues[Keys.GPU_LOAD_PATH]
+                workingGpuFreqPath = persistedValues[Keys.GPU_FREQ_PATH]
+                workingGpuTempPath = persistedValues[Keys.GPU_TEMP_PATH]
+                workingCpuTempPath = persistedValues[Keys.CPU_TEMP_PATH]
+                cachedSoCModel = persistedValues[Keys.SOC_MODEL]
+                
+                android.util.Log.d("BB-PERF", "Loaded config - GPU Load: $workingGpuLoadPath, CPU Temp: $workingCpuTempPath, SoC: $cachedSoCModel")
+
+                val renderer = persistedValues[Keys.GPU_RENDERER]
+                if (renderer != null) {
+                    cachedGpuStaticInfo = GpuStaticInfo(
+                        renderer = renderer,
+                        model = persistedValues[Keys.GPU_MODEL],
+                        vendor = persistedValues[Keys.GPU_VENDOR],
+                        apiVersion = null
+                    )
+                }
+
+                val maxFreqsStr = persistedValues[Keys.CPU_MAX_FREQS]
+                if (!maxFreqsStr.isNullOrEmpty()) {
+                    maxFreqsStr.split(",").forEach {
+                        val parts = it.split(":")
+                        if (parts.size == 2) {
+                            val core = parts[0].toIntOrNull()
+                            val freq = parts[1].toLongOrNull()
+                            if (core != null && freq != null) {
+                                cachedCpuMaxFreqs[core] = freq
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("BB-PERF", "Error loading persistent config", e)
+            }
+        }
+        hasLoadedPersistentData = true
+    }
+
+    private fun persist(key: String, value: String?) {
+        if (value == null) return
+        if (persistedValues[key] == value) return // Avoid redundant writes
+        
+        android.util.Log.d("BB-PERF", "Saving config: $key -> $value")
+        persistedValues[key] = value
+        // Fire and forget persistence
+        CoroutineScope(Dispatchers.IO).launch {
+            configDao.putString(key, value)
+        }
+    }
 
     // Reflection cache for Shizuku
     private object ShizukuReflection {
@@ -94,17 +186,82 @@ class DeviceMonitorRepository @Inject constructor(
         }
     }
 
-    suspend fun getCpuInfo(): CpuInfo = withContext(Dispatchers.IO) {
-        val loads = calculateCpuLoad()
+    suspend fun getCpuInfo(): CpuInfo = coroutineScope {
+        ensurePersistentDataLoaded()
         val coreCount = Runtime.getRuntime().availableProcessors()
+        
+        // 🚀 SYN-STYLE: Check if background daemon stats are available
+        val daemonStats = daemonManager.readStats()
+        if (daemonStats.isNotEmpty()) {
+            return@coroutineScope parseCpuInfoFromDaemon(daemonStats, coreCount)
+        }
+
+        // --- FALLBACK: Batch all frequent shell queries into ONE Shizuku process ---
+        val batchResults = readShellCommands(listOf(
+            "cat /proc/stat",
+            "cat /sys/devices/system/cpu/cpu*/online",
+            "cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq",
+            "getprop sys.vivo.project.ramsize",
+            "for f in /sys/class/thermal/thermal_zone*; do echo \$(cat \"${'$'}f\"/type):\$(cat \"${'$'}f\"/temp); done"
+        ), 1500)
+
+        val statContent = batchResults.getOrNull(0)
+        val onlineContent = batchResults.getOrNull(1)
+        val freqContent = batchResults.getOrNull(2)
+        val vivoRamSize = batchResults.getOrNull(3)?.trim()?.toLongOrNull()
+        val thermBatch = batchResults.getOrNull(4)
+
+        val loadsAsync = async { 
+            if (isProcStatRestricted != true) {
+                try {
+                    val direct = File("/proc/stat").readText()
+                    isProcStatRestricted = false
+                    parseCpuStat(direct)
+                } catch (_: Exception) {
+                    isProcStatRestricted = true
+                    parseCpuStat(statContent)
+                }
+            } else {
+                parseCpuStat(statContent)
+            }
+        }
+        
+        val batchFrequenciesAsync = async { parseFreqsBatch(freqContent, coreCount) }
+        val batchOnlineAsync = async { parseOnlineBatch(onlineContent, coreCount) }
+        val batchMaxFreqsAsync = async { readMaxFreqsBatch(coreCount) }
+        val socAsync = async { 
+            if (cachedSoCModel != null) cachedSoCModel else {
+                getSoCModel().also { 
+                    cachedSoCModel = it
+                    persist(Keys.SOC_MODEL, it)
+                }
+            }
+        }
+        val tempAsync = async { 
+            if (workingCpuTempPath != null) {
+                readTemp(workingCpuTempPath!!) 
+            } else {
+                parseThermalBatch(thermBatch)
+            }
+        }
+        val ramAsync = async {
+            if (vivoRamSize != null && vivoRamSize > 0) {
+                 val ram = getRamInfo()
+                 ram.copy(totalMb = vivoRamSize * 1024) 
+            } else {
+                 getRamInfo()
+            }
+        }
+
+        // Await results
+        val loads = loadsAsync.await()
+        val batchFrequencies = batchFrequenciesAsync.await()
+        val batchOnline = batchOnlineAsync.await()
+        val batchMaxFreqs = batchMaxFreqsAsync.await()
+        
         val frequencies = mutableListOf<Long>()
         val maxFrequencies = mutableListOf<Long>()
         val onlineStatus = mutableListOf<Boolean>()
-
-        // Optimistically try to read all frequencies in one go if they are restricted
-        val batchFrequencies = readFreqsBatch(coreCount)
-        val batchOnline = readOnlineBatch(coreCount)
-        val batchMaxFreqs = readMaxFreqsBatch(coreCount)
 
         for (i in 0 until coreCount) {
             frequencies.add(batchFrequencies[i] ?: readFreq(i))
@@ -112,6 +269,10 @@ class DeviceMonitorRepository @Inject constructor(
             maxFrequencies.add(batchMaxFreqs[i] ?: readMaxFreq(i))
         }
         
+        val soc = socAsync.await()
+        val temp = tempAsync.await()
+        val ram = ramAsync.await()
+
         // Calculate Clusters (e.g. "1x 3.30GHz, 4x 2.61GHz")
         val clusters = maxFrequencies.groupingBy { it }.eachCount()
             .toSortedMap(compareByDescending { it })
@@ -120,22 +281,6 @@ class DeviceMonitorRepository @Inject constructor(
                 "${count}x ${freqGhz}GHz"
             }
         
-        val soc = if (cachedSoCModel != null) cachedSoCModel else {
-            val s = getSoCModel()
-            cachedSoCModel = s
-            s
-        }
-        val temp = getCpuTemperature()
-
-        // Get RAM size from Vivo specific prop if possible (often matches marketing GB exactly)
-        val vivoRamSize = readShellCommand("getprop sys.vivo.project.ramsize")?.trim()?.toLongOrNull()
-        val finalRamInfo = if (vivoRamSize != null && vivoRamSize > 0) {
-             val ram = getRamInfo()
-             ram.copy(totalMb = vivoRamSize * 1024) 
-        } else {
-             getRamInfo()
-        }
-
         CpuInfo(
             loadPercent = loads.first,
             coreCount = coreCount,
@@ -163,88 +308,145 @@ class DeviceMonitorRepository @Inject constructor(
          return freq
     }
 
-    private suspend fun calculateCpuLoad(): Pair<Float, List<Float>> {
+    private fun parseCpuStat(statContent: String?): Pair<Float, List<Float>> {
+        if (statContent.isNullOrEmpty()) return Pair(0f, emptyList())
         var totalLoad = 0f
         val coreLoads = mutableListOf<Float>()
         
-        // Try reading /proc/stat directly first
-        var statContent: String? = null
-        if (isProcStatRestricted != true) {
-            try {
-                val directContent = File("/proc/stat").readText()
-                if (directContent.isNotEmpty() && directContent.startsWith("cpu ")) {
-                    statContent = directContent
-                    isProcStatRestricted = false
+        try {
+            val reader = BufferedReader(StringReader(statContent))
+            var line = reader.readLine()
+
+            // Overall CPU
+            if (line != null && line.startsWith("cpu ")) {
+                val parts = line.split("\\s+".toRegex())
+                if (parts.size >= 5) {
+                    val idle = parts[4].toLong()
+                    val total = parts.subList(1, 8.coerceAtMost(parts.size)).mapNotNull { it.toLongOrNull() }.sum()
+
+                    if (lastCpuTotal > 0) {
+                        val diffTotal = total - lastCpuTotal
+                        val diffIdle = idle - lastCpuIdle
+                        totalLoad = if (diffTotal > 0) (diffTotal - diffIdle).toFloat() / diffTotal * 100f else 0f
+                    }
+                    lastCpuTotal = total
+                    lastCpuIdle = idle
                 }
-            } catch (_: Exception) {
-                isProcStatRestricted = true
             }
+
+            // Per core CPU
+            var coreIdx = 0
+            while (true) {
+                line = reader.readLine()
+                if (line == null || !line.startsWith("cpu")) break 
+                if (!line.startsWith("cpu$coreIdx")) {
+                    if (!line.startsWith("cpu")) break 
+                    continue 
+                }
+                
+                val parts = line.split("\\s+".toRegex())
+                if (parts.size >= 5) {
+                    val idle = parts[4].toLong()
+                    val total = parts.subList(1, 8.coerceAtMost(parts.size)).mapNotNull { it.toLongOrNull() }.sum()
+
+                    if (lastCoreTotals.size <= coreIdx) {
+                        lastCoreTotals.add(total)
+                        lastCoreIdles.add(idle)
+                        coreLoads.add(0f)
+                    } else {
+                        val diffTotal = total - lastCoreTotals[coreIdx]
+                        val diffIdle = idle - lastCoreIdles[coreIdx]
+                        val load = if (diffTotal > 0) (diffTotal - diffIdle).toFloat() / diffTotal * 100f else 0f
+                        coreLoads.add(load.coerceIn(0f, 100f))
+                        lastCoreTotals[coreIdx] = total
+                        lastCoreIdles[coreIdx] = idle
+                    }
+                }
+                coreIdx++
+            }
+            reader.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return Pair(totalLoad.coerceIn(0f, 100f), coreLoads)
+    }
+
+    private fun parseFreqsBatch(content: String?, coreCount: Int): Map<Int, Long> {
+        val result = mutableMapOf<Int, Long>()
+        if (!content.isNullOrEmpty()) {
+            content.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
+                if (index < coreCount) result[index] = s.trim().toLongOrNull() ?: 0L
+            }
+        }
+        return result
+    }
+
+    private fun parseOnlineBatch(content: String?, coreCount: Int): Map<Int, Boolean> {
+        val result = mutableMapOf<Int, Boolean>()
+        if (!content.isNullOrEmpty()) {
+             content.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
+                if (index < coreCount) result[index] = s.trim() == "1"
+            }
+        }
+        return result
+    }
+
+    private fun parseThermalBatch(content: String?): Float? {
+        if (content.isNullOrEmpty()) return null
+        
+        val cpuZones = listOf("cpu-0-0-usr", "cpu-1-0-usr", "cpu-0-usr", "cpu-1-usr", "soc", "package", "processor", "tsens_tz_sensor0")
+        var bestTemp: Float? = null
+        var bestPath: String? = null
+        
+        try {
+            content.lines().forEachIndexed { index, line ->
+                if (line.isBlank() || !line.contains(":")) return@forEachIndexed
+                val parts = line.split(":")
+                if (parts.size != 2) return@forEachIndexed
+                
+                val type = parts[0].lowercase()
+                val tempRaw = parts[1].toFloatOrNull() ?: return@forEachIndexed
+                val temp = if (tempRaw > 1000) tempRaw / 1000f else tempRaw
+                
+                if (temp !in 10f..110f) return@forEachIndexed
+                
+                // Priority matching
+                for (target in cpuZones) {
+                    if (type.contains(target)) {
+                        bestTemp = temp
+                        bestPath = "/sys/class/thermal/thermal_zone$index/temp"
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        
+        if (bestPath != null) {
+            workingCpuTempPath = bestPath
+            persist(Keys.CPU_TEMP_PATH, bestPath)
         }
         
-        // Fallback to Shizuku if direct read failed
-        if (statContent == null) {
-            statContent = readShellCommand("cat /proc/stat", 300)
-        }
+        return bestTemp
+    }
 
-        if (!statContent.isNullOrEmpty()) {
-            try {
-                val reader = BufferedReader(StringReader(statContent))
-                var line = reader.readLine()
-
-                // Overall CPU
-                if (line != null && line.startsWith("cpu ")) {
-                    val parts = line.split("\\s+".toRegex())
-                    if (parts.size >= 5) {
-                        val idle = parts[4].toLong()
-                        val total = parts.subList(1, 8.coerceAtMost(parts.size)).mapNotNull { it.toLongOrNull() }.sum()
-
-                        if (lastCpuTotal > 0) {
-                            val diffTotal = total - lastCpuTotal
-                            val diffIdle = idle - lastCpuIdle
-                            totalLoad = if (diffTotal > 0) (diffTotal - diffIdle).toFloat() / diffTotal * 100f else 0f
-                        }
-                        lastCpuTotal = total
-                        lastCpuIdle = idle
-                    }
+    private suspend fun readTemp(path: String): Float? {
+        try {
+            val content = if (!blockedDirectPaths.contains(path)) {
+                try { File(path).readText().trim() } catch (_: Exception) { 
+                    blockedDirectPaths.add(path)
+                    readShellCommand("cat $path", 300)?.trim()
                 }
-
-                // Per core CPU
-                var coreIdx = 0
-                while (true) {
-                    line = reader.readLine()
-                    if (line == null || !line.startsWith("cpu")) break 
-                    if (!line.startsWith("cpu$coreIdx")) {
-                        if (!line.startsWith("cpu")) break 
-                        continue 
-                    }
-                    
-                    val parts = line.split("\\s+".toRegex())
-                    if (parts.size >= 5) {
-                        val idle = parts[4].toLong()
-                        val total = parts.subList(1, 8.coerceAtMost(parts.size)).mapNotNull { it.toLongOrNull() }.sum()
-
-                        if (lastCoreTotals.size <= coreIdx) {
-                            lastCoreTotals.add(total)
-                            lastCoreIdles.add(idle)
-                            coreLoads.add(0f)
-                        } else {
-                            val diffTotal = total - lastCoreTotals[coreIdx]
-                            val diffIdle = idle - lastCoreIdles[coreIdx]
-                            val load = if (diffTotal > 0) (diffTotal - diffIdle).toFloat() / diffTotal * 100f else 0f
-                            coreLoads.add(load.coerceIn(0f, 100f))
-                            lastCoreTotals[coreIdx] = total
-                            lastCoreIdles[coreIdx] = idle
-                        }
-                    }
-                    coreIdx++
-                }
-                reader.close()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
+                readShellCommand("cat $path", 300)?.trim()
             }
-        }
-
-        return Pair(totalLoad.coerceIn(0f, 100f), coreLoads)
+            
+            val t = content?.toFloatOrNull()
+            if (t != null) {
+                val temp = if (t > 1000) t / 1000f else t
+                if (temp in 10f..110f) return temp
+            }
+        } catch (_: Exception) {}
+        return null
     }
 
     private suspend fun readFreq(core: Int): Long {
@@ -272,29 +474,6 @@ class DeviceMonitorRepository @Inject constructor(
         return 0L
     }
     
-    private suspend fun readFreqsBatch(coreCount: Int): Map<Int, Long> {
-        val result = mutableMapOf<Int, Long>()
-        // Only try batch shell if direct read is likely to fail (or has failed)
-        val output = readShellCommand("cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq", 500)
-        if (!output.isNullOrEmpty()) {
-            output.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
-                if (index < coreCount) result[index] = s.trim().toLongOrNull() ?: 0L
-            }
-        }
-        return result
-    }
-
-    private suspend fun readOnlineBatch(coreCount: Int): Map<Int, Boolean> {
-        val result = mutableMapOf<Int, Boolean>()
-        val output = readShellCommand("cat /sys/devices/system/cpu/cpu*/online", 500)
-        if (!output.isNullOrEmpty()) {
-             output.lines().filter { it.isNotBlank() }.forEachIndexed { index, s ->
-                if (index < coreCount) result[index] = s.trim() == "1"
-            }
-        }
-        return result
-    }
-
     private suspend fun readMaxFreqsBatch(coreCount: Int): Map<Int, Long> {
         if (cachedCpuMaxFreqs.size >= coreCount) return cachedCpuMaxFreqs
         val result = mutableMapOf<Int, Long>()
@@ -307,6 +486,10 @@ class DeviceMonitorRepository @Inject constructor(
                     if (freq > 0) cachedCpuMaxFreqs[index] = freq
                 }
             }
+        }
+        if (cachedCpuMaxFreqs.isNotEmpty()) {
+            val encoded = cachedCpuMaxFreqs.entries.joinToString(",") { "${it.key}:${it.value}" }
+            persist(Keys.CPU_MAX_FREQS, encoded)
         }
         return result
     }
@@ -345,57 +528,69 @@ class DeviceMonitorRepository @Inject constructor(
             if (blockedShellPaths.contains(path)) return@withContext null
         }
 
-        var process: Any? = null
-        try {
-            withTimeoutOrNull(timeoutMs) {
-                val binder = Shizuku.getBinder() ?: return@withTimeoutOrNull null
-                val service = IShizukuService.Stub.asInterface(binder)
-                process = service.newProcess(arrayOf("sh", "-c", command), null, null)
-                
-                if (process == null) return@withTimeoutOrNull null
-                
-                val processClass = process!!.javaClass
-                ShizukuReflection.init(processClass)
+        // 🚀 Use the persistent shell bridge
+        val result = keepShell.doCmd(command)
+        if (result.startsWith("error:")) null else result
+    }
 
-                val isObj = ShizukuReflection.getInputStream?.invoke(process) as? ParcelFileDescriptor
-                    ?: return@withTimeoutOrNull null
+    private suspend fun readShellCommands(commands: List<String>, timeoutMs: Long = 2000): List<String?> = withContext(Dispatchers.IO) {
+        if (!checkShizukuPermission()) return@withContext List(commands.size) { null }
+        
+        val sep = "--BATCH-SEP--"
+        // Combine commands: cmd1 2>&1; echo --SEP--; cmd2 2>&1; echo --SEP--; ...
+        val bigCommand = commands.joinToString(separator = "; echo \"$sep\"; ") { "$it 2>&1" }
+        
+        try {
+            // 🚀 Use the persistent shell bridge
+            val fullResult = keepShell.doCmd(bigCommand)
+            if (fullResult.startsWith("error:")) return@withContext List(commands.size) { null }
+
+            val parts = fullResult.split(sep)
+            commands.indices.map { i ->
+                val result = parts.getOrNull(i)?.trim()
                 
-                val output = StringBuilder()
-                val reader = BufferedReader(InputStreamReader(ParcelFileDescriptor.AutoCloseInputStream(isObj)))
-                
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    output.append(line).append("\n")
-                }
-                
-                ShizukuReflection.waitFor?.invoke(process)
-                val result = output.toString()
-                
-                if (command.startsWith("cat ")) {
-                    val path = command.substring(4).trim()
-                    if (result.contains("denied", true) || result.contains("inaccessible", true) || 
-                        result.contains("Not found", true)) {
+                // Auto-block failing paths
+                val cmd = commands[i]
+                if (cmd.startsWith("cat ")) {
+                    val path = cmd.subSequence(4, cmd.length).toString().split(" ")[0] // Handle "cat path 2>&1"
+                    if (result != null && (result.contains("denied", true) || 
+                        result.contains("inaccessible", true) || 
+                        result.contains("Not found", true))) {
+                        android.util.Log.w("BB-PERF", "Blocking path: $path (Reason: $result)")
                         blockedShellPaths.add(path)
                     }
                 }
-                
                 result
             }
         } catch (_: Exception) {
-            null
-        } finally {
-            try {
-                if (process != null) {
-                    ShizukuReflection.destroy?.invoke(process)
-                }
-            } catch (_: Exception) {}
+            List(commands.size) { null }
         }
     }
 
     private fun checkShizukuPermission(): Boolean {
+        if (isShizukuAuthorizedCached == true) return true
+        
         try {
              if (Shizuku.isPreV11() || Shizuku.getVersion() < 11) return false
-             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) return true
+             val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+             
+             // One-time load from persistence if not already authorized in session
+             if (isShizukuAuthorizedCached == null) {
+                 MainScope().launch(Dispatchers.IO) {
+                     val cached = configDao.getString("shizuku_authorized")
+                     if (cached == "true") isShizukuAuthorizedCached = true
+                 }
+             }
+
+             if (granted) {
+                 if (isShizukuAuthorizedCached != true) {
+                     isShizukuAuthorizedCached = true
+                     MainScope().launch(Dispatchers.IO) {
+                         configDao.putString("shizuku_authorized", "true")
+                     }
+                 }
+                 return true
+             }
              return false
         } catch (_: Throwable) {
             return false
@@ -497,8 +692,12 @@ class DeviceMonitorRepository @Inject constructor(
         var healthPercent: Int? = null
 
         // 1. Try Capacity Ratio (Most accurate if available)
-        var designCap = getBatteryDesignCapacity()
-        var maxCap = getBatteryMaxCapacity()
+        var designCap = persistedValues[Keys.BATTERY_DESIGN_CAP]?.toIntOrNull() ?: getBatteryDesignCapacity()?.also {
+            persist(Keys.BATTERY_DESIGN_CAP, it.toString())
+        }
+        var maxCap = persistedValues[Keys.BATTERY_MAX_CAP]?.toIntOrNull() ?: getBatteryMaxCapacity()?.also {
+            persist(Keys.BATTERY_MAX_CAP, it.toString())
+        }
         if (designCap != null && maxCap != null && designCap > 0) {
             healthPercent = (maxCap * 100 / designCap).coerceAtMost(100)
         }
@@ -609,11 +808,12 @@ class DeviceMonitorRepository @Inject constructor(
             totalGb = totalGb,
             usedGb = usedGb,
             availableGb = availableGb,
-            usagePercent = percent
+        usagePercent = percent
         )
     }
 
-    suspend fun getGpuInfo(): GpuInfo = withContext(Dispatchers.IO) {
+    suspend fun getGpuInfo(): GpuInfo = coroutineScope {
+        ensurePersistentDataLoaded()
         val loadPaths = listOf(
             "/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage",
             "/sys/class/kgsl/kgsl-3d0/gpubusy",
@@ -630,126 +830,7 @@ class DeviceMonitorRepository @Inject constructor(
             "/sys/class/devfreq/soc:qcom,kgsl-3d0/cur_freq",
             "/sys/kernel/gpu/gpu_clock"
         )
-        
-        var load: Int? = null
-        val loadPathsToTry = if (workingGpuLoadPath != null) listOf(workingGpuLoadPath!!) + loadPaths else loadPaths
-        
-        for (path in loadPathsToTry) {
-            if (load != null) break
-            
-            // 1. Try Direct Read
-            if (!blockedDirectPaths.contains(path)) {
-                try {
-                    val content = File(path).readText().trim()
-                    load = parseGpuLoad(content, path)
-                    if (load != null) {
-                        workingGpuLoadPath = path
-                        break
-                    }
-                } catch (_: Exception) {
-                    blockedDirectPaths.add(path)
-                }
-            }
-            
-            // 2. Try Shizuku Fallback
-            if (load == null && !blockedShellPaths.contains(path)) {
-                val content = readShellCommand("cat $path", 400)?.trim()
-                load = parseGpuLoad(content, path)
-                if (load != null) {
-                    workingGpuLoadPath = path
-                }
-            }
-        }
-        
-        var freq: Int? = null
-        val freqPathsToTry = if (workingGpuFreqPath != null) listOf(workingGpuFreqPath!!) + freqPaths else freqPaths
-        
-        for (path in freqPathsToTry) {
-            if (freq != null) break
-            
-            // 1. Direct
-            if (!blockedDirectPaths.contains(path)) {
-                try {
-                    val content = File(path).readText().trim()
-                    freq = parseGpuFreq(content)
-                    if (freq != null && freq > 0) {
-                        workingGpuFreqPath = path
-                        break
-                    }
-                } catch (_: Exception) {
-                    blockedDirectPaths.add(path)
-                }
-            }
-            
-            // 2. Shell
-            if (freq == null && !blockedShellPaths.contains(path)) {
-                val content = readShellCommand("cat $path", 400)?.trim()
-                freq = parseGpuFreq(content)
-                if (freq != null && freq > 0) {
-                    workingGpuFreqPath = path
-                }
-            }
-        }
 
-        // Use cached static info to avoid 4+ Shizuku calls every cycle
-        if (cachedGpuStaticInfo == null) {
-            val batchOutput = readShellCommand("getprop ro.product.board; echo \"--SEP--\"; getprop ro.board.platform; echo \"--SEP--\"; dumpsys SurfaceFlinger | grep \"GLES:\"")
-            val batchParts = batchOutput?.split("--SEP--")?.map { it.trim() } ?: emptyList()
-            
-            var board = batchParts.getOrNull(0)
-            var platform = batchParts.getOrNull(1)
-            val sfOutput = batchParts.getOrNull(2)
-            
-            var model = if (!board.isNullOrEmpty()) board else platform
-            
-            var renderer: String? = null
-            var apiVersion: String? = null
-            
-            if (!sfOutput.isNullOrEmpty() && sfOutput.contains("GLES:")) {
-                val glesLine = sfOutput.substringAfter("GLES:").trim()
-                val parts = glesLine.split(",").map { it.trim() }
-                
-                // parts[0] = vendor (Qualcomm), parts[1] = renderer (Adreno 735), parts[2] = version
-                if (parts.size >= 2) {
-                    renderer = parts[1]
-                        .replace("(TM)", "")
-                        .replace("(R)", "")
-                        .trim()
-                }
-                if (parts.size >= 3) {
-                    // Extract just "OpenGL ES 3.2" from "OpenGL ES 3.2 V@676..."
-                    val versionPart = parts[2]
-                    apiVersion = versionPart.substringBefore(" V@").substringBefore(" (").trim()
-                }
-            }
-            
-            // Fallbacks 
-            if (renderer.isNullOrEmpty()) {
-                renderer = readShellCommand("getprop ro.hardware.egl")?.trim()
-            }
-            if (apiVersion.isNullOrEmpty()) {
-                val glVersion = readShellCommand("getprop ro.opengles.version")?.trim()?.toIntOrNull()
-                if (glVersion != null) {
-                    val major = (glVersion shr 16) and 0xFF
-                    val minor = glVersion and 0xFF
-                    apiVersion = "OpenGL ES $major.$minor"
-                }
-            }
-            
-            val vendor = if (renderer?.lowercase()?.contains("adreno") == true) "Qualcomm" 
-                         else if (renderer?.lowercase()?.contains("mali") == true) "ARM" 
-                         else null
-            
-            cachedGpuStaticInfo = GpuStaticInfo(
-                renderer = renderer ?: "GPU",
-                model = model,
-                vendor = vendor,
-                apiVersion = apiVersion
-            )
-        }
-
-        // Try to get GPU temperature
-        var gpuTemp: Float? = null
         val tempPaths = listOf(
             "/sys/class/kgsl/kgsl-3d0/temp",
             "/sys/class/kgsl/kgsl-3d0/temperature",
@@ -757,58 +838,91 @@ class DeviceMonitorRepository @Inject constructor(
             "/sys/class/thermal/thermal_zone20/temp",
             "/sys/class/thermal/thermal_zone22/temp"
         )
-        val tempPathsToTry = if (workingGpuTempPath != null) listOf(workingGpuTempPath!!) + tempPaths else tempPaths
-        
-        for (path in tempPathsToTry) {
-            if (gpuTemp != null) break
 
-            // 1. Direct
-            if (!blockedDirectPaths.contains(path)) {
-                try {
-                    val content = File(path).readText().trim()
-                    val t = content.toFloatOrNull()
-                    if (t != null) {
-                        val temp = if (t > 1000) t / 1000f else t
-                        if (temp in -20f..120f) {
-                            gpuTemp = temp
-                            workingGpuTempPath = path
-                            break
-                        }
-                    }
-                } catch (_: Exception) {
-                    blockedDirectPaths.add(path)
+        // Batch all frequent GPU shell queries if paths are already discovered
+        if (workingGpuLoadPath != null || workingGpuFreqPath != null || workingGpuTempPath != null) {
+            val cmdList = mutableListOf<String>()
+            if (workingGpuLoadPath != null) cmdList.add("cat $workingGpuLoadPath")
+            if (workingGpuFreqPath != null) cmdList.add("cat $workingGpuFreqPath")
+            if (workingGpuTempPath != null) cmdList.add("cat $workingGpuTempPath")
+            
+            val batchResults = readShellCommands(cmdList, 800)
+            var batchIdx = 0
+            
+            val loadAsync = async {
+                val content = if (workingGpuLoadPath != null) batchResults.getOrNull(batchIdx++) else null
+                parseGpuLoad(content, workingGpuLoadPath ?: "") ?: run {
+                    // Discovery fallback if cached path failed
+                    discoverGpuPath(loadPaths, ::parseGpuLoad, Keys.GPU_LOAD_PATH) { workingGpuLoadPath = it }
                 }
             }
-
-            // 2. Shell
-            if (gpuTemp == null && !blockedShellPaths.contains(path)) {
-                val content = readShellCommand("cat $path", 400)?.trim()
+            
+            val freqAsync = async {
+                val content = if (workingGpuFreqPath != null) batchResults.getOrNull(batchIdx++) else null
+                parseGpuFreq(content)?.takeIf { it > 0 } ?: run {
+                    discoverGpuPath(freqPaths, { c, _ -> parseGpuFreq(c) }, Keys.GPU_FREQ_PATH) { workingGpuFreqPath = it }
+                }
+            }
+            
+            val tempAsync = async {
+                val content = if (workingGpuTempPath != null) batchResults.getOrNull(batchIdx++) else null
                 val t = content?.toFloatOrNull()
                 if (t != null) {
                     val temp = if (t > 1000) t / 1000f else t
-                    if (temp in -20f..120f) {
-                        gpuTemp = temp
-                        workingGpuTempPath = path
-                    }
+                    if (temp in -20f..120f) return@async temp
+                }
+                discoverGpuTempPath(tempPaths)
+            }
+            
+            val staticInfoAsync = async { 
+                if (cachedGpuStaticInfo != null) cachedGpuStaticInfo else discoverGpuStaticInfo()
+            }
+
+            val powerLevelAsync = async { readShellCommand("cat /sys/class/kgsl/kgsl-3d0/cur_pwrlevel")?.trim()?.toIntOrNull() }
+            val maxPowerLevelAsync = async {
+                if (cachedMaxPowerLevel != null) cachedMaxPowerLevel else {
+                    readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull().also { cachedMaxPowerLevel = it }
                 }
             }
+            
+            val si = staticInfoAsync.await()
+            return@coroutineScope GpuInfo(
+                loadPercent = loadAsync.await() ?: 0,
+                frequencyMhz = freqAsync.await() ?: 0,
+                temperatureCelsius = tempAsync.await(),
+                renderer = si?.renderer ?: "Unknown",
+                model = si?.model,
+                vendor = si?.vendor,
+                apiVersion = si?.apiVersion,
+                powerLevel = powerLevelAsync.await(),
+                maxPowerLevel = maxPowerLevelAsync.await(),
+                available = true
+            )
         }
 
-        val pwrLevel = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/cur_pwrlevel")?.trim()?.toIntOrNull()
-        val maxPwrLevel = if (cachedMaxPowerLevel != null) cachedMaxPowerLevel else {
-            val m = readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull()
-            cachedMaxPowerLevel = m
-            m
+        // Full discovery mode (only happens once or if paths break)
+        val loadAsync = async { discoverGpuPath(loadPaths, ::parseGpuLoad, Keys.GPU_LOAD_PATH) { workingGpuLoadPath = it } }
+        val freqAsync = async { discoverGpuPath(freqPaths, { c, _ -> parseGpuFreq(c) }, Keys.GPU_FREQ_PATH) { workingGpuFreqPath = it } }
+        val tempAsync = async { discoverGpuTempPath(tempPaths) }
+        val staticInfoAsync = async { discoverGpuStaticInfo() }
+        val powerLevelAsync = async { readShellCommand("cat /sys/class/kgsl/kgsl-3d0/cur_pwrlevel")?.trim()?.toIntOrNull() }
+        val maxPowerLevelAsync = async {
+            if (cachedMaxPowerLevel != null) cachedMaxPowerLevel else {
+                readShellCommand("cat /sys/class/kgsl/kgsl-3d0/max_pwrlevel")?.trim()?.toIntOrNull().also { cachedMaxPowerLevel = it }
+            }
         }
+        val gpuTemp = tempAsync.await()
+        val staticResult = staticInfoAsync.await()
+        val pwrLevel = powerLevelAsync.await()
+        val maxPwrLevel = maxPowerLevelAsync.await()
 
-        val static = cachedGpuStaticInfo!!
         GpuInfo(
-            loadPercent = load,
-            frequencyMhz = freq,
-            renderer = static.renderer,
-            model = static.model,
-            vendor = static.vendor,
-            apiVersion = static.apiVersion,
+            loadPercent = loadAsync.await() ?: 0,
+            frequencyMhz = freqAsync.await() ?: 0,
+            renderer = staticResult?.renderer ?: "Unknown",
+            model = staticResult?.model,
+            vendor = staticResult?.vendor,
+            apiVersion = staticResult?.apiVersion,
             temperatureCelsius = gpuTemp,
             powerLevel = pwrLevel,
             maxPowerLevel = maxPwrLevel,
@@ -817,6 +931,100 @@ class DeviceMonitorRepository @Inject constructor(
     }
 
     private var workingCpuTempPath: String? = null
+
+    private suspend fun discoverGpuPath(paths: List<String>, parser: (String?, String) -> Int?, key: String, onFound: (String) -> Unit): Int? {
+        for (path in paths) {
+            // Try direct
+            if (!blockedDirectPaths.contains(path)) {
+                try {
+                    val content = File(path).readText().trim()
+                    val result = parser(content, path)
+                    if (result != null) {
+                        onFound(path); persist(key, path); return result
+                    }
+                } catch (_: Exception) { blockedDirectPaths.add(path) }
+            }
+            // Try shell
+            if (!blockedShellPaths.contains(path)) {
+                val content = readShellCommand("cat $path", 400)
+                val result = parser(content, path)
+                if (result != null) {
+                    onFound(path); persist(key, path); return result
+                }
+            }
+        }
+        return null
+    }
+
+    private suspend fun discoverGpuTempPath(paths: List<String>): Float? {
+        for (path in paths) {
+            val content = if (!blockedDirectPaths.contains(path)) {
+                try { File(path).readText().trim() } catch (_: Exception) {
+                    blockedDirectPaths.add(path)
+                    readShellCommand("cat $path", 300)
+                }
+            } else {
+                readShellCommand("cat $path", 300)
+            }
+            
+            val t = content?.trim()?.toFloatOrNull()
+            if (t != null) {
+                val temp = if (t > 1000) t / 1000f else t
+                if (temp in -20f..120f) {
+                    workingGpuTempPath = path
+                    persist(Keys.GPU_TEMP_PATH, path)
+                    return temp
+                }
+            }
+        }
+        return null
+    }
+
+    private suspend fun discoverGpuStaticInfo(): GpuStaticInfo? {
+        if (cachedGpuStaticInfo != null) return cachedGpuStaticInfo
+        
+        val batchOutput = readShellCommands(listOf(
+            "getprop ro.product.board",
+            "getprop ro.board.platform",
+            "dumpsys SurfaceFlinger | grep \"GLES:\"",
+            "getprop ro.hardware.egl",
+            "getprop ro.opengles.version"
+        ), 1500)
+        
+        val board = batchOutput.getOrNull(0)
+        val platform = batchOutput.getOrNull(1)
+        val sfOutput = batchOutput.getOrNull(2)
+        val egl = batchOutput.getOrNull(3)
+        val glVerStr = batchOutput.getOrNull(4)
+        
+        var model = if (!board.isNullOrEmpty()) board else platform
+        var renderer: String? = null
+        var apiVersion: String? = null
+        
+        if (!sfOutput.isNullOrEmpty() && sfOutput.contains("GLES:")) {
+            val glesLine = sfOutput.substringAfter("GLES:").trim()
+            val parts = glesLine.split(",").map { it.trim() }
+            if (parts.size >= 2) renderer = parts[1].replace("(TM)", "").replace("(R)", "").trim()
+            if (parts.size >= 3) apiVersion = parts[2].substringBefore(" V@").substringBefore(" (").trim()
+        }
+        
+        if (renderer.isNullOrEmpty()) renderer = egl
+        if (apiVersion.isNullOrEmpty()) {
+            val glVersion = glVerStr?.toIntOrNull()
+            if (glVersion != null) apiVersion = "OpenGL ES ${(glVersion shr 16) and 0xFF}.${glVersion and 0xFF}"
+        }
+        
+        val vendor = if (renderer?.lowercase()?.contains("adreno") == true) "Qualcomm" 
+                     else if (renderer?.lowercase()?.contains("mali") == true) "ARM" 
+                     else null
+                     
+        val info = GpuStaticInfo(renderer ?: "Unknown", model, vendor, apiVersion)
+        cachedGpuStaticInfo = info
+        persist(Keys.GPU_RENDERER, info.renderer)
+        persist(Keys.GPU_MODEL, info.model)
+        persist(Keys.GPU_VENDOR, info.vendor)
+        return info
+    }
 
     private suspend fun getCpuTemperature(): Float? {
         val tempPaths = listOf(
@@ -834,6 +1042,7 @@ class DeviceMonitorRepository @Inject constructor(
                     val temp = if (t > 1000) t / 1000f else t
                     if (temp in 10f..100f) {
                         workingCpuTempPath = path
+                        persist(Keys.CPU_TEMP_PATH, path)
                         return temp
                     }
                 }
@@ -845,6 +1054,7 @@ class DeviceMonitorRepository @Inject constructor(
                 val temp = if (st > 1000) st / 1000f else st
                 if (temp in 10f..100f) {
                     workingCpuTempPath = path
+                    persist(Keys.CPU_TEMP_PATH, path)
                     return temp
                 }
             }
@@ -1267,7 +1477,7 @@ class DeviceMonitorRepository @Inject constructor(
     private fun parseGpuLoad(content: String?, path: String): Int? {
         if (content.isNullOrEmpty()) return null
         return try {
-            if (path.endsWith("gpubusy")) {
+            val raw = if (path.endsWith("gpubusy")) {
                 val match = gpuBusyRegex.find(content)
                 if (match != null) {
                     val busy = match.groupValues[1].toLong()
@@ -1276,6 +1486,14 @@ class DeviceMonitorRepository @Inject constructor(
                 } else null
             } else {
                 content.replace("%", "").split(whitespaceRegex)[0].toIntOrNull()
+            }
+            
+            // 🚀 SYN-STYLE Sanity Check (Handles raw ticks vs percentages)
+            when {
+                raw == null -> null
+                raw > 1000 -> (raw / 1000).coerceAtMost(100)
+                raw > 100 -> (raw / 10).coerceAtMost(100)
+                else -> raw.coerceAtMost(100)
             }
         } catch (_: Exception) { null }
     }
@@ -1364,4 +1582,44 @@ class DeviceMonitorRepository @Inject constructor(
         }
         props
     }
+
+    /**
+     * Parses the flat key-value stats from the Daemon background file.
+     * This is the fastest monitoring path.
+     */
+    private suspend fun parseCpuInfoFromDaemon(stats: Map<String, String>, coreCount: Int): CpuInfo {
+        val freqsStr = stats["cpu_freqs"] ?: ""
+        val freqList = if (freqsStr.isNotEmpty()) freqsStr.split(",").map { it.toLongOrNull() ?: 0L } else List(coreCount) { 0L }
+        
+        val cpuUsageStr = stats["cpu_usage"] ?: "0"
+        val cpuUsagePercent = cpuUsageStr.toFloatOrNull() ?: 0f
+        
+        val fpsStr = stats["fps"] ?: "0"
+        
+        val tempsRaw = stats["temps"] ?: ""
+        val temp = tempsRaw.split("|").firstNotNullOfOrNull { line ->
+            val pts = line.split(":")
+            if (pts.size == 2 && (pts[0].contains("cpu") || pts[0].contains("soc"))) {
+                val t = pts[1].toFloatOrNull() ?: return@firstNotNullOfOrNull null
+                if (t > 1000) t / 1000f else t
+            } else null
+        } ?: 0f
+
+        val soc = cachedSoCModel ?: stats["soc"] ?: getSoCModel().also { cachedSoCModel = it }
+        val ram = getRamInfo()
+
+        return CpuInfo(
+            loadPercent = cpuUsagePercent.coerceIn(0f, 100f),
+            coreCount = coreCount,
+            coreLoads = List(coreCount) { cpuUsagePercent },
+            frequencies = freqList,
+            onlineStatus = List(coreCount) { true },
+            socName = soc,
+            temperatureCelsius = temp,
+            fps = fpsStr.toFloatOrNull() ?: 0f,
+            architecture = "ARMv8-A" // Standardize
+        )
+    }
+
+    suspend fun startDaemon() = daemonManager.deployAndStart()
 }

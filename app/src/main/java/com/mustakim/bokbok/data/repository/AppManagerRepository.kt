@@ -3,7 +3,9 @@ package com.mustakim.bokbok.data.repository
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.PermissionInfo
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -19,6 +21,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.MainScope
 import rikka.shizuku.Shizuku
 import moe.shizuku.server.IShizukuService
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -28,7 +33,8 @@ import javax.inject.Singleton
 @Singleton
 class AppManagerRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val appDao: AppDao
+    private val appDao: AppDao,
+    private val configDao: com.mustakim.bokbok.data.local.dao.SystemConfigDao
 ) {
     private val packageManager: PackageManager = context.packageManager
     private val workManager = WorkManager.getInstance(context)
@@ -37,6 +43,10 @@ class AppManagerRepository @Inject constructor(
         return appDao.getAllApps().map { entities ->
             entities.map { it.toModel() }
         }
+    }
+
+    fun observeApp(packageName: String): Flow<AppItem?> {
+        return appDao.getAppByPackage(packageName).map { it?.toModel() }
     }
 
     fun refreshApps() {
@@ -67,6 +77,7 @@ class AppManagerRepository @Inject constructor(
         apkSize = apkSize,
         hasActivities = hasActivities,
         isDebuggable = isDebuggable,
+        category = category,
         isBloatware = isBloatware,
         removalSafety = removalSafety,
         bloatwareType = bloatwareType,
@@ -144,9 +155,10 @@ class AppManagerRepository @Inject constructor(
         }
     }
     
-    suspend fun clearAppCache(packageName: String): Result<Unit> {
+    suspend fun clearAppData(packageName: String): Result<Unit> {
         return try {
             if (checkShizukuPermission()) {
+                // pm clear resets EVERYTHING (data + cache)
                 executeShellCommand("pm clear $packageName")
                 Result.success(Unit)
             } else {
@@ -157,10 +169,18 @@ class AppManagerRepository @Inject constructor(
         }
     }
 
+    suspend fun clearAppCache(packageName: String): Result<Unit> {
+        // Technically, pm clear is the main tool. Specific cache deletion
+        // usually needs internal APIs. We'll reuse pm clear for consistency if needed,
+        // or just let it be a placeholder for now as pm clear handles everything.
+        return clearAppData(packageName)
+    }
+
     suspend fun disableApp(packageName: String): Result<Unit> {
         return try {
             if (checkShizukuPermission()) {
                 executeShellCommand("pm disable-user --user 0 $packageName")
+                appDao.updateAppEnabledState(packageName, false)
                 Result.success(Unit)
             } else {
                 Result.failure(SecurityException("Shizuku permission not granted"))
@@ -174,6 +194,7 @@ class AppManagerRepository @Inject constructor(
         return try {
             if (checkShizukuPermission()) {
                 executeShellCommand("pm enable --user 0 $packageName")
+                appDao.updateAppEnabledState(packageName, true)
                 Result.success(Unit)
             } else {
                 Result.failure(SecurityException("Shizuku permission not granted"))
@@ -261,14 +282,183 @@ class AppManagerRepository @Inject constructor(
         } catch (_: Exception) {}
     }
 
+    /**
+     * Gamer Power Tools: List components of an app (Services, Receivers, Activities)
+     */
+    fun getAppComponents(packageName: String, type: ComponentType): List<com.mustakim.bokbok.data.model.AppComponent> {
+        val flags = PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS or 
+                    PackageManager.GET_ACTIVITIES or PackageManager.GET_DISABLED_COMPONENTS
+        
+        val packageInfo = try {
+            packageManager.getPackageInfo(packageName, flags)
+        } catch (e: Exception) {
+            return emptyList()
+        }
+
+        val componentList = when (type) {
+            ComponentType.SERVICE -> packageInfo.services?.toList()
+            ComponentType.RECEIVER -> packageInfo.receivers?.toList()
+            ComponentType.ACTIVITY -> packageInfo.activities?.toList()
+        } ?: return emptyList()
+
+        return componentList.map { info ->
+            // Use explicit cast if necessary, though it should be inferred as ComponentInfo
+            val comp = info as android.content.pm.ComponentInfo
+            com.mustakim.bokbok.data.model.AppComponent(
+                packageName = packageName,
+                name = comp.name,
+                label = comp.loadLabel(packageManager).toString(),
+                isEnabled = packageManager.getComponentEnabledSetting(
+                    android.content.ComponentName(packageName, comp.name)
+                ).let { setting ->
+                    when(setting) {
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                        else -> comp.enabled
+                    }
+                },
+                isExported = comp.exported,
+                processName = comp.processName
+            )
+        }
+    }
+
+    suspend fun toggleComponent(packageName: String, componentName: String, enabled: Boolean): Result<Unit> {
+        return try {
+            if (checkShizukuPermission()) {
+                val state = if (enabled) "enable" else "disable"
+                executeShellCommand("pm $state $packageName/$componentName")
+                Result.success(Unit)
+            } else {
+                Result.failure(SecurityException("Shizuku permission not granted"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun togglePermission(packageName: String, permission: String, grant: Boolean): Result<Unit> {
+        return try {
+            if (checkShizukuPermission()) {
+                val action = if (grant) "grant" else "revoke"
+                executeShellCommand("pm $action $packageName $permission")
+                Result.success(Unit)
+            } else {
+                Result.failure(SecurityException("Shizuku permission not granted"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Gamer Power Tools: Handle App Ops (Battery, Overlay, Background)
+     */
+    suspend fun setAppOp(packageName: String, op: String, mode: String): Result<Unit> {
+        return try {
+            if (checkShizukuPermission()) {
+                executeShellCommand("appops set $packageName $op $mode")
+                Result.success(Unit)
+            } else {
+                Result.failure(SecurityException("Shizuku permission not granted"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setBatteryOptimization(packageName: String, optimize: Boolean): Result<Unit> {
+        val mode = if (optimize) "allow" else "ignore"
+        // This is a bit complex as it might involve different op codes/commands depending on OS
+        return setAppOp(packageName, "RUN_IN_BACKGROUND", if (optimize) "allow" else "ignore")
+    }
+
+    suspend fun setOverlayPermission(packageName: String, allow: Boolean): Result<Unit> {
+        val mode = if (allow) "allow" else "deny"
+        return setAppOp(packageName, "SYSTEM_ALERT_WINDOW", mode)
+    }
+
+    /**
+     * App Analysis Helpers
+     */
+    fun getPermissionCount(packageName: String): Int {
+        return try {
+            val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES or android.content.pm.PackageManager.GET_PERMISSIONS
+            } else {
+                @Suppress("DEPRECATION")
+                android.content.pm.PackageManager.GET_SIGNATURES or android.content.pm.PackageManager.GET_PERMISSIONS
+            }
+            val pi = packageManager.getPackageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
+            pi.requestedPermissions?.size ?: 0
+        } catch (e: Exception) { 0 }
+    }
+
+    fun getComponentCount(packageName: String): Triple<Int, Int, Int> {
+        return try {
+            val flags = PackageManager.GET_SERVICES or PackageManager.GET_RECEIVERS or PackageManager.GET_ACTIVITIES or PackageManager.GET_DISABLED_COMPONENTS
+            val pi = packageManager.getPackageInfo(packageName, flags)
+            Triple(
+                pi.services?.size ?: 0,
+                pi.receivers?.size ?: 0,
+                pi.activities?.size ?: 0
+            )
+        } catch (e: Exception) { Triple(0, 0, 0) }
+    }
+
+    fun getAppPermissions(packageName: String): List<com.mustakim.bokbok.data.model.AppPermissionDetail> {
+        return try {
+            val pi = packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
+            val requested = pi.requestedPermissions ?: return emptyList()
+            val flags = pi.requestedPermissionsFlags ?: IntArray(requested.size)
+
+            requested.mapIndexed { index, perm ->
+                val info = try { packageManager.getPermissionInfo(perm, 0) } catch (e: Exception) { null }
+                val label = info?.loadLabel(packageManager)?.toString() ?: perm.substringAfterLast(".")
+                val isGranted = (flags[index] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+                
+                com.mustakim.bokbok.data.model.AppPermissionDetail(
+                    permission = perm,
+                    label = label,
+                    isGranted = isGranted,
+                    isRuntime = info?.protectionLevel == PermissionInfo.PROTECTION_DANGEROUS
+                )
+            }
+        } catch (e: Exception) { emptyList() }
+    }
+
+    enum class ComponentType { SERVICE, RECEIVER, ACTIVITY }
+
     suspend fun syncBloatwareDatabase(): Boolean = withContext(Dispatchers.IO) {
         BloatwareDatabase.sync(context)
     }
 
+    private var isShizukuAuthorizedCached: Boolean? = null
+
     private fun checkShizukuPermission(): Boolean {
+        if (isShizukuAuthorizedCached == true) return true
+        
         try {
              if (Shizuku.isPreV11() || Shizuku.getVersion() < 11) return false
-             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) return true
+             val granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+             
+             if (isShizukuAuthorizedCached == null) {
+                 // Try to load from cache once
+                 MainScope().launch(Dispatchers.IO) {
+                     val cached = configDao.getString("shizuku_authorized")
+                     if (cached == "true") isShizukuAuthorizedCached = true
+                 }
+             }
+
+             if (granted) {
+                 if (isShizukuAuthorizedCached != true) {
+                     isShizukuAuthorizedCached = true
+                     MainScope().launch(Dispatchers.IO) {
+                         configDao.putString("shizuku_authorized", "true")
+                     }
+                 }
+                 return true
+             }
              if (Shizuku.shouldShowRequestPermissionRationale()) {
                  return false
              }

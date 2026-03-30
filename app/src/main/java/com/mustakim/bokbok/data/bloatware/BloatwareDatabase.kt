@@ -13,7 +13,6 @@ import java.net.URL
  * Based on the App Manager reference implementation.
  */
 data class DebloatObject(
-    @SerializedName("id")
     val packageName: String,
     
     @SerializedName("label")
@@ -23,10 +22,10 @@ data class DebloatObject(
     val description: String? = null,
     
     @SerializedName("removal")
-    val removal: String = "caution",
+    val removal: String = "Advanced",
     
-    @SerializedName("type")
-    val type: String = "misc",
+    @SerializedName("list")
+    val type: String = "Misc",
     
     @SerializedName("warning")
     val warning: String? = null,
@@ -37,35 +36,36 @@ data class DebloatObject(
     @SerializedName("dependencies")
     val dependencies: List<String>? = null,
     
-    @SerializedName("required_by")
+    @SerializedName("neededBy")
     val requiredBy: List<String>? = null,
+    
+    @SerializedName("labels")
+    val labels: List<String>? = null,
     
     @SerializedName("web")
     val webRefs: List<String>? = null
 ) {
     companion object {
-        const val REMOVAL_SAFE = "safe"
-        const val REMOVAL_REPLACE = "replace"
-        const val REMOVAL_CAUTION = "caution"
-        const val REMOVAL_UNSAFE = "unsafe"
-        const val REMOVAL_DELETE = "delete" // Same as safe in terms of action
+        const val REMOVAL_RECOMMENDED = "Recommended"
+        const val REMOVAL_ADVANCED = "Advanced"
+        const val REMOVAL_EXPERT = "Expert"
+        const val REMOVAL_UNSAFE = "Unsafe"
         
-        const val TYPE_AOSP = "aosp"
-        const val TYPE_CARRIER = "carrier"
-        const val TYPE_GOOGLE = "google"
-        const val TYPE_OEM = "oem"
-        const val TYPE_MISC = "misc"
-        const val TYPE_PENDING = "pending"
+        const val LIST_AOSP = "Aosp"
+        const val LIST_CARRIER = "Carrier"
+        const val LIST_GOOGLE = "Google"
+        const val LIST_OEM = "Oem"
+        const val LIST_MISC = "Misc"
     }
     
     /**
      * Get removal safety level as enum
      */
     fun getRemovalSafety(): RemovalSafety {
-        return when (removal.lowercase()) {
-            REMOVAL_SAFE, REMOVAL_DELETE -> RemovalSafety.SAFE
-            REMOVAL_REPLACE -> RemovalSafety.REPLACEABLE
-            REMOVAL_CAUTION -> RemovalSafety.CAUTION
+        return when (removal.replaceFirstChar { it.uppercase() }) {
+            REMOVAL_RECOMMENDED -> RemovalSafety.SAFE
+            REMOVAL_ADVANCED -> RemovalSafety.CAUTION
+            REMOVAL_EXPERT -> RemovalSafety.UNSAFE
             REMOVAL_UNSAFE -> RemovalSafety.UNSAFE
             else -> RemovalSafety.UNKNOWN
         }
@@ -75,7 +75,8 @@ data class DebloatObject(
      * Check if this app is safe to remove
      */
     fun isSafeToRemove(): Boolean {
-        return removal.lowercase() in listOf(REMOVAL_SAFE, REMOVAL_DELETE, REMOVAL_REPLACE)
+        // Only Recommended and Advanced are considered somewhat safe for general users
+        return removal.replaceFirstChar { it.uppercase() } in listOf(REMOVAL_RECOMMENDED, REMOVAL_ADVANCED)
     }
 }
 
@@ -121,12 +122,16 @@ object BloatwareDatabase {
             // 2. Fallback to Asset (if cache failed or empty)
             if (debloatMap == null || debloatMap!!.isEmpty()) {
                 val json = context.assets.open("debloat.json").bufferedReader().use { it.readText() }
-                // Handle legacy list format or new map format
+                
                 if (json.trim().startsWith("[")) {
+                     // Old list format
                      val list = gson.fromJson(json, Array<DebloatObject>::class.java).toList()
                      debloatMap = list.associateBy { it.packageName }
                 } else {
-                     debloatMap = gson.fromJson(json, type)
+                     // New map format: { "pkg.name": { ... }, ... }
+                     val map = gson.fromJson<Map<String, DebloatObject>>(json, type)
+                     // Re-create the map giving each object its package name from the key
+                     debloatMap = map.mapValues { (pkg, obj) -> obj.copy(packageName = pkg) }
                 }
             }
         } catch (e: Exception) {
@@ -156,12 +161,15 @@ object BloatwareDatabase {
                 val newMap: Map<String, DebloatObject> = gson.fromJson(json, type)
                 
                 if (newMap.isNotEmpty()) {
+                    // Re-create with package names from keys to validate and store in-memory
+                    val processedMap = newMap.mapValues { (pkg, obj) -> obj.copy(packageName = pkg) }
+                    
                     // Save to cache
                     val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
                     cacheFile.writeText(json)
                     
                     // Update in-memory
-                    debloatMap = newMap
+                    debloatMap = processedMap
                     true
                 } else {
                     false
@@ -215,5 +223,12 @@ object BloatwareDatabase {
     fun getCount(context: Context): Int {
         load(context)
         return debloatMap?.size ?: 0
+    }
+    /**
+     * Clear the in-memory database to free RAM.
+     * Call this after a full scan is complete.
+     */
+    fun clear() {
+        debloatMap = null
     }
 }

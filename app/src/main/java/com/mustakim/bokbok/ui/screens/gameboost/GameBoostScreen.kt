@@ -31,7 +31,9 @@ import androidx.compose.runtime.setValue
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -77,28 +79,11 @@ fun GameBoostScreen(
         navController.getBackStackEntry(com.mustakim.bokbok.ui.navigation.NavRoutes.GameBoost.route)
     }
     
-    // 🚀 PERFORMANCE (Eager Shared Initialization): 
-    // We instantiate ALL ViewModels at the root using the shared route scope.
-    // This allows smooth swiping because the ViewModels are ready.
-    // The "Entry Freeze" caused by this Eager loading is solved by Baseline Profiles (AOT Compilation).
-    val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel(viewModelStoreOwner)
-    val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(viewModelStoreOwner)
-    val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(viewModelStoreOwner)
-    val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(viewModelStoreOwner)
-    val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel = hiltViewModel(viewModelStoreOwner)
-    val securityViewModel: com.mustakim.bokbok.viewmodel.SecurityViewModel = hiltViewModel(viewModelStoreOwner)
+    // ViewModels are now lazily initialized inside the pager items using hiltViewModel(viewModelStoreOwner)
 
     // Sync Pager state with ViewModel state
     LaunchedEffect(pagerState.currentPage) {
-        val selectedTabEnum = tabs[pagerState.currentPage]
         viewModel.onTabSelected(pagerState.currentPage)
-        
-        // Smart Heartbeat: Only monitor when the user is actually looking at the Monitor tab.
-        if (selectedTabEnum == GameBoostTab.DEVICE_MONITOR) {
-            deviceMonitorViewModel.startMonitoring()
-        } else {
-            deviceMonitorViewModel.stopMonitoring()
-        }
     }
 
     LaunchedEffect(selectedTab) {
@@ -120,18 +105,30 @@ fun GameBoostScreen(
             modifier = Modifier
                 .padding(bottom = innerPadding.calculateBottomPadding()), // Respect BottomBar
             containerColor = MaterialTheme.colorScheme.surface, // Solid Surface color
+            // TopAppBar with dynamic Back Button support
             topBar = {
                 TopAppBar(
                     title = {
                         Text(
                             modifier = Modifier.padding(start = 8.dp),
-                            text = "Optimizer",
+                            text = if (selectedTab == GameBoostTab.DASHBOARD) "Optimizer" else selectedTab.title,
                             fontFamily = GoogleSansFlex,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.primary,
-                            fontSize = 40.sp,
+                            fontSize = 32.sp, // Adjusted for dynamic title
                             letterSpacing = 1.sp
                         )
+                    },
+                    navigationIcon = {
+                        if (selectedTab != GameBoostTab.DASHBOARD) {
+                            IconButton(onClick = { viewModel.onTabSelected(GameBoostTab.DASHBOARD) }) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to Dashboard",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     },
                     actions = {
                         FilledIconButton(
@@ -159,47 +156,65 @@ fun GameBoostScreen(
                 )
             }
         ) { scaffoldPadding ->
-            Column(
+            Box(
                 modifier = Modifier
                     .padding(top = scaffoldPadding.calculateTopPadding())
                     .fillMaxSize()
             ) {
-                ScrollableTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    edgePadding = 12.dp,
-                    indicator = { tabPositions ->
-                        if (pagerState.currentPage < tabPositions.size) {
-                            TabRowDefaults.PrimaryIndicator(
-                                modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
-                                height = 3.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                // Feature Content Switcher (Lazy initialization of screens)
+                when (selectedTab) {
+                    GameBoostTab.DASHBOARD -> {
+                        OptimizerDashboard(
+                            onTabSelected = { tab -> viewModel.onTabSelected(tab) }
+                        )
+                    }
+
+                    GameBoostTab.GAME_BOOST -> {
+                        val gameSpaceViewModel: com.mustakim.bokbok.viewmodel.GameSpaceViewModel = hiltViewModel(viewModelStoreOwner)
+                        com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(
+                            navController = navController,
+                            viewModel = gameSpaceViewModel
+                        )
+                    }
+
+                    GameBoostTab.APP_MANAGER -> {
+                        val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(viewModelStoreOwner)
+                        AppManagerScreen(
+                            navController = navController,
+                            viewModel = appManagerViewModel
+                        )
+                    }
+
+                    GameBoostTab.USAGE_STATS -> {
+                        val usageStatsViewModel: com.mustakim.bokbok.viewmodel.UsageStatsViewModel = hiltViewModel(viewModelStoreOwner)
+                        UsageStatsScreen(viewModel = usageStatsViewModel)
+                    }
+
+                    GameBoostTab.DEVICE_MONITOR -> {
+                        val deviceMonitorViewModel: com.mustakim.bokbok.viewmodel.DeviceMonitorViewModel = hiltViewModel(viewModelStoreOwner)
+                        LaunchedEffect(Unit) {
+                            deviceMonitorViewModel.startMonitoring()
                         }
-                    },
-                    divider = {}
-                ) {
-                    tabs.forEachIndexed { index, tab ->
-                        TabAnimation(
-                            index = index,
-                            title = tab.title,
-                            selectedIndex = pagerState.currentPage,
-                            unselectedColor = MaterialTheme.colorScheme.surfaceContainerHighest, // Tonal elevation
-                            onClick = {
-                                scope.launch {
-                                    pagerState.animateScrollToPage(index)
-                                }
-                            }
-                        ) {
-                            Text(
-                                text = tab.title,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (pagerState.currentPage == index) FontWeight.Bold else FontWeight.Medium
-                            )
-                        }
+                        DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
+                    }
+
+                    GameBoostTab.SCREEN_RECORD -> {
+                        val screenRecordViewModel: com.mustakim.bokbok.viewmodel.ScreenRecordViewModel = hiltViewModel(viewModelStoreOwner)
+                        ScreenRecordTab(
+                            navController = navController,
+                            viewModel = screenRecordViewModel
+                        )
+                    }
+
+                    GameBoostTab.SECURITY -> {
+                        val securityViewModel: com.mustakim.bokbok.viewmodel.SecurityViewModel = hiltViewModel(viewModelStoreOwner)
+                        SecurityScreen(
+                            viewModel = securityViewModel
+                        )
                     }
                 }
 
+                // Shizuku Alert Dialog (Persistent across sub-screens)
                 val showShizukuDialog by viewModel.showShizukuWarning.collectAsState()
                 val shizukuActive by viewModel.shizukuActive.collectAsState()
 
@@ -207,133 +222,23 @@ fun GameBoostScreen(
                     AlertDialog(
                         modifier = Modifier.padding(28.dp),
                         onDismissRequest = { viewModel.dismissShizukuWarning() },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        },
-                        title = {
-                            Text(
-                                "Shizuku Not Running",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        },
-                        text = {
-                            Text(
-                                "Most optimizations and system monitoring features require Shizuku to be active and authorized. Please ensure Shizuku is running and this app is authorized in Shizuku's settings.",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        },
+                        icon = { Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        title = { Text("Shizuku Not Running", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) },
+                        text = { Text("This feature requires Shizuku to be active and authorized.", style = MaterialTheme.typography.bodyMedium) },
                         confirmButton = {
                             TextButton(onClick = {
                                 try {
                                     val intent = context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                                    if (intent != null) {
-                                        context.startActivity(intent)
-                                    } else {
-                                        val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api"))
-                                        context.startActivity(playStoreIntent)
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Could not open Shizuku", Toast.LENGTH_SHORT).show()
-                                }
+                                    if (intent != null) context.startActivity(intent)
+                                    else context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")))
+                                } catch (e: Exception) { Toast.makeText(context, "Could not open Shizuku", Toast.LENGTH_SHORT).show() }
                                 viewModel.dismissShizukuWarning()
-                            }) {
-                                Text("Open Shizuku")
-                            }
+                            }) { Text("Open Shizuku") }
                         },
-                        dismissButton = {
-                            TextButton(onClick = { viewModel.dismissShizukuWarning() }) {
-                                Text("Dismiss")
-                            }
-                        },
+                        dismissButton = { TextButton(onClick = { viewModel.dismissShizukuWarning() }) { Text("Dismiss") } },
                         shape = RoundedCornerShape(28.dp),
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     )
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 0.dp),
-                    color = MaterialTheme.colorScheme.background,
-                    shape = RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)
-                ) {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier
-                            .fillMaxSize(),
-                        beyondViewportPageCount = 1, // 🚀 Pre-load adjacent tabs for smooth swiping
-                        key = { tabs[it] }
-                    ) { page ->
-                        val tab = tabs[page]
-                        
-                        when (tab) {
-                            GameBoostTab.GAME_BOOST -> {
-                                LaunchedEffect(Unit) {
-                                    gameSpaceViewModel.loadDataIfNeeded()
-                                }
-                                com.mustakim.bokbok.ui.screens.gameboost.games.GameBoostTabScreen(
-                                    viewModel = gameSpaceViewModel
-                                )
-                            }
-
-                            GameBoostTab.APP_MANAGER -> {
-                                LaunchedEffect(Unit) {
-                                    appManagerViewModel.loadDataIfNeeded()
-                                }
-                                AppManagerScreen(viewModel = appManagerViewModel)
-                            }
-
-                            GameBoostTab.USAGE_STATS -> {
-                                LaunchedEffect(Unit) {
-                                    usageStatsViewModel.loadDataIfNeeded()
-                                }
-                                UsageStatsScreen(viewModel = usageStatsViewModel)
-                            }
-
-                            GameBoostTab.DEVICE_MONITOR -> {
-                                DeviceMonitorScreen(viewModel = deviceMonitorViewModel)
-                            }
-
-                            GameBoostTab.SCREEN_RECORD -> {
-                                ScreenRecordTab(
-                                    navController = navController,
-                                    viewModel = screenRecordViewModel
-                                )
-                            }
-
-                            GameBoostTab.SECURITY -> {
-                                com.mustakim.bokbok.ui.screens.gameboost.security.SecurityScreen(
-                                    viewModel = securityViewModel
-                                )
-                            }
-
-                            else -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            text = tab.title,
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "Feature Coming Soon",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }

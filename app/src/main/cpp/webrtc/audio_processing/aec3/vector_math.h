@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <arm_vector_types.h>
 
 #include "rtc_base/array_view.h"
 #include "audio_processing/aec3/aec3_common.h"

@@ -13,6 +13,9 @@ interface AppDao {
     @Query("SELECT * FROM apps ORDER BY label COLLATE NOCASE ASC")
     fun getAllApps(): Flow<List<AppEntity>>
 
+    @Query("SELECT * FROM apps WHERE packageName = :packageName")
+    fun getAppByPackage(packageName: String): Flow<AppEntity?>
+
     @Query("SELECT * FROM apps")
     suspend fun getAppsOneShot(): List<AppEntity>
 
@@ -30,6 +33,9 @@ interface AppDao {
 
     @Query("SELECT COUNT(*) FROM apps")
     suspend fun getAppCount(): Int
+
+    @Query("UPDATE apps SET isEnabled = :isEnabled WHERE packageName = :packageName")
+    suspend fun updateAppEnabledState(packageName: String, isEnabled: Boolean)
 
     @Query("UPDATE apps SET apkPath = :apkPath, dataPath = :dataPath, apkSize = :apkSize, dataSize = :dataSize, cacheSize = :cacheSize, hasActivities = :hasLauncher WHERE packageName = :packageName")
     suspend fun updateAppDetails(

@@ -371,6 +371,10 @@ class ScreenRecordViewModel @Inject constructor(
         }
     }
     
+    fun cancelDeepFilterDownload() {
+        modelRepository.cancelDownload()
+    }
+    
     fun deleteModels() {
         modelRepository.deleteModels()
     }

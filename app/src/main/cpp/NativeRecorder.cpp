@@ -25,7 +25,6 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 // Forward declarations
-extern "C" JNIEXPORT jboolean JNICALL Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(JNIEnv*, jobject);
 
 struct Packet {
     uint8_t* data;
@@ -73,7 +72,7 @@ struct RecorderContext {
     std::atomic<bool> audioEnabled{false};
 };
 
-static RecorderContext* gCtx = nullptr;
+// static RecorderContext* gCtx = nullptr; // REMOVED GLOBAL
 static std::mutex gGlobalMutex;
 
 static int64_t getCurrentTimeUs() {
@@ -180,42 +179,38 @@ static void pollVideo(RecorderContext* ctx) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_stringFromJNI(JNIEnv* env, jobject) {
-    return env->NewStringUTF("Native Recorder Engine v4.0 (Raw Capture Mode)");
+    return env->NewStringUTF("Native Recorder Engine v4.0 (Handle-Based Mode)");
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_setup(
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_mustakim_bokbok_data_service_NativeRecorder_nativeSetup(
         JNIEnv* env, jobject, 
         jint width, jint height, jint bitrate, jint fps, jboolean useHevc,
         jboolean audioEnabled, 
         jstring videoPath, jstring micPath, jstring internalPath,
         jint audioSampleRate, jint audioBitrate) {
     
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    
-    if (gCtx) {
-        Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(env, nullptr); 
-    }
-    
-    gCtx = new RecorderContext();
-    gCtx->expectedTracks = 1; // Video only for main muxer
-    gCtx->audioEnabled = audioEnabled;
+    // We don't check for global here anymore as each setup creates a new context
+    RecorderContext* ctx = new RecorderContext();
+    ctx->expectedTracks = 1; 
+    ctx->audioEnabled = audioEnabled;
 
     // Video Output
     const char* vPath = env->GetStringUTFChars(videoPath, nullptr);
-    gCtx->fd = open(vPath, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    ctx->fd = open(vPath, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     env->ReleaseStringUTFChars(videoPath, vPath);
     
-    if (gCtx->fd < 0) {
+    if (ctx->fd < 0) {
         LOGE("Failed to open video file");
-        return JNI_FALSE;
+        delete ctx;
+        return 0;
     }
 
-    gCtx->muxer = AMediaMuxer_new(gCtx->fd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
-    if (!gCtx->muxer) {
-        close(gCtx->fd);
-        gCtx->fd = -1;
-        return JNI_FALSE;
+    ctx->muxer = AMediaMuxer_new(ctx->fd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
+    if (!ctx->muxer) {
+        close(ctx->fd);
+        delete ctx;
+        return 0;
     }
 
     // Audio Outputs (Raw PCM)
@@ -223,8 +218,8 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_setup(
         const char* mPath = env->GetStringUTFChars(micPath, nullptr);
         const char* iPath = env->GetStringUTFChars(internalPath, nullptr);
         
-        bool mOk = gCtx->micWriter.open(mPath);
-        bool iOk = gCtx->internalWriter.open(iPath);
+        bool mOk = ctx->micWriter.open(mPath);
+        bool iOk = ctx->internalWriter.open(iPath);
         
         if (mOk) LOGI("Mic raw writer opened: %s", mPath);
         else LOGE("Failed to open mic raw path: %s", mPath);
@@ -253,49 +248,52 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_setup(
     int64_t repeatUs = 1000000LL / fps;
     AMediaFormat_setInt64(format, "repeat-previous-frame-after", repeatUs);
 
-    gCtx->videoCodec = AMediaCodec_createEncoderByType(mime);
-    media_status_t status = AMediaCodec_configure(gCtx->videoCodec, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
+    ctx->videoCodec = AMediaCodec_createEncoderByType(mime);
+    media_status_t status = AMediaCodec_configure(ctx->videoCodec, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
     if (status != AMEDIA_OK) {
         LOGE("Failed to configure video codec: %d", status);
         AMediaFormat_delete(format);
-        return JNI_FALSE;
+        AMediaMuxer_delete(ctx->muxer);
+        close(ctx->fd);
+        delete ctx;
+        return 0;
     }
-    AMediaCodec_createInputSurface(gCtx->videoCodec, &gCtx->inputSurface);
+    AMediaCodec_createInputSurface(ctx->videoCodec, &ctx->inputSurface);
     AMediaFormat_delete(format);
 
-    return JNI_TRUE;
+    return reinterpret_cast<jlong>(ctx);
 }
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_getInputSurface(JNIEnv* env, jobject) {
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    if (!gCtx || !gCtx->inputSurface) return nullptr;
-    return ANativeWindow_toSurface(env, gCtx->inputSurface);
+Java_com_mustakim_bokbok_data_service_NativeRecorder_getInputSurface(JNIEnv* env, jobject, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (!ctx || !ctx->inputSurface) return nullptr;
+    return ANativeWindow_toSurface(env, ctx->inputSurface);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_start(JNIEnv*, jobject) {
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    if (!gCtx || !gCtx->videoCodec) return JNI_FALSE;
+Java_com_mustakim_bokbok_data_service_NativeRecorder_start(JNIEnv*, jobject, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (!ctx || !ctx->videoCodec) return JNI_FALSE;
 
-    AMediaCodec_start(gCtx->videoCodec);
+    AMediaCodec_start(ctx->videoCodec);
 
-    gCtx->isRecording = true;
-    gCtx->videoPollingThread = std::thread(pollVideo, gCtx);
+    ctx->isRecording = true;
+    ctx->videoPollingThread = std::thread(pollVideo, ctx);
 
     return JNI_TRUE;
 }
 
-// Keeping this for compatibility, but it redirects to generic write
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioBuffer(
-        JNIEnv* env, jobject, jshortArray data, jint length) {
-    // Deprecated path - mapped to mic writer for fallback
-    if (!gCtx || !gCtx->isRecording.load() || gCtx->isPaused.load()) return JNI_FALSE;
+        JNIEnv* env, jobject, jlong handle, jshortArray data, jint length) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (!ctx || !ctx->isRecording.load() || ctx->isPaused.load()) return JNI_FALSE;
 
     jshort* samples = env->GetShortArrayElements(data, nullptr);
-    if (gCtx->micWriter.isOpen()) {
-        gCtx->micWriter.write(samples, length);
+    if (ctx->micWriter.isOpen()) {
+        ctx->micWriter.write(samples, length);
     }
     env->ReleaseShortArrayElements(data, samples, JNI_ABORT);
     return JNI_TRUE;
@@ -303,17 +301,9 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioBuffer(
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
-        JNIEnv* env, jobject thiz, jshortArray micData, jshortArray internalData, jint length) {
-    if (!gCtx || !gCtx->isRecording.load() || gCtx->isPaused.load()) {
-        static int dropLogCounter = 0;
-        if (dropLogCounter++ < 50) { 
-            LOGI("AudioWrite: DROPPED (isRecording=%s isPaused=%s)", 
-                 (gCtx && gCtx->isRecording.load()) ? "true" : "false",
-                 (gCtx && gCtx->isPaused.load()) ? "true" : "false");
-        }
-        return JNI_FALSE;
-    }
-
+        JNIEnv* env, jobject thiz, jlong handle, jshortArray micData, jshortArray internalData, jint length) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (!ctx || !ctx->isRecording.load() || ctx->isPaused.load()) return JNI_FALSE;
 
     jsize micLen = env->GetArrayLength(micData);
     jsize intLen = env->GetArrayLength(internalData);
@@ -321,24 +311,16 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
     jshort* micSamples = (micLen > 0) ? env->GetShortArrayElements(micData, nullptr) : nullptr;
     jshort* internalSamples = (intLen > 0) ? env->GetShortArrayElements(internalData, nullptr) : nullptr;
 
-    // 1. Write Raw Data (Only if array has enough data)
-    static int logThrottle = 0;
     bool micWrote = false;
     bool intWrote = false;
 
-    if (gCtx->micWriter.isOpen() && micSamples && micLen >= length) {
-        gCtx->micWriter.write(micSamples, length);
+    if (ctx->micWriter.isOpen() && micSamples && micLen >= length) {
+        ctx->micWriter.write(micSamples, length);
         micWrote = true;
     }
-    if (gCtx->internalWriter.isOpen() && internalSamples && intLen >= length) {
-        gCtx->internalWriter.write(internalSamples, length);
+    if (ctx->internalWriter.isOpen() && internalSamples && intLen >= length) {
+        ctx->internalWriter.write(internalSamples, length);
         intWrote = true;
-    }
-
-    if (logThrottle++ % 100 == 0) {
-        LOGI("AudioWrite: Mic=%s (%d samples) Int=%s (%d samples)", 
-             micWrote ? "OK" : "SKIP", (int)micLen,
-             intWrote ? "OK" : "SKIP", (int)intLen);
     }
 
     if (micSamples) env->ReleaseShortArrayElements(micData, micSamples, JNI_ABORT);
@@ -347,7 +329,7 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_writeAudioSamples(
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_getAudioLevels(JNIEnv* env, jobject) {
+Java_com_mustakim_bokbok_data_service_NativeRecorder_getAudioLevels(JNIEnv* env, jobject, jlong handle) {
     jfloatArray result = env->NewFloatArray(4);
     float zeros[4] = {0, 0, 0, 0};
     env->SetFloatArrayRegion(result, 0, 4, zeros);
@@ -356,90 +338,101 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_getAudioLevels(JNIEnv* env,
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_setMixRatio(
-        JNIEnv* env, jobject, jfloat internalRatio, jfloat micRatio) {
-    // No-op in raw capture mode - mixing happens offline
-    // We could store it for metadata, but for now ignoring
+        JNIEnv* env, jobject, jlong handle, jfloat internalRatio, jfloat micRatio) {
+    // No-op
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_pause(JNIEnv*, jobject) {
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    if (gCtx) { 
-        gCtx->isPaused = true;
-        gCtx->pauseStartTime = getCurrentTimeUs();
+Java_com_mustakim_bokbok_data_service_NativeRecorder_pause(JNIEnv*, jobject, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (ctx) { 
+        ctx->isPaused = true;
+        ctx->pauseStartTime = getCurrentTimeUs();
     }
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_resume(JNIEnv*, jobject) {
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    if (gCtx && gCtx->isPaused) {
-        gCtx->totalPauseDuration += (getCurrentTimeUs() - gCtx->pauseStartTime);
-        gCtx->isPaused = false;
+Java_com_mustakim_bokbok_data_service_NativeRecorder_resume(JNIEnv*, jobject, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (ctx && ctx->isPaused) {
+        ctx->totalPauseDuration += (getCurrentTimeUs() - ctx->pauseStartTime);
+        ctx->isPaused = false;
     }
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(JNIEnv*, jobject) {
-    std::lock_guard<std::mutex> lock(gGlobalMutex);
-    if (!gCtx) return JNI_FALSE;
+Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(JNIEnv*, jobject, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (!ctx) return JNI_FALSE;
 
-    gCtx->isRecording = false;
+    ctx->isRecording = false;
     
-    if (gCtx->videoPollingThread.joinable()) gCtx->videoPollingThread.join();
+    if (ctx->videoPollingThread.joinable()) ctx->videoPollingThread.join();
 
     // Close writers
-    gCtx->micWriter.close();
-    gCtx->internalWriter.close();
+    ctx->micWriter.close();
+    ctx->internalWriter.close();
 
     // Stop Codecs
-    if (gCtx->videoCodec) {
-        AMediaCodec_stop(gCtx->videoCodec);
-        AMediaCodec_delete(gCtx->videoCodec);
+    if (ctx->videoCodec) {
+        AMediaCodec_stop(ctx->videoCodec);
+        AMediaCodec_delete(ctx->videoCodec);
+        ctx->videoCodec = nullptr;
     }
  
     // Stop Muxer
-    if (gCtx->muxer) {
-        if (gCtx->muxerStarted) AMediaMuxer_stop(gCtx->muxer);
-        AMediaMuxer_delete(gCtx->muxer);
+    if (ctx->muxer) {
+        if (ctx->muxerStarted) AMediaMuxer_stop(ctx->muxer);
+        AMediaMuxer_delete(ctx->muxer);
+        ctx->muxer = nullptr;
     }
     
-    if (gCtx->fd >= 0) {
-        close(gCtx->fd);
-        gCtx->fd = -1;
+    if (ctx->fd >= 0) {
+        close(ctx->fd);
+        ctx->fd = -1;
     }
 
-    if (gCtx->inputSurface) ANativeWindow_release(gCtx->inputSurface);
+    if (ctx->inputSurface) {
+        ANativeWindow_release(ctx->inputSurface);
+        ctx->inputSurface = nullptr;
+    }
     
-    std::lock_guard<std::mutex> muxLock(gCtx->muxerMutex);
-    while (!gCtx->packetQueue.empty()) {
-        Packet* p = gCtx->packetQueue.front();
-        gCtx->packetQueue.pop();
+    std::lock_guard<std::mutex> muxLock(ctx->muxerMutex);
+    while (!ctx->packetQueue.empty()) {
+        Packet* p = ctx->packetQueue.front();
+        ctx->packetQueue.pop();
         delete[] p->data;
         delete p;
     }
 
-    delete gCtx;
-    gCtx = nullptr;
+    delete ctx;
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_captureScreenshot(JNIEnv*, jobject) {
+Java_com_mustakim_bokbok_data_service_NativeRecorder_captureScreenshot(JNIEnv*, jobject, jlong handle) {
     return JNI_TRUE;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_mustakim_bokbok_data_service_NativeRecorder_release(JNIEnv* env, jobject thiz) {
-   Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(env, thiz);
+Java_com_mustakim_bokbok_data_service_NativeRecorder_nativeRelease(JNIEnv* env, jobject thiz, jlong handle) {
+    RecorderContext* ctx = reinterpret_cast<RecorderContext*>(handle);
+    if (ctx) {
+        // If release is called without stop, we should clean up
+        if (ctx->isRecording.load()) {
+            Java_com_mustakim_bokbok_data_service_NativeRecorder_stop(env, thiz, handle);
+        } else {
+            delete ctx;
+        }
+    }
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         JNIEnv* env,
-        jobject /* this */,
+        jobject thiz,
         jint videoFd,
         jint width,
         jint height,
@@ -460,6 +453,10 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
         jint audioSampleRate,
         jint audioBitrate
 ) {
+    // 1. Prepare JNI for Progress Callback
+    jclass clazz = env->GetObjectClass(thiz);
+    jmethodID progressMethod = env->GetMethodID(clazz, "onProcessProgress", "(FLjava/lang/String;)V");
+
     const char* micPath = env->GetStringUTFChars(jMicPath, nullptr);
     const char* internalPath = env->GetStringUTFChars(jInternalPath, nullptr);
     const char* outputPath = env->GetStringUTFChars(jOutputPath, nullptr);
@@ -483,14 +480,20 @@ Java_com_mustakim_bokbok_data_service_NativeRecorder_processRecording(
     config.exportMicOnly = exportMicOnly;
     config.exportInternalOnly = exportInternalOnly;
     config.internalChannels = isMono ? 1 : 2;
-    config.numChannels = 2; // We always want stereo output for the final MP4
+    config.numChannels = 2; // Stereo output
     config.sampleRate = audioSampleRate;
     config.audioBitrate = audioBitrate;
 
     bokbok::PostProcessor processor;
-    processor.setOnProgress([env](float progress, const std::string& status) {
-        // Callback logic to Java could be re-implemented here if needed
-    });
+    
+    // 2. Set the progress callback
+    if (progressMethod) {
+        processor.setOnProgress([env, thiz, progressMethod](float progress, const std::string& status) {
+            jstring msg = env->NewStringUTF(status.c_str());
+            env->CallVoidMethod(thiz, progressMethod, (jfloat)progress, msg);
+            env->DeleteLocalRef(msg);
+        });
+    }
     
     bool success = processor.process(config);
 

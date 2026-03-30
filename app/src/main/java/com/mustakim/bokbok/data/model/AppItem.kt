@@ -23,6 +23,7 @@ data class AppItem(
     val apkSize: Long = 0L,
     val hasActivities: Boolean = false,
     val isDebuggable: Boolean = false,
+    val category: Int = -1,
     // Selection state for batch operations
     val isSelected: Boolean = false,
     

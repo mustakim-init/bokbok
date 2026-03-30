@@ -59,18 +59,15 @@ class AudioCaptureManager(
     ) {
         if (isRecording.getAndSet(true)) return
 
-        // Setup Microphone
-        if (includeMic && ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            try {
-                // Use MIC source - most reliable across devices
-                val audioSource = MediaRecorder.AudioSource.MIC
-
+        try {
+            // 1. Setup Microphone
+            if (includeMic && ActivityCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                 val micChannelConfig = AudioFormat.CHANNEL_IN_MONO
                 val minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, micChannelConfig, AUDIO_FORMAT)
                 val bufferSize = max(minBufSize, BUFFER_SIZE_SAMPLES * 8)
                 
                 micRecord = AudioRecord(
-                    audioSource,
+                    MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE,
                     micChannelConfig,
                     AUDIO_FORMAT,
@@ -78,7 +75,6 @@ class AudioCaptureManager(
                 )
                 
                 if (micRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                    Timber.w("MIC source failed to initialize, trying VOICE_RECOGNITION")
                     micRecord?.release()
                     micRecord = AudioRecord(
                         MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -91,23 +87,14 @@ class AudioCaptureManager(
                 
                 if (micRecord?.state == AudioRecord.STATE_INITIALIZED) {
                     micRecord?.startRecording()
-                    Timber.i("Mic recording started successfully")
-                    micJob = serviceScope.launch {
-                        captureLoop(micRecord!!, true, 1)
-                    }
-                } else {
-                    Timber.e("Failed to initialize any mic source")
+                    Timber.i("Mic recording initialized")
                 }
-            } catch (e: Exception) { Timber.e(e, "Error initializing mic") }
-        }
+            }
 
-        // Setup Internal Audio (Android 10+)
-        // Logic: Start internal capture if requested OR if forced as an AEC reference
-        val internalNeeded = (includeInternal || forceInternalRef)
-        if (internalNeeded && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && mediaProjection != null) {
-            try {
+            // 2. Setup Internal Audio
+            val internalNeeded = (includeInternal || forceInternalRef)
+            if (internalNeeded && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && mediaProjection != null) {
                 val intChannelConfig = if (isMono) AudioFormat.CHANNEL_IN_MONO else AudioFormat.CHANNEL_IN_STEREO
-                val numChannels = if (isMono) 1 else 2
                 val minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, intChannelConfig, AUDIO_FORMAT)
                 val bufferSize = max(minBufSize, BUFFER_SIZE_SAMPLES * 8)
 
@@ -126,48 +113,63 @@ class AudioCaptureManager(
 
                 if (internalRecord?.state == AudioRecord.STATE_INITIALIZED) {
                     internalRecord?.startRecording()
-                    Timber.i("Internal audio recording started successfully (RefOnly=$forceInternalRef)")
-                    internalJob = serviceScope.launch {
-                        captureLoop(internalRecord!!, false, numChannels)
-                    }
-                } else {
-                    Timber.e("Failed to initialize internal audio record")
+                    Timber.i("Internal audio initialized")
                 }
-            } catch (e: Exception) { Timber.e(e, "Error initializing internal audio") }
+            }
+
+            // 3. Start Unified Capture Loop
+            val intChannels = if (isMono) 1 else 2
+            micJob = serviceScope.launch {
+                captureLoopSync(intChannels)
+            }
+
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to start unified audio capture")
+            isRecording.set(false)
         }
     }
 
-    private suspend fun captureLoop(record: AudioRecord, isMic: Boolean, numChannels: Int) {
-        val loopBufferSize = BUFFER_SIZE_SAMPLES * numChannels
-        val buffer = ShortArray(loopBufferSize)
-        val emptyInternal = ShortArray(0) 
-        val emptyMic = ShortArray(0)
+    private suspend fun captureLoopSync(internalChannels: Int) {
+        val micBufferSize = BUFFER_SIZE_SAMPLES // Always mono for mic
+        val intBufferSize = BUFFER_SIZE_SAMPLES * internalChannels
+        
+        val micBuffer = ShortArray(micBufferSize)
+        val intBuffer = ShortArray(intBufferSize)
+        
+        val zeroMic = ShortArray(micBufferSize) { 0 }
+        val zeroInt = ShortArray(intBufferSize) { 0 }
+
+        Timber.i("Unified audio loop started. Mic=${micRecord != null}, Int=${internalRecord != null}")
 
         while (isRecording.get()) {
             if (isPaused.get()) {
-                // To maintain perfect A/V sync, we MUST continue writing samples,
-                // otherwise the audio/wall-clock time will drift away from video timestamps.
-                // We write a buffer of silence (zeros).
-                val silence = ShortArray(loopBufferSize) { 0 }
-                if (isMic) {
-                    nativeRecorder.writeAudioSamples(silence, emptyInternal, loopBufferSize)
-                } else {
-                    nativeRecorder.writeAudioSamples(emptyMic, silence, loopBufferSize)
-                }
-                // Sleep for the duration of a frame to avoid CPU thrashing
-                delay(20) // ~48kHz * 1024 samples is roughly 21.3ms
+                // Write digital silence to both channels to lock A/V clock
+                nativeRecorder.writeAudioSamples(zeroMic, zeroInt, BUFFER_SIZE_SAMPLES)
+                delay(20) // ~21ms for 1024 samples at 48kHz
                 continue
             }
-            
-            // Blocking read (efficient)
-            val read = record.read(buffer, 0, loopBufferSize)
-            if (read > 0) {
-                if (isMic) {
-                    nativeRecorder.writeAudioSamples(buffer, emptyInternal, read)
-                } else {
-                    nativeRecorder.writeAudioSamples(emptyMic, buffer, read)
-                }
+
+            var micRead = 0
+            var intRead = 0
+
+            // 1. Read Mic
+            if (micRecord != null && micRecord?.state == AudioRecord.STATE_INITIALIZED) {
+                micRead = micRecord!!.read(micBuffer, 0, micBufferSize)
             }
+
+            // 2. Read Internal
+            if (internalRecord != null && internalRecord?.state == AudioRecord.STATE_INITIALIZED) {
+                intRead = internalRecord!!.read(intBuffer, 0, intBufferSize)
+            }
+
+            // 3. Synchronized Dispatch
+            // We use the requested BUFFER_SIZE_SAMPLES to maintain strict time alignment
+            // even if one source returned fewer samples (padding)
+            val finalMic = if (micRead > 0) micBuffer else zeroMic
+            val finalInt = if (intRead > 0) intBuffer else zeroInt
+
+            // We pass the maximum read amount or a fixed chunk to keep native side stable
+            nativeRecorder.writeAudioSamples(finalMic, finalInt, BUFFER_SIZE_SAMPLES)
         }
     }
 

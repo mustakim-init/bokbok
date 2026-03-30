@@ -48,158 +48,67 @@ fun SecurityScreen(
 
     val isDnsActive = currentDns != null && currentDns != "opportunistic"
     val activePreset = dnsPresets.find { it.hostname == currentDns }
+    
+    val maliciousCount = results.count { it.priority >= 2 }
+    val totalCount = results.size
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // Compact Security Score
-        CompactSecurityScore(score, isScanning, progress)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Actions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                modifier = Modifier.weight(1f),
-                onClick = { 
+        // ═══════════════════════════════════════════════════════════════════
+        // HERO SECTION: Security Score + Scan Action
+        // ═══════════════════════════════════════════════════════════════════
+        item {
+            HeroSecurityCard(
+                score = score,
+                isScanning = isScanning,
+                progress = progress,
+                hasApiKey = storedApiKey.isNotBlank(),
+                onScanClick = {
                     if (storedApiKey.isBlank()) {
-                        showApiKeyDialog = true 
+                        showApiKeyDialog = true
                     } else {
                         viewModel.startScan(storedApiKey)
                     }
                 },
-                enabled = !isScanning,
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            ) {
-                Icon(if (isScanning) Icons.Default.Sync else Icons.Default.Shield, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(if (storedApiKey.isBlank()) "Setup Scan API" else if (isScanning) "Scanning..." else "Perform Scan")
-            }
-            
-            if (storedApiKey.isNotBlank()) {
-                IconButton(
-                    onClick = { showApiKeyDialog = true },
-                    enabled = !isScanning,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Icon(Icons.Default.Settings, contentDescription = "Change API Key")
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (results.isNotEmpty() || isScanning) {
-            val maliciousCount = results.count { it.priority >= 2 }
-            val totalCount = results.size
-            
-            Card(
-                onClick = { showResultsSheet = true },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (maliciousCount > 0) 
-                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f) 
-                    else MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        if (maliciousCount > 0) Icons.Default.Warning else Icons.Default.Assignment,
-                        contentDescription = null,
-                        tint = if (maliciousCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isScanning) "Scan in Progress" else "Threat Analysis",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (maliciousCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = if (isScanning) "$totalCount apps checked so far" else "$totalCount Results • $maliciousCount Flagged",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Icon(Icons.Default.ChevronRight, contentDescription = null)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // DNS Shield Section (Functional)
-        Text(
-            text = "Privacy & Shield",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        Card(
-            onClick = { showDnsSheet = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isDnsActive) 
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) 
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                onSettingsClick = { showApiKeyDialog = true }
             )
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(if (isDnsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        if (isDnsActive) Icons.Default.VerifiedUser else Icons.Default.Lock, 
-                        contentDescription = null, 
-                        tint = if (isDnsActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                
-                Spacer(modifier = Modifier.width(16.dp))
-                
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Cloud DNS Shield", 
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = if (isDnsActive) (activePreset?.name ?: currentDns ?: "Active") else "Ad-blocking & safe browsing",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isDnsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // THREAT ANALYSIS CARD (Shows only when there are results)
+        // ═══════════════════════════════════════════════════════════════════
+        if (results.isNotEmpty() || isScanning) {
+            item {
+                ThreatAnalysisCard(
+                    isScanning = isScanning,
+                    totalCount = totalCount,
+                    maliciousCount = maliciousCount,
+                    onClick = { showResultsSheet = true }
                 )
             }
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // PRIVACY & SHIELD SECTION
+        // ═══════════════════════════════════════════════════════════════════
+        item {
+            Text(
+                text = "Privacy & Shield",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+        
+        item {
+            DnsShieldCard(
+                isDnsActive = isDnsActive,
+                activePresetName = activePreset?.name ?: currentDns,
+                onClick = { showDnsSheet = true }
+            )
         }
     }
 
@@ -446,103 +355,334 @@ fun EngineResultRow(engine: com.mustakim.bokbok.data.remote.EngineResult) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// HERO SECURITY CARD - M3 Expressive with pulsing animation
+// ═══════════════════════════════════════════════════════════════════════════
 @Composable
-fun CompactSecurityScore(score: Int, isScanning: Boolean, progress: Float) {
+fun HeroSecurityCard(
+    score: Int,
+    isScanning: Boolean,
+    progress: Float,
+    hasApiKey: Boolean,
+    onScanClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
     val animatedScore by animateIntAsState(targetValue = score, label = "ScoreAnimation")
+    val scoreColor = getScoreColor(score)
+    
+    // Pulsing animation for scanning state
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = EaseInOut),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
     
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            // Large Score Circle
+            Box(
+                modifier = Modifier.size(160.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Background glow for scanning
+                if (isScanning) {
+                    Box(
+                        modifier = Modifier
+                            .size(170.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                }
+                
+                // Progress/Score Ring
                 CircularProgressIndicator(
                     progress = { if (isScanning) progress else 1f },
-                    modifier = Modifier.size(64.dp),
-                    color = getScoreColor(score),
-                    strokeWidth = 6.dp,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    modifier = Modifier.size(140.dp),
+                    color = if (isScanning) MaterialTheme.colorScheme.primary else scoreColor,
+                    strokeWidth = 10.dp,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                 )
-                Text(
-                    text = if (isScanning) "${(progress * 100).toInt()}%" else animatedScore.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isScanning) MaterialTheme.colorScheme.primary else getScoreColor(score)
-                )
+                
+                // Center Content
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isScanning) {
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Scanning...",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Text(
+                            text = animatedScore.toString(),
+                            style = MaterialTheme.typography.displayMedium,
+                            fontWeight = FontWeight.Black,
+                            color = scoreColor
+                        )
+                        Text(
+                            text = getScoreLabel(score),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = scoreColor.copy(alpha = 0.8f)
+                        )
+                    }
+                }
             }
             
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 20.dp)
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Status Text
+            Text(
+                text = if (isScanning) "Deep Scanning Your Device" else "System Integrity",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = if (isScanning) "Checking apps against VirusTotal database..." else "Perform a full scan to verify security",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Action Buttons Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = if (isScanning) "Scanning Device..." else "System Integrity",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = if (score >= 90) "Safe Atmosphere" else if (score >= 70) "Minor Concerns" else "System at Risk",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = getScoreColor(score)
-                )
+                // Primary Scan Button (M3 Expressive: Large, rounded)
+                FilledTonalButton(
+                    onClick = onScanClick,
+                    enabled = !isScanning,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                ) {
+                    Icon(
+                        if (isScanning) Icons.Default.Sync else Icons.Default.Shield,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (!hasApiKey) "Setup API" else if (isScanning) "Scanning..." else "Full Scan",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                
+                // Settings Button (if API configured)
+                if (hasApiKey) {
+                    FilledTonalIconButton(
+                        onClick = onSettingsClick,
+                        enabled = !isScanning,
+                        modifier = Modifier.size(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "API Settings")
+                    }
+                }
             }
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// THREAT ANALYSIS CARD
+// ═══════════════════════════════════════════════════════════════════════════
 @Composable
-fun SecurityScoreCard(score: Int, isScanning: Boolean, progress: Float) {
-    val animatedScore by animateIntAsState(targetValue = score, label = "ScoreAnimation")
+fun ThreatAnalysisCard(
+    isScanning: Boolean,
+    totalCount: Int,
+    maliciousCount: Int,
+    onClick: () -> Unit
+) {
+    val hasThreats = maliciousCount > 0
     
     Card(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+            containerColor = if (hasThreats)
+                MaterialTheme.colorScheme.errorContainer
+            else MaterialTheme.colorScheme.surfaceContainerHigh
         )
     ) {
-        Column(
-            modifier = Modifier
-                .padding(24.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                // Score Circle
-                CircularProgressIndicator(
-                    progress = { if (isScanning) progress else 1f },
-                    modifier = Modifier.size(120.dp),
-                    color = getScoreColor(score),
-                    strokeWidth = 8.dp,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+            // Icon with background
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (hasThreats) MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (hasThreats) Icons.Default.Warning else Icons.Default.Assignment,
+                    contentDescription = null,
+                    tint = if (hasThreats) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
                 )
-                
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isScanning) "Scan in Progress" else if (hasThreats) "Threats Detected!" else "Scan Complete",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (hasThreats) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (isScanning) "$totalCount apps checked" else "$totalCount apps • $maliciousCount flagged",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (hasThreats) MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = "View details",
+                tint = if (hasThreats) MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DNS SHIELD CARD
+// ═══════════════════════════════════════════════════════════════════════════
+@Composable
+fun DnsShieldCard(
+    isDnsActive: Boolean,
+    activePresetName: String?,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isDnsActive)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        border = if (isDnsActive) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else null
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Icon
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isDnsActive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (isDnsActive) Icons.Default.VerifiedUser else Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = if (isDnsActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Cloud DNS Shield",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = if (isDnsActive) (activePresetName ?: "Active") else "Ad-blocking & safe browsing",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isDnsActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            // Status indicator
+            if (isDnsActive) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
                     Text(
-                        text = if (isScanning) "${(progress * 100).toInt()}%" else animatedScore.toString(),
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isScanning) MaterialTheme.colorScheme.primary else getScoreColor(score)
-                    )
-                    Text(
-                        text = if (isScanning) "Scanning..." else "Security Score",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "ACTIVE",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = "Configure",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
         }
     }
+}
+
+// Helper function for score label
+private fun getScoreLabel(score: Int): String = when {
+    score >= 90 -> "Excellent"
+    score >= 70 -> "Good"
+    score >= 50 -> "Fair"
+    else -> "At Risk"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

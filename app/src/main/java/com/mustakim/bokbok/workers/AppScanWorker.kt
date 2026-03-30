@@ -24,7 +24,8 @@ import java.io.File
 class AppScanWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val appDao: AppDao
+    private val appDao: AppDao,
+    private val gameRepository: com.mustakim.bokbok.data.repository.GameRepository
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -38,8 +39,8 @@ class AppScanWorker @AssistedInject constructor(
             // Optimization: Load existing apps to check for changes and skip redundant IPC calls
             val existingAppsMap = appDao.getAppsOneShot().associateBy { it.packageName }
             
-            // Optimization: Process apps in smaller chunks to avoid Binder saturation and main thread jank
-            val entities = packages.chunked(10).flatMap { chunk ->
+            // Optimization: Process apps in parallel to avoid sequential binder bottlenecks
+            val entities = packages.chunked(25).flatMap { chunk ->
                 coroutineScope {
                     chunk.map { packageInfo ->
                         async(Dispatchers.IO) {
@@ -49,34 +50,34 @@ class AppScanWorker @AssistedInject constructor(
                             val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                             
                             val existing = existingAppsMap[packageName]
-                            val isUpToDate = existing != null && existing.lastUpdateTime == packageInfo.lastUpdateTime
-                            
-                            // 🚀 SMART SCAN: Cache label to avoid Vivo theme engine exception storms
-                            val label = if (isUpToDate && existing!!.label.isNotEmpty()) {
-                                existing.label
-                            } else {
-                                try {
-                                    pm.getApplicationLabel(appInfo).toString()
-                                } catch (_: Exception) {
-                                    packageName
-                                }
-                            }
-
-                            // 🚀 SMART SCAN: Delay expensive metadata (size, paths, launcher)
-                            // We use cached values from the DB if they exist, otherwise 0/empty.
-                            // These will be "enriched" when the user clicks the app.
-                            val apkSize = existing?.apkSize ?: 0L
-                            val dataSize = existing?.dataSize ?: 0L
-                            val cacheSize = existing?.cacheSize ?: 0L
-                            val apkPath = existing?.apkPath ?: ""
-                            val dataPath = existing?.dataPath ?: ""
-                            val hasLauncher = existing?.hasActivities ?: false
-
                             val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(applicationContext, packageName)
+                            
+                            val shouldRefreshSize = existing == null || 
+                                                  existing.lastUpdateTime != packageInfo.lastUpdateTime ||
+                                                  existing.dataSize == 0L
+                            
+                            val (apkSize, dataSize, cacheSize) = if (isInstalled) {
+                                if (shouldRefreshSize) {
+                                    getAppSize(applicationContext, packageName) ?: Triple(0L, 0L, 0L)
+                                } else {
+                                    Triple(existing!!.apkSize, existing.dataSize, existing.cacheSize)
+                                }
+                            } else Triple(0L, 0L, 0L)
+
+                            val hasLauncher = if (isInstalled) {
+                                if (existing != null && existing.lastUpdateTime == packageInfo.lastUpdateTime) {
+                                    existing.hasActivities
+                                } else {
+                                    pm.queryIntentActivities(
+                                        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName),
+                                        0
+                                    ).isNotEmpty()
+                                }
+                            } else false
 
                             AppEntity(
                                 packageName = packageName,
-                                label = label,
+                                label = pm.getApplicationLabel(appInfo).toString(),
                                 versionName = packageInfo.versionName,
                                 versionCode = PackageInfoCompat.getLongVersionCode(packageInfo),
                                 isSystemApp = isSystemApp,
@@ -99,8 +100,8 @@ class AppScanWorker @AssistedInject constructor(
                                 bloatwareDescription = bloatwareInfo?.description,
                                 category = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) appInfo.category else -1,
                                 isUserApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) == 0 || (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0,
-                                apkPath = apkPath,
-                                dataPath = dataPath
+                                apkPath = appInfo.sourceDir ?: "",
+                                dataPath = appInfo.dataDir ?: ""
                             )
                         }
                     }.mapNotNull { it.await() }
@@ -108,6 +109,11 @@ class AppScanWorker @AssistedInject constructor(
             }
             
             appDao.refreshApps(entities)
+            BloatwareDatabase.clear() // Free huge in-memory map after processing
+            
+            // Sync game list to shell after scan to ensure newly discovered games are monitored
+            gameRepository.syncGameListToShell()
+            
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()

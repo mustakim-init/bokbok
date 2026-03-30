@@ -1,12 +1,5 @@
 package com.mustakim.bokbok.data.model
 
-enum class OptimizationProfile {
-    BATTERY,
-    BALANCED,
-    PERFORMANCE,
-    CUSTOM
-}
-
 enum class TweakType {
     TOGGLE,
     SELECT, // For resolution, refresh rate, etc.

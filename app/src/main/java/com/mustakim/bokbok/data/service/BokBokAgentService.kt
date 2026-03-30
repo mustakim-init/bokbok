@@ -39,6 +39,7 @@ class BokBokAgentService : AccessibilityService() {
     @Inject lateinit var voiceManager: VoiceManager
     @Inject lateinit var repository: AIRepository
     @Inject lateinit var preferencesManager: com.mustakim.bokbok.data.local.PreferencesManager
+    @Inject lateinit var gameRepository: com.mustakim.bokbok.data.repository.GameRepository
     private lateinit var overlayManager: EdgeGlowOverlayManager
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
@@ -235,8 +236,31 @@ class BokBokAgentService : AccessibilityService() {
         overlayManager.hideOverlay()
     }
 
+    private var lastPackage: String? = null
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // AI perception will be triggered here based on window changes
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val packageName = event.packageName?.toString() ?: return
+            if (packageName == lastPackage) return
+            lastPackage = packageName
+
+            serviceScope.launch {
+                // 1. Check if this is a registered game
+                val game = gameRepository.getGameEntity(packageName)
+                if (game != null) {
+                    android.util.Log.d("BokBokAgentService", "Game detected: $packageName. Applying boost...")
+                    // 2. Apply the custom optimizations
+                    gameRepository.applyOptimizations(packageName)
+                } else {
+                    // Not a game, or game closed (switching to regular app)
+                    // We only revert if we were previously in a game
+                    if (gameRepository.hasActiveSnapshots()) {
+                        android.util.Log.d("BokBokAgentService", "Non-game detected. Reverting optimizations.")
+                        gameRepository.revertAllOptimizations()
+                    }
+                }
+            }
+        }
     }
 
     override fun onInterrupt() {

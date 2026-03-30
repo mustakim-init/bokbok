@@ -3,70 +3,27 @@ package com.mustakim.bokbok.ui.screens.gameboost.appmanager
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.foundation.Image
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.Block
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -75,376 +32,223 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
-import com.mustakim.bokbok.data.repository.AppManagerRepository
-import coil.compose.AsyncImage
 import com.mustakim.bokbok.utils.AppIcon
-import kotlinx.coroutines.launch
+import com.mustakim.bokbok.viewmodel.AppDetailsViewModel
+import com.mustakim.bokbok.data.repository.AppManagerRepository
 import java.text.DecimalFormat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AppDetailsScreen(
-    app: AppItem,
-    repository: AppManagerRepository,
-    onBack: () -> Unit,
-    onAppUninstalled: () -> Unit
+    navController: NavController,
+    viewModel: AppDetailsViewModel
 ) {
+    val app by viewModel.app.collectAsState()
+    val isProcessing by viewModel.isProcessing.collectAsState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    
-    var showUninstallDialog by remember { mutableStateOf(false) }
-    var isProcessing by remember { mutableStateOf(false) }
-    var showAdbUninstallDialog by remember { mutableStateOf(false) }
-    
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+
+    var currentManager by remember { mutableStateOf<ManagerType?>(null) }
+
+    when (currentManager) {
+        ManagerType.COMPONENT -> {
+            AppComponentManagerScreen(
+                onBack = { currentManager = null },
+                viewModel = viewModel
+            )
+            return
+        }
+        ManagerType.PERMISSION -> {
+            AppPermissionManagerScreen(
+                onBack = { currentManager = null },
+                viewModel = viewModel
+            )
+            return
+        }
+        null -> {}
+    }
+
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { 
-                    Text(
-                        text = app.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    ) 
+                    app?.let { 
+                        Text(
+                            text = it.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        ) 
+                    } 
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     IconButton(onClick = {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.fromParts("package", app.packageName, null)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        app?.let {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", it.packageName, null)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(intent)
                         }
-                        context.startActivity(intent)
                     }) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "System Settings"
-                        )
+                        Icon(Icons.Default.Settings, contentDescription = "System Settings")
                     }
                 },
+                scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // App Icon and Basic Info
-            AppHeaderSection(app, clipboardManager) {
-                scope.launch {
-                    snackbarHostState.showSnackbar("Package name copied")
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // Bloatware Warning Section
-            if (app.isBloatware) {
-                BloatwareWarningSection(app)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            
-            // Quick Actions
-            QuickActionsSection(
-                app = app,
-                isProcessing = isProcessing,
-                onLaunch = {
-                    context.packageManager.getLaunchIntentForPackage(app.packageName)?.let {
-                        context.startActivity(it)
-                    }
-                },
-                onForceStop = {
-                    scope.launch {
-                        isProcessing = true
-                        val result = repository.forceStopApp(app.packageName)
-                        isProcessing = false
-                        if (result.isSuccess) {
-                            snackbarHostState.showSnackbar("App force stopped")
-                        } else {
-                            snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                        }
-                    }
-                },
-                onClearCache = {
-                    scope.launch {
-                        isProcessing = true
-                        val result = repository.clearAppCache(app.packageName)
-                        isProcessing = false
-                        if (result.isSuccess) {
-                            snackbarHostState.showSnackbar("Cache cleared")
-                        } else {
-                            snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                        }
-                    }
-                },
-                onUninstall = {
-                    if (app.isSystemApp) {
-                        showAdbUninstallDialog = true
-                    } else {
-                        showUninstallDialog = true
-                    }
-                },
-                onToggleEnable = {
-                    scope.launch {
-                        isProcessing = true
-                        val result = if (app.isEnabled) {
-                            repository.disableApp(app.packageName)
-                        } else {
-                            repository.enableApp(app.packageName)
-                        }
-                        isProcessing = false
-                        if (result.isSuccess) {
-                            val action = if (app.isEnabled) "disabled" else "enabled"
-                            snackbarHostState.showSnackbar("App $action. Refreshing list...")
-                            onAppUninstalled() // Refresh list
-                        } else {
-                            snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                        }
-                    }
-                },
-                onRestore = {
-                    scope.launch {
-                        isProcessing = true
-                        val result = repository.reinstallApp(app.packageName)
-                        isProcessing = false
-                        if (result.isSuccess) {
-                            snackbarHostState.showSnackbar("App restored successfully")
-                            onAppUninstalled() // Refresh list
-                        } else {
-                            snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                        }
-                    }
-                }
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // App Details Section
-            AppDetailsSection(app)
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Technical Info Section
-            TechnicalInfoSection(app)
-            
-            Spacer(modifier = Modifier.height(80.dp))
         }
-    }
-    
-    // Standard Uninstall Dialog
-    if (showUninstallDialog) {
-        AlertDialog(
-            onDismissRequest = { showUninstallDialog = false },
-            title = { Text("Uninstall ${app.label}?") },
-            text = { Text("This will remove the app and all its data from your device.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showUninstallDialog = false
-                        repository.requestUninstall(app.packageName)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Uninstall")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUninstallDialog = false }) {
-                    Text("Cancel")
-                }
+    ) { padding ->
+        if (app == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
-        )
-    }
-    
-    // ADB Uninstall Dialog for System Apps
-    if (showAdbUninstallDialog) {
-        AlertDialog(
-            onDismissRequest = { showAdbUninstallDialog = false },
-            title = { 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Uninstall System App?")
-                }
-            },
-            text = { 
-                Column {
-                    Text("This is a system app. Uninstalling it will:")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("• Remove it for the current user only")
-                    Text("• Keep app data (reversible)")
-                    Text("• Require Shizuku permission")
-                    
-                    if (app.removalSafety == RemovalSafety.UNSAFE) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "WARNING: This app is marked as UNSAFE to remove. It may break system functionality!",
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                    
-                    app.bloatwareWarning?.let { warning ->
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = warning,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showAdbUninstallDialog = false
-                        scope.launch {
-                            isProcessing = true
-                            val result = repository.uninstallViaAdb(app.packageName, keepData = true)
-                            isProcessing = false
-                            if (result.isSuccess) {
-                                snackbarHostState.showSnackbar("App uninstalled successfully")
-                                onAppUninstalled()
-                            } else {
-                                snackbarHostState.showSnackbar("Failed: ${result.exceptionOrNull()?.message}")
-                            }
+        } else {
+            val appItem = app!!
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp), // Standard M3 margin
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Hero Section (Redesigned)
+                AppHeroHeader(app = appItem, clipboardManager = clipboardManager)
+
+                // Quick Actions
+                QuickActionsSection(
+                    app = appItem,
+                    isProcessing = isProcessing,
+                    onLaunch = {
+                        context.packageManager.getLaunchIntentForPackage(appItem.packageName)?.let {
+                            context.startActivity(it)
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Uninstall via ADB")
+                    onForceStop = { viewModel.forceStopApp() },
+                    onToggleEnable = { viewModel.toggleAppEnable() },
+                    onUninstall = { viewModel.requestUninstall() },
+                    onUninstallAdb = { viewModel.uninstallViaAdb() },
+                    onRestore = { viewModel.reinstallApp() }
+                )
+
+                // Bloatware Alert
+                if (appItem.isBloatware) {
+                    BloatwareAlert(app = appItem)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAdbUninstallDialog = false }) {
-                    Text("Cancel")
-                }
+
+                // App Analysis (Replacing Power Tools, PRESERVING style)
+                AppAnalysisElevatedCard(
+                    viewModel = viewModel,
+                    onManagePermissions = { currentManager = ManagerType.PERMISSION },
+                    onManageComponents = { type ->
+                        viewModel.setComponentType(type)
+                        currentManager = ManagerType.COMPONENT
+                    }
+                )
+
+                SectionHeader("Storage")
+                StorageCard(
+                    app = appItem,
+                    onClearCache = { viewModel.clearAppCache() },
+                    onClearData = { viewModel.clearAppData() }
+                )
+                
+                SectionHeader("Technical")
+                TechnicalInfoCard(app = appItem)
+                
+                Spacer(modifier = Modifier.height(32.dp))
             }
-        )
+        }
     }
 }
 
 @Composable
-private fun AppHeaderSection(
+fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+    )
+}
+
+@Composable
+private fun AppHeroHeader(
     app: AppItem,
-    clipboardManager: androidx.compose.ui.platform.ClipboardManager,
-    onCopied: () -> Unit
+    clipboardManager: androidx.compose.ui.platform.ClipboardManager
 ) {
     Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Icon
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainer)
+        // Large Icon (120dp)
+        Surface(
+            modifier = Modifier.size(120.dp),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            tonalElevation = 4.dp
         ) {
             AsyncImage(
                 model = AppIcon(app.packageName),
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.padding(20.dp).fillMaxSize()
             )
         }
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
-        // App Name
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // App Name (Header)
         Text(
             text = app.label,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.Center
         )
-        
-        // Package Name with copy button
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp)
-        ) {
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Package Name (Monospace Subhead)
+        SelectionContainer {
             Text(
                 text = app.packageName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold
             )
-            IconButton(
-                onClick = {
-                    clipboardManager.setText(AnnotatedString(app.packageName))
-                    onCopied()
-                },
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
-        
-        // Version and badges
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(top = 8.dp)
-        ) {
-            app.versionName?.let { version ->
-                InfoChip(text = "v$version")
-            }
-            InfoChip(text = "SDK ${app.targetSdk}")
-            if (app.isSystemApp) {
-                InfoChip(
-                    text = "SYSTEM",
-                    color = MaterialTheme.colorScheme.error
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Status Chips
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppHeaderStatusChip(
+                label = if (app.isSystemApp) "System App" else "User App",
+                color = if (app.isSystemApp) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+            )
+            AppHeaderStatusChip(
+                label = "v${app.versionName ?: app.versionCode}",
+                color = MaterialTheme.colorScheme.secondaryContainer
+            )
+            if (!app.isEnabled) {
+                AppHeaderStatusChip(
+                    label = "Disabled",
+                    color = MaterialTheme.colorScheme.tertiaryContainer
                 )
             }
         }
@@ -452,101 +256,52 @@ private fun AppHeaderSection(
 }
 
 @Composable
-private fun BloatwareWarningSection(app: AppItem) {
-    val (bgColor, textColor, icon, label) = when (app.removalSafety) {
-        RemovalSafety.SAFE -> Quadruple(
-            Color(0xFF4CAF50).copy(alpha = 0.1f),
-            Color(0xFF4CAF50),
-            Icons.Default.Delete,
-            "Safe to Remove"
-        )
-        RemovalSafety.REPLACEABLE -> Quadruple(
-            Color(0xFF2196F3).copy(alpha = 0.1f),
-            Color(0xFF2196F3),
-            Icons.Default.Refresh,
-            "Can be Replaced"
-        )
-        RemovalSafety.CAUTION -> Quadruple(
-            Color(0xFFFFA726).copy(alpha = 0.1f),
-            Color(0xFFFFA726),
-            Icons.Default.Warning,
-            "Remove with Caution"
-        )
-        RemovalSafety.UNSAFE -> Quadruple(
-            Color(0xFFE53935).copy(alpha = 0.1f),
-            Color(0xFFE53935),
-            Icons.Default.Block,
-            "Do NOT Remove"
-        )
-        RemovalSafety.UNKNOWN -> Quadruple(
-            Color(0xFF9E9E9E).copy(alpha = 0.1f),
-            Color(0xFF9E9E9E),
-            Icons.Default.Info,
-            "Unknown"
+private fun AppHeaderStatusChip(label: String, color: Color) {
+    Surface(
+        color = color,
+        shape = CircleShape
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
         )
     }
+}
+
+@Composable
+private fun BloatwareAlert(app: AppItem) {
+    val color = when(app.removalSafety) {
+        RemovalSafety.SAFE -> Color(0xFF4CAF50)
+        RemovalSafety.UNSAFE -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.tertiary
+    }
     
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = bgColor),
-        shape = RoundedCornerShape(16.dp)
+    OutlinedCard(
+        colors = CardDefaults.outlinedCardColors(
+            containerColor = color.copy(alpha = 0.1f),
+            contentColor = color
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = textColor,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = textColor
-                    )
-                    app.bloatwareType?.let { type ->
-                        Text(
-                            text = "Type: ${type.replaceFirstChar { it.uppercase() }}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = textColor.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-            }
-            
-            app.bloatwareDescription?.let { description ->
-                Spacer(modifier = Modifier.height(12.dp))
+            Icon(Icons.Default.Warning, null)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
                 Text(
-                    text = description.replace("\\n", "\n"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    "Bloatware: ${app.removalSafety.name}",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall
                 )
-            }
-            
-            app.bloatwareWarning?.let { warning ->
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
+                if (!app.bloatwareDescription.isNullOrEmpty()) {
                     Text(
-                        text = warning,
+                        app.bloatwareDescription,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Medium
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -561,86 +316,74 @@ private fun QuickActionsSection(
     isProcessing: Boolean,
     onLaunch: () -> Unit,
     onForceStop: () -> Unit,
-    onClearCache: () -> Unit,
-    onUninstall: () -> Unit,
     onToggleEnable: () -> Unit,
+    onUninstall: () -> Unit,
+    onUninstallAdb: () -> Unit,
     onRestore: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Primary Actions Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "Quick Actions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            if (isProcessing) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
+            Button(
+                onClick = onLaunch,
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp), // Standard M3 radius
+                enabled = !isProcessing && app.isEnabled && app.hasActivities
+            ) {
+                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Launch")
+            }
+
+            FilledTonalButton(
+                onClick = onForceStop,
+                modifier = Modifier.weight(1f).height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ),
+                enabled = !isProcessing && app.isEnabled
+            ) {
+                Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Force Stop")
+            }
+        }
+
+        // Secondary Chips
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (app.isInstalled) {
+                 AssistChip(
+                    onClick = { if (app.isSystemApp) onUninstallAdb() else onUninstall() },
+                    label = { Text(if (app.isSystemApp) "Uninstall (ADB)" else "Uninstall") },
+                    leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(16.dp)) }
+                )
+                AssistChip(
+                    onClick = onToggleEnable,
+                    label = { Text(if (app.isEnabled) "Disable" else "Enable") },
+                    leadingIcon = { Icon(if (app.isEnabled) Icons.Default.Block else Icons.Default.Check, null, Modifier.size(16.dp)) },
+                    colors = if (!app.isEnabled) AssistChipDefaults.assistChipColors(
+                        labelColor = MaterialTheme.colorScheme.primary
+                    ) else AssistChipDefaults.assistChipColors()
+                )
             } else {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                 Button(
+                    onClick = onRestore,
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    shape = CircleShape
                 ) {
-                    // Launch button (only if app has activities)
-                    if (app.hasActivities) {
-                        ActionButton(
-                            icon = Icons.Default.PlayArrow,
-                            label = "Launch",
-                            onClick = onLaunch
-                        )
-                    }
-                    
-                    ActionButton(
-                        icon = Icons.Default.Stop,
-                        label = "Force Stop",
-                        onClick = onForceStop
-                    )
-                    
-                    ActionButton(
-                        icon = Icons.Default.CleaningServices,
-                        label = "Clear Data",
-                        onClick = onClearCache
-                    )
-                    
-                    // Disable/Enable button for system apps (or all apps if we want)
-                    if (app.isInstalled) {
-                        ActionButton(
-                            icon = if (app.isEnabled) Icons.Default.Block else Icons.Default.PlayArrow,
-                            label = if (app.isEnabled) "Disable" else "Enable",
-                            onClick = onToggleEnable
-                        )
-                        
-                        ActionButton(
-                            icon = if (app.isSystemApp) Icons.Default.DeleteForever else Icons.Default.Delete,
-                            label = if (app.isSystemApp) "Uninstall (ADB)" else "Uninstall",
-                            onClick = onUninstall,
-                            isDangerous = true
-                        )
-                    } else {
-                        // Restore Button
-                        ActionButton(
-                            icon = Icons.Default.Refresh,
-                            label = "Restore (ADB)",
-                            onClick = onRestore
-                        )
-                    }
+                    Icon(Icons.Default.Refresh, null, Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Restore", fontSize = 12.sp)
                 }
             }
         }
@@ -648,170 +391,134 @@ private fun QuickActionsSection(
 }
 
 @Composable
-private fun ActionButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    isDangerous: Boolean = false
+private fun AppAnalysisElevatedCard(
+    viewModel: AppDetailsViewModel,
+    onManagePermissions: () -> Unit,
+    onManageComponents: (AppManagerRepository.ComponentType) -> Unit
 ) {
-    FilledTonalButton(
-        onClick = onClick,
-        colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = if (isDangerous) {
-                MaterialTheme.colorScheme.errorContainer
-            } else {
-                MaterialTheme.colorScheme.secondaryContainer
-            },
-            contentColor = if (isDangerous) {
-                MaterialTheme.colorScheme.onErrorContainer
-            } else {
-                MaterialTheme.colorScheme.onSecondaryContainer
-            }
-        ),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(text = label, fontSize = 13.sp)
-    }
-}
+    val permissionCount by viewModel.permissionCount.collectAsState()
+    val componentCounts by viewModel.componentCounts.collectAsState()
 
-@Composable
-private fun AppDetailsSection(app: AppItem) {
-    Card(
+    ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "App Details",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+        Column(modifier = Modifier.padding(4.dp)) {
+            ListItem(
+                headlineContent = { Text("Permissions") },
+                supportingContent = { Text("$permissionCount requested by app") },
+                leadingContent = { Icon(Icons.Default.Security, null) },
+                trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManagePermissions() },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             )
-            
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            DetailRow("APK Size", formatFileSize(app.apkSize))
-            DetailRow("Data Size", formatFileSize(app.dataSize))
-            DetailRow("Cache Size", formatFileSize(app.cacheSize))
-            
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            
-            DetailRow("Installed", formatDate(app.firstInstallTime))
-            DetailRow("Updated", formatDate(app.lastUpdateTime))
-            
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            
-            DetailRow("Status", if (app.isEnabled) "Enabled" else "Disabled")
-            DetailRow("Has Launcher", if (app.hasActivities) "Yes" else "No")
-            DetailRow("Debuggable", if (app.isDebuggable) "Yes" else "No")
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text("Components") },
+                supportingContent = { Text("${componentCounts.first} services, ${componentCounts.second} receivers") },
+                leadingContent = { Icon(Icons.Default.Extension, null) },
+                trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.SERVICE) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+            ListItem(
+                headlineContent = { Text("Activities") },
+                supportingContent = { Text("${componentCounts.third} activities found") },
+                leadingContent = { Icon(Icons.Default.PlayCircle, null) },
+                trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.ACTIVITY) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
         }
     }
 }
 
+enum class ManagerType { COMPONENT, PERMISSION }
+
 @Composable
-private fun TechnicalInfoSection(app: AppItem) {
-    Card(
+private fun StorageCard(
+    app: AppItem,
+    onClearCache: () -> Unit,
+    onClearData: () -> Unit
+) {
+    ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Technical Info",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            DetailRow("Target SDK", app.targetSdk.toString())
-            DetailRow("Min SDK", if (app.minSdk > 0) app.minSdk.toString() else "Unknown")
-            DetailRow("UID", app.uid.toString())
-            DetailRow("Version Code", app.versionCode.toString())
-            
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            
-            if (app.apkPath.isNotEmpty()) {
-                DetailRow("APK Path", app.apkPath, isPath = true)
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("APK Size", style = MaterialTheme.typography.bodyMedium)
+                Text(formatFileSize(app.apkSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             }
-            if (app.dataPath.isNotEmpty()) {
-                DetailRow("Data Path", app.dataPath, isPath = true)
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Data Size", style = MaterialTheme.typography.bodyMedium)
+                Text(formatFileSize(app.dataSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Cache Size", style = MaterialTheme.typography.bodyMedium)
+                Text(formatFileSize(app.cacheSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            }
+            
+            Spacer(Modifier.height(16.dp))
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = onClearCache,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Clear Cache")
+                }
+                
+                Button(
+                    onClick = onClearData,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Clear Data")
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DetailRow(
-    label: String,
-    value: String,
-    isPath: Boolean = false
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
+private fun TechnicalInfoCard(app: AppItem) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(0.35f)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(0.65f),
-            textAlign = TextAlign.End,
-            maxLines = if (isPath) 2 else 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TechRow("Package", app.packageName, true)
+            TechRow("Category", getCategoryName(app.category))
+            TechRow("Target SDK", "Android ${getTargetAndroidName(app.targetSdk)} (${app.targetSdk})")
+            TechRow("UID", app.uid.toString())
+            TechRow("Path", app.apkPath, true)
+            if (app.dataPath.isNotEmpty()) TechRow("Data", app.dataPath, true)
+        }
     }
 }
 
 @Composable
-private fun InfoChip(
-    text: String,
-    color: Color = MaterialTheme.colorScheme.onSurfaceVariant
-) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
-        modifier = Modifier
-            .background(
-                color.copy(alpha = 0.1f),
-                RoundedCornerShape(6.dp)
+private fun TechRow(label: String, value: String, isMonospace: Boolean = false) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        SelectionContainer {
+             Text(
+                value, 
+                style = if (isMonospace) MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) 
+                        else MaterialTheme.typography.bodyMedium
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    )
+        }
+    }
 }
-
-// Helper class for multiple return values
-private data class Quadruple<A, B, C, D>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D
-)
 
 private fun formatFileSize(size: Long): String {
     if (size <= 0) return "0 B"
@@ -820,8 +527,24 @@ private fun formatFileSize(size: Long): String {
     return DecimalFormat("#,##0.#").format(size / Math.pow(1024.0, digitGroups.toDouble())) + " " + units[digitGroups]
 }
 
-private fun formatDate(timestamp: Long): String {
-    if (timestamp <= 0) return "Unknown"
-    val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-    return sdf.format(Date(timestamp))
+private fun getCategoryName(category: Int): String = when (category) {
+    0 -> "Game"
+    1 -> "Audio"
+    2 -> "Video"
+    3 -> "Image"
+    4 -> "Social"
+    5 -> "News"
+    6 -> "Maps"
+    7 -> "Productivity"
+    else -> "Generic"
+}
+
+private fun getTargetAndroidName(sdk: Int): String = when (sdk) {
+    34, 35 -> "14/15"
+    33 -> "13"
+    31, 32 -> "12"
+    30 -> "11"
+    29 -> "10"
+    28 -> "9.0"
+    else -> sdk.toString()
 }

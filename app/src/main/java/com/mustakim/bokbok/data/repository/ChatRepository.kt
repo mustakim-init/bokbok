@@ -293,6 +293,7 @@ class ChatRepository @Inject constructor(
             .document(groupId)
             .collection("messages")
             .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(50)
             .snapshots()
             .map { snapshot ->
                 snapshot.toObjects(Message::class.java)

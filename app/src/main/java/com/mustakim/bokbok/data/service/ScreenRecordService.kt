@@ -321,7 +321,7 @@ class ScreenRecordService : Service() {
                     // Determine if we need to force internal audio for AEC reference
                     var forceInternalRef = false
                     try {
-                        val settings = runBlocking(Dispatchers.IO) { preferencesManager.recorderSettings.first() }
+                        val settings = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { preferencesManager.recorderSettings.first() }
                         val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
                         // Force internal if bleed reduction is enabled and we are recording from mic
                         if (bleedReduction && config.includeMic && !config.includeInternal) {
@@ -608,19 +608,15 @@ class ScreenRecordService : Service() {
                     )
 
                     if (autoProcess) {
-                        try {
-                            performProcessing(dbId, recordConfig?.micAudioRatio ?: 1.0f, recordConfig?.internalAudioRatio ?: 1.0f)
-                        } finally {
-                            stopSelf()
-                        }
+                        enqueuePostProcessing(dbId, recordConfig?.micAudioRatio ?: 1.0f, recordConfig?.internalAudioRatio ?: 1.0f)
                     } else {
-                        // Manual Mode
+                        // Manual Mode - still scan video so it shows up
                         MediaScannerConnection.scanFile(this@ScreenRecordService, arrayOf(path), arrayOf("video/mp4")) { _, uri ->
                              Timber.i("MediaScanner completed: $uri")
                         }
                         showCapturedNotification(path) 
-                        stopSelf()
                     }
+                    stopSelf()
                 } catch (e: Exception) {
                     Timber.e(e, "Error during auto-processing")
                 } finally {
@@ -632,176 +628,31 @@ class ScreenRecordService : Service() {
         Timber.i("Recording stopped. File: $recordedPath")
     }
 
-    /**
-     * Triggers processing for a specific recording ID from the database.
-     */
     fun processHistoricalRecording(id: Long, micGain: Float = 1.0f, internalGain: Float = 1.0f) {
         if (_isRecording.value) {
             _errorMessage.value = "Cannot process while recording"
             return
         }
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                performProcessing(id, micGain, internalGain)
-            } catch (e: Exception) {
-                Timber.e(e, "Manual processing failed")
-            } finally {
-                stopSelf()
-            }
-        }
+        enqueuePostProcessing(id, micGain, internalGain)
+        stopSelf()
     }
 
-    private suspend fun performProcessing(dbId: Long, micGain: Float = 1.0f, internalGain: Float = 1.0f) {
-        val recording = recordingRepository.getRecording(dbId) ?: return
-        val path = recording.videoPath
-        val micPath = recording.micPath
-        val intPath = recording.internalPath
-
-        try {
-            // Ensure foreground service is running for processing if not recording
-            if (!_isRecording.value) {
-                val notification = createNotification("Processing recording...", showActions = false)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
-                }
-            } else {
-                updateNotification("Processing recording...", showActions = false)
-            }
-
-            val settings = preferencesManager.recorderSettings.first()
-            val noiseReduction = settings["noiseReduction"] as? Boolean ?: true
-            val bleedReduction = settings["bleedReduction"] as? Boolean ?: true
-            val qualityMode = settings["qualityMode"] as? Int ?: 1
-            val exportMic = settings["exportMicOnly"] as? Boolean ?: false
-            val exportInternal = settings["exportInternalOnly"] as? Boolean ?: false
-            val studioMaster = settings["studioMaster"] as? Boolean ?: true
-            
-            val audioSampleRate = recording.audioSampleRate
-            val audioBitrate = recording.audioBitrate
-            val isMono = recording.isMono
-            
-            recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSING)
-            
-            val originalFile = File(path)
-            val tempInputVideo = File(path.replace(".mp4", "_temp.mp4"))
-            
-            delay(200) 
-            
-            if (originalFile.renameTo(tempInputVideo)) {
-                // Prepare separate audio export paths if enabled
-                val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "BokBok/Audio")
-                if ((exportMic || exportInternal) && !musicDir.exists()) {
-                    musicDir.mkdirs()
-                }
-                
-                val baseFilename = originalFile.nameWithoutExtension
-                val micExportPath = if (exportMic) File(musicDir, "${baseFilename}_mic.m4a").absolutePath else ""
-                val internalExportPath = if (exportInternal) File(musicDir, "${baseFilename}_internal.m4a").absolutePath else ""
-
-                nativeRecorder.onProgressUpdate = { progress, msg ->
-                    val percent = (progress * 100).toInt()
-                    updateNotification("Processing: $percent% - $msg", showActions = false)
-                    
-                    // Update flow for UI
-                    _processingProgress.value = _processingProgress.value.toMutableMap().apply {
-                        put(dbId, progress)
-                    }
-                }
-
-                var success: Boolean
-                try {
-                    // Open file descriptor for Native Layer (bypasses raw path permission issues)
-                    val pfd = ParcelFileDescriptor.open(tempInputVideo, ParcelFileDescriptor.MODE_READ_ONLY)
-                    val videoFd = pfd.fd
-                    
-                    success = nativeRecorder.processRecording(
-                        videoFd = videoFd,
-                        videoWidth = recording.width,
-                        videoHeight = recording.height,
-                        micPath = micPath,
-                        internalPath = intPath,
-                        outputPath = path,
-                        micExportPath = micExportPath,
-                        internalExportPath = internalExportPath,
-                        modelPath = modelRepository.getModelDirectory(),
-                        enableBleed = bleedReduction, 
-                        enableNoise = noiseReduction, 
-                        enableStudioMaster = studioMaster,
-                        micGain = micGain, 
-                        internalGain = internalGain,
-                        exportMic = exportMic,
-                        exportInternal = exportInternal,
-                        isMono = isMono,
-                        audioSampleRate = audioSampleRate,
-                        audioBitrate = audioBitrate
-                    )
-                    
-                    pfd.close() // Close FD after native processing is done
-                } catch (e: Exception) {
-                    Timber.e(e, "Failed to open ParcelFileDescriptor or process recording")
-                    success = false
-                }
-                
-                nativeRecorder.onProgressUpdate = null
-                _processingProgress.value = _processingProgress.value.toMutableMap().apply {
-                    remove(dbId)
-                }
-                
-                if (success) {
-                    Timber.i("Processing successful: $path")
-                    tempInputVideo.delete()
-                    File(micPath).delete()
-                    File(intPath).delete()
-                    recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.PROCESSED, path)
-                    
-                    val filesToScan = mutableListOf(path)
-                    if (micExportPath.isNotEmpty() && File(micExportPath).exists()) {
-                        filesToScan.add(micExportPath)
-                    }
-                    if (internalExportPath.isNotEmpty() && File(internalExportPath).exists()) {
-                        filesToScan.add(internalExportPath)
-                    }
-
-                    MediaScannerConnection.scanFile(this@ScreenRecordService, filesToScan.toTypedArray(), null) { p, _ ->
-                        Timber.i("MediaScanner completed: $p")
-                    }
-
-                    if (micExportPath.isNotEmpty() || internalExportPath.isNotEmpty()) {
-                        autoStopHandler.post {
-                            Toast.makeText(this@ScreenRecordService, "Audio exports saved to Music/BokBok", Toast.LENGTH_LONG).show()
-                        }
-                    }
-
-                    showCapturedNotification(path)
-                } else {
-                    Timber.e("Processing failed! Restoring original video.")
-                    tempInputVideo.renameTo(originalFile)
-                    recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
-                    handleError("Processing failed")
-                }
-            } else {
-                 Timber.e("Failed to rename temp file for processing")
-                 recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
-                 handleError("Processing failed: Could not prepare files.")
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "performProcessing failed")
-            recordingRepository.updateStatus(dbId, com.mustakim.bokbok.data.local.entity.RecordingStatus.FAILED)
-            handleError("Processing failed: ${e.message}")
-        } finally {
-            nativeRecorder.onProgressUpdate = null
-            _processingProgress.value = _processingProgress.value.toMutableMap().apply {
-                remove(dbId)
-            }
-            // Explicitly remove notification and foreground status
-            if (!_isRecording.value) {
-                stopForeground(Service.STOP_FOREGROUND_REMOVE)
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.cancel(NOTIFICATION_ID)
-            }
-        }
+    private fun enqueuePostProcessing(dbId: Long, micGain: Float, internalGain: Float) {
+        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.mustakim.bokbok.workers.PostProcessWorker>()
+            .setInputData(androidx.work.workDataOf(
+                "dbId" to dbId,
+                "micGain" to micGain,
+                "internalGain" to internalGain
+            ))
+            .setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+        
+        androidx.work.WorkManager.getInstance(this).enqueueUniqueWork(
+            "post_process_$dbId",
+            androidx.work.ExistingWorkPolicy.REPLACE,
+            workRequest
+        )
+        Timber.i("Enqueued PostProcessWorker for dbId: $dbId")
     }
 
 

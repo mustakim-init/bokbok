@@ -173,16 +173,11 @@ class LoungeViewModel @Inject constructor(
     }
 
     private suspend fun enrichWithOnlineCounts(rooms: List<VoiceRoom>): List<VoiceRoom> {
+        if (rooms.isEmpty()) return emptyList()
+        val allCounts = presenceRepository.getAllRoomOnlineCounts()
         return rooms.map { room ->
-            viewModelScope.async {
-                val online = try {
-                    presenceRepository.getOnlineCount(room.id)
-                } catch (_: Exception) {
-                    0
-                }
-                room.copy(currentOnline = online)
-            }
-        }.map { it.await() }
+            room.copy(currentOnline = allCounts[room.id] ?: 0)
+        }
     }
 
 

@@ -478,14 +478,20 @@ class HybridChatRepository @Inject constructor(
         }
     }
 
+    private val messageListeners = mutableMapOf<String, com.google.firebase.firestore.ListenerRegistration>()
+    private var parentChatListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     /**
      * Start Firestore listeners to sync incoming messages to Room
      */
     fun startFirestoreListeners() {
         val currentUserId = auth.currentUser?.uid ?: return
 
+        // Clean up existing parent listener if any
+        parentChatListener?.remove()
+
         // Listen to all chats where user is a participant
-        firestore.collection("chats")
+        parentChatListener = firestore.collection("chats")
             .whereArrayContains("participants", currentUserId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -493,54 +499,72 @@ class HybridChatRepository @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                snapshot?.documents?.forEach { chatDoc ->
-                    val chatId = chatDoc.id
+                val currentChatIds = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
 
-                    // Listen to messages in each chat
-                    firestore.collection("chats")
-                        .document(chatId)
-                        .collection("messages")
-                        .orderBy("timestamp", Query.Direction.DESCENDING)
-                        .limit(50)
-                        .addSnapshotListener { messagesSnapshot, messagesError ->
-                            if (messagesError != null) {
-                                android.util.Log.e(
-                                    "HybridChatRepo",
-                                    "Error listening to messages",
-                                    messagesError
-                                )
-                                return@addSnapshotListener
-                            }
+                // 1. Remove listeners for chats we are no longer part of
+                val removedChatIds = messageListeners.keys.filter { it !in currentChatIds }
+                removedChatIds.forEach { id ->
+                    messageListeners[id]?.remove()
+                    messageListeners.remove(id)
+                    android.util.Log.d("HybridChatRepo", "Removed stale listener for chat: $id")
+                }
 
-                            messagesSnapshot?.toObjects(Message::class.java)
-                                ?.forEach { message ->
-                                    // Save to Room if not already synced
-                                    backgroundScope.launch {
-                                        try {
-                                            val existing = messageDao.getMessageById(message.id)
-                                            if (existing == null || existing.syncStatus == SyncStatus.PENDING) {
-                                                messageDao.insert(
-                                                    message.toEntity(
-                                                        chatId,
-                                                        SyncStatus.SYNCED
+                // 2. Add listeners for new chats we just joined
+                currentChatIds.forEach { chatId ->
+                    if (!messageListeners.containsKey(chatId)) {
+                        val listener = firestore.collection("chats")
+                            .document(chatId)
+                            .collection("messages")
+                            .orderBy("timestamp", Query.Direction.DESCENDING)
+                            .limit(50)
+                            .addSnapshotListener { messagesSnapshot, messagesError ->
+                                if (messagesError != null) {
+                                    android.util.Log.e("HybridChatRepo", "Error listening to messages in $chatId", messagesError)
+                                    return@addSnapshotListener
+                                }
+
+                                messagesSnapshot?.toObjects(Message::class.java)
+                                    ?.forEach { message ->
+                                        // Save to Room if not already synced
+                                        backgroundScope.launch {
+                                            try {
+                                                val existing = messageDao.getMessageById(message.id)
+                                                if (existing == null || existing.syncStatus == SyncStatus.PENDING) {
+                                                    messageDao.insert(
+                                                        message.toEntity(
+                                                            chatId,
+                                                            SyncStatus.SYNCED
+                                                        )
                                                     )
-                                                )
-                                                android.util.Log.d(
+                                                    android.util.Log.d(
+                                                        "HybridChatRepo",
+                                                        "Synced incoming message: ${message.id}"
+                                                    )
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.e(
                                                     "HybridChatRepo",
-                                                    "Synced incoming message: ${message.id}"
+                                                    "Error saving incoming message",
+                                                    e
                                                 )
                                             }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e(
-                                                "HybridChatRepo",
-                                                "Error saving incoming message",
-                                                e
-                                            )
                                         }
                                     }
-                                }
-                        }
+                            }
+                        messageListeners[chatId] = listener
+                        android.util.Log.d("HybridChatRepo", "Started new listener for chat: $chatId")
+                    }
                 }
             }
+    }
+
+    /**
+     * Stop all listeners
+     */
+    fun stopFirestoreListeners() {
+        parentChatListener?.remove()
+        parentChatListener = null
+        messageListeners.values.forEach { it.remove() }
+        messageListeners.clear()
     }
 }

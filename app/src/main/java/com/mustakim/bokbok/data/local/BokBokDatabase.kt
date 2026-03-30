@@ -10,6 +10,7 @@ import com.mustakim.bokbok.data.local.entity.GroupEntity
 import com.mustakim.bokbok.data.local.entity.GroupMemberEntity
 import com.mustakim.bokbok.data.local.entity.GroupMessageEntity
 import com.mustakim.bokbok.data.local.entity.MessageEntity
+import com.mustakim.bokbok.data.local.entity.SystemConfigEntity
 
 @Database(
     entities = [
@@ -23,9 +24,10 @@ import com.mustakim.bokbok.data.local.entity.MessageEntity
         com.mustakim.bokbok.data.local.entity.RecordingEntity::class,
         com.mustakim.bokbok.data.model.AIMessage::class,
         com.mustakim.bokbok.data.model.AISession::class,
-        com.mustakim.bokbok.data.model.AIFact::class
+        com.mustakim.bokbok.data.model.AIFact::class,
+        SystemConfigEntity::class
     ],
-    version = 12,
+    version = 15,
     exportSchema = false
 )
 @androidx.room.TypeConverters(GeneralTypeConverters::class)
@@ -38,6 +40,7 @@ abstract class BokBokDatabase : RoomDatabase() {
     abstract fun usageStatsDao(): com.mustakim.bokbok.data.local.dao.UsageStatsDao
     abstract fun recordingDao(): com.mustakim.bokbok.data.local.dao.RecordingDao
     abstract fun aiConversationDao(): AIConversationDao
+    abstract fun systemConfigDao(): com.mustakim.bokbok.data.local.dao.SystemConfigDao
     
     companion object {
         @Volatile

@@ -98,6 +98,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Screenshot
+import com.mustakim.bokbok.data.repository.ModelRepository.ModelState
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsVoice
 import androidx.compose.material.icons.filled.Speed
@@ -849,7 +850,7 @@ fun ScreenRecordTab(
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                                 // AI Section integrated into Engine
-                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.READY) {
+                                if (modelState == ModelState.READY) {
                                     ToggleSetting(
                                         icon = Icons.Default.Hearing,
                                         title = "AI Noise Reduction",
@@ -893,12 +894,25 @@ fun ScreenRecordTab(
                                                 Text("Download DeepFilterNet (~50MB) for neural noise suppression.", style = MaterialTheme.typography.bodySmall)
                                                 Spacer(modifier = Modifier.height(12.dp))
                                                 
-                                                if (modelState == com.mustakim.bokbok.data.repository.ModelRepository.ModelState.DOWNLOADING) {
+                                                if (modelState == ModelState.DOWNLOADING) {
                                                     LinearProgressIndicator(
                                                         progress = { modelDownloadProgress },
                                                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
                                                     )
-                                                    Text("Downloading... ${(modelDownloadProgress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text("Downloading... ${(modelDownloadProgress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+                                                        TextButton(
+                                                            onClick = { viewModel.cancelDeepFilterDownload() },
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                                            modifier = Modifier.height(24.dp)
+                                                        ) {
+                                                            Text("Cancel", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                                        }
+                                                    }
                                                 } else {
                                                     Button(
                                                         onClick = { viewModel.downloadModels() },
@@ -907,7 +921,7 @@ fun ScreenRecordTab(
                                                     ) {
                                                         Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
                                                         Spacer(modifier = Modifier.width(8.dp))
-                                                        Text("Download Models")
+                                                        Text(if (modelState == ModelState.PAUSED) "Resume Download" else "Download Models")
                                                     }
                                                 }
                                             }

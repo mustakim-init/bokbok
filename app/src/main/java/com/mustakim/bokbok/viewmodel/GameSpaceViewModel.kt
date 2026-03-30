@@ -3,7 +3,6 @@ package com.mustakim.bokbok.viewmodel
 import android.app.Application
 import androidx.lifecycle.viewModelScope
 import com.mustakim.bokbok.data.model.GameItem
-import com.mustakim.bokbok.data.model.OptimizationProfile
 import com.mustakim.bokbok.data.repository.GameRepository
 import com.mustakim.bokbok.data.local.dao.AppDao
 import com.mustakim.bokbok.data.local.entity.AppEntity
@@ -19,11 +18,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import rikka.shizuku.Shizuku
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import android.content.pm.PackageManager
 
 enum class LaunchState {
-    NONE, OPTIMIZING, COMPILING, LAUNCHING
+    NONE, OPTIMIZING, LAUNCHING
 }
 
 @HiltViewModel
@@ -35,6 +36,9 @@ class GameSpaceViewModel @Inject constructor(
 
     private val _launchState = MutableStateFlow(LaunchState.NONE)
     val launchState: StateFlow<LaunchState> = _launchState.asStateFlow()
+
+    private val _isCompiling = MutableStateFlow(false)
+    val isCompiling: StateFlow<Boolean> = _isCompiling.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -51,10 +55,14 @@ class GameSpaceViewModel @Inject constructor(
     private val _addableApps = MutableStateFlow<List<AddableApp>>(emptyList())
     val addableApps: StateFlow<List<AddableApp>> = _addableApps.asStateFlow()
 
+    private val _shizukuActive = MutableStateFlow(false)
+    val shizukuActive: StateFlow<Boolean> = _shizukuActive.asStateFlow()
+
     // 🚀 PERFORMANCE: Track if initial data has already been loaded
     private var _hasLoadedInitialData = false
 
     init {
+        verifyShizukuStatus()
         // Recovery Logic: If the app starts and find snapshots but the service isn't running,
         // it means we had a "messy" exit previously. Clean up.
         viewModelScope.launch(Dispatchers.IO) {
@@ -66,9 +74,21 @@ class GameSpaceViewModel @Inject constructor(
 
     // 🚀 PERFORMANCE: Called from UI when tab is settled, prevents redundant loads
     fun loadDataIfNeeded() {
+        verifyShizukuStatus()
         if (_hasLoadedInitialData) return
         _hasLoadedInitialData = true
         // Data is loaded via Flow subscription, just mark as loaded
+    }
+
+    fun verifyShizukuStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val isActive = try {
+                Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            } catch (_: Exception) {
+                false
+            }
+            _shizukuActive.value = isActive
+        }
     }
 
     // 🚀 PERFORMANCE: Use SharingStarted.Lazily to defer flow collection until first subscriber
@@ -81,25 +101,10 @@ class GameSpaceViewModel @Inject constructor(
         else currentGames.filter { it.label.contains(query, ignoreCase = true) }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    private val _selectedPackageName = MutableStateFlow<String?>(null)
-    
-    val selectedGame: StateFlow<GameItem?> = combine(games, _selectedPackageName) { currentGames, pkgName ->
-        if (pkgName == null) null
-        else currentGames.find { it.packageName == pkgName }
-    }.onEach { if (it == null) _selectedPackageName.value = null } // Clear if game disappears from list
-    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-
     fun onSearchQueryChanged(query: String) {
         _searchQuery.value = query
     }
 
-    fun selectGame(game: GameItem) {
-        if (_isSelectionMode.value) {
-            toggleGameSelection(game.packageName)
-        } else {
-            _selectedPackageName.value = game.packageName
-        }
-    }
 
     fun toggleGameSelection(packageName: String) {
         val current = _selectedGames.value
@@ -124,87 +129,31 @@ class GameSpaceViewModel @Inject constructor(
         _isSelectionMode.value = true
     }
 
-    fun clearSelectedGame() {
-        _selectedPackageName.value = null
-    }
 
     fun launchGameWithOptimizations(game: GameItem) {
         viewModelScope.launch {
             try {
                 _launchState.value = LaunchState.OPTIMIZING
                 
-                // 1. Get profile and custom JSON
-                val profile = game.optimizationProfile
-                val customJson = game.customSettingsJson
-                
-                // Move heavy JSON parsing and logic to IO
+                // 1. Delegate optimization to repository (handles JSON parsing and Shell commands on IO)
                 withContext(Dispatchers.IO) {
-                    val json = try { JSONObject(customJson) } catch (_: Exception) { JSONObject() }
-
-                    // 2. Apply Tweaks on IO thread to ensure absolute UI smoothness (Profile Threading)
-                    // Kill background apps first if needed
-                    val shouldKillApps = profile == OptimizationProfile.PERFORMANCE || json.optString("kill_bg_apps") == "true"
-                    if (shouldKillApps) {
-                        repository.killBackgroundApps()
-                    }
-
-                    when (profile) {
-                        OptimizationProfile.PERFORMANCE -> {
-                            repository.applyOptimization("window_animation_scale", "0.25", game.packageName)
-                            repository.applyOptimization("transition_animation_scale", "0.25", game.packageName)
-                            repository.applyOptimization("animator_duration_scale", "0.25", game.packageName)
-                            repository.applyOptimization("force_gpu_rendering", "true", game.packageName)
-                            repository.applyOptimization("native_game_mode", "true", game.packageName)
-                            repository.applyOptimization("app_standby_active", "true", game.packageName)
-                            
-                            _launchState.value = LaunchState.COMPILING
-                            repository.compileApp(game.packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
-                        }
-                        OptimizationProfile.CUSTOM -> {
-                            val keys = json.keys()
-                            while(keys.hasNext()) {
-                                val key = keys.next()
-                                val value = json.getString(key)
-                                if (key == "compile_speed" && value == "true") {
-                                    _launchState.value = LaunchState.COMPILING
-                                    repository.compileApp(game.packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
-                                    _launchState.value = LaunchState.OPTIMIZING
-                                } else {
-                                    repository.applyOptimization(key, value, game.packageName)
-                                }
-                            }
-                        }
-                        else -> {}
-                    }
+                    repository.applyOptimizations(game.packageName)
                 }
                 
-                // 3. Final Launch
+                // 2. Final Launch
                 _launchState.value = LaunchState.LAUNCHING
-                
-                // START MONITORING SERVICE BEFORE LAUNCH
-                // This ensures the service is ready to catch the PID as soon as the app starts.
-                com.mustakim.bokbok.data.service.GameMonitorService.start(application, game.packageName)
                 
                 repository.launchGame(game.packageName)
                 
             } catch (e: Exception) {
                 android.util.Log.e("GameSpaceViewModel", "Launch failed, reverting", e)
-                // If anything fails during launch, REVERT immediately
                 withContext(Dispatchers.IO) {
                     repository.revertAllOptimizations()
-                    com.mustakim.bokbok.data.service.GameMonitorService.stop(application)
                 }
             } finally {
-                // Reset state after a delay to ensure UI reflects launch
                 delay(1500)
                 _launchState.value = LaunchState.NONE
             }
-        }
-    }
-
-    fun updateGameProfile(packageName: String, profile: OptimizationProfile) {
-        viewModelScope.launch {
-            repository.updateGameEntity(packageName) { it.copy(optimizationProfile = profile) }
         }
     }
 
@@ -213,7 +162,7 @@ class GameSpaceViewModel @Inject constructor(
             repository.updateGameEntity(packageName) { current ->
                 val json = JSONObject(current.customSettingsJson)
                 json.put(tweakId, value)
-                current.copy(customSettingsJson = json.toString(), optimizationProfile = OptimizationProfile.CUSTOM)
+                current.copy(customSettingsJson = json.toString())
             }
         }
     }
@@ -259,6 +208,20 @@ class GameSpaceViewModel @Inject constructor(
                 repository.showInLauncher(game.packageName)
             } else {
                 repository.hideFromLauncher(game.packageName)
+            }
+        }
+    }
+
+    fun preOptimizeGame(packageName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (_isCompiling.value) return@launch
+            _isCompiling.value = true
+            try {
+                repository.compileApp(packageName, com.mustakim.bokbok.data.model.CompileMode.SPEED.value)
+            } catch (e: Exception) {
+                android.util.Log.e("GameSpaceViewModel", "Manual pre-optimization failed", e)
+            } finally {
+                _isCompiling.value = false
             }
         }
     }

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,10 +18,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -29,13 +33,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -47,9 +51,138 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.VoiceRoom
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.runtime.mutableStateOf
 
+/**
+ * 🚀 PERFORMANCE OPTIMIZED: Flattened version of PublicRoomsSection.
+ * Instead of composing the whole grid in one item, we split it into multiple items.
+ */
+fun LazyListScope.publicRoomsItems(
+    rooms: List<VoiceRoom>,
+    totalRooms: Int,
+    totalParticipants: Int,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    onJoinCallOnly: (VoiceRoom) -> Unit,
+    onJoinPermanently: (VoiceRoom) -> Unit
+) {
+    if (rooms.isEmpty()) return
+
+    // 1. Header Item
+    item(key = "public_rooms_header", contentType = "header") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Public Rooms",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+
+            RefreshButton(
+                isRefreshing = isRefreshing,
+                onClick = onRefresh
+            )
+        }
+    }
+
+    // 2. Stats Item
+    item(key = "public_rooms_stats", contentType = "stats") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            StatCard(
+                title = "Active Rooms",
+                value = totalRooms.toString(),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "Online Users",
+                value = totalParticipants.toString(),
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+
+    item(key = "public_rooms_spacer", contentType = "spacer") {
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+
+    // 3. Grid Row Items (The heavy part)
+    val rows = rooms.chunked(2)
+    itemsIndexed(
+        items = rows,
+        key = { index, row -> "public_room_row_${row.firstOrNull()?.id ?: index}" },
+        contentType = { _, _ -> "room_row" }
+    ) { _, rowRooms ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            rowRooms.forEach { room ->
+                Box(modifier = Modifier.weight(1f)) {
+                    var showJoinDialog by remember { mutableStateOf(false) }
+
+                    CompactRoomCard(
+                        room = room,
+                        onClick = { onJoinCallOnly(room) },
+                        onLongClick = { showJoinDialog = true }
+                    )
+
+                    if (showJoinDialog) {
+                        RoomJoinDialog(
+                            room = room,
+                            onDismiss = { showJoinDialog = false },
+                            onJoinPermanently = { 
+                                onJoinPermanently(room)
+                                showJoinDialog = false
+                            },
+                            onJoinCallOnly = {
+                                onJoinCallOnly(room)
+                                showJoinDialog = false
+                            }
+                        )
+                    }
+                }
+            }
+            if (rowRooms.size == 1) {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoomJoinDialog(
+    room: VoiceRoom,
+    onDismiss: () -> Unit,
+    onJoinPermanently: () -> Unit,
+    onJoinCallOnly: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Join room") },
+        text = { Text("How do you want to join ${room.name}?") },
+        confirmButton = {
+            TextButton(onClick = onJoinPermanently) {
+                Text("Join permanently")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onJoinCallOnly) {
+                Text("Join call only")
+            }
+        }
+    )
+}
 
 @Composable
 fun PublicRoomsSection(
@@ -62,6 +195,7 @@ fun PublicRoomsSection(
     modifier: Modifier = Modifier,
     isRefreshing: Boolean = false
 ) {
+    // Keep legacy version just in case, but LoungeScreen will use flattened version
     val roomRows = remember(rooms) { rooms.chunked(2) }
     val currentOnJoinCallOnly by rememberUpdatedState(onJoinCallOnly)
     val currentOnJoinPermanently by rememberUpdatedState(onJoinPermanently)
@@ -70,7 +204,6 @@ fun PublicRoomsSection(
     var showJoinDialog by remember { mutableStateOf(false) }
 
     Column(modifier = modifier) {
-        // Header + refresh
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,7 +223,6 @@ fun PublicRoomsSection(
             )
         }
 
-        // Stats row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -111,7 +243,6 @@ fun PublicRoomsSection(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Rooms grid
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -129,12 +260,8 @@ fun PublicRoomsSection(
                         ) {
                             CompactRoomCard(
                                 room = room,
-                                onClick = {
-                                    // Tap → join call only
-                                    currentOnJoinCallOnly(room)
-                                },
+                                onClick = { currentOnJoinCallOnly(room) },
                                 onLongClick = {
-                                    // Long press → show options dialog
                                     selectedRoom = room
                                     showJoinDialog = true
                                 }
@@ -150,29 +277,16 @@ fun PublicRoomsSection(
     }
 
     if (showJoinDialog && selectedRoom != null) {
-        AlertDialog(
-            onDismissRequest = { showJoinDialog = false },
-            title = { Text("Join room") },
-            text = { Text("How do you want to join this room?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        selectedRoom?.let { currentOnJoinPermanently(it) }
-                        showJoinDialog = false
-                    }
-                ) {
-                    Text("Join permanently")
-                }
+        RoomJoinDialog(
+            room = selectedRoom!!,
+            onDismiss = { showJoinDialog = false },
+            onJoinPermanently = { 
+                selectedRoom?.let { currentOnJoinPermanently(it) }
+                showJoinDialog = false
             },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        selectedRoom?.let { currentOnJoinCallOnly(it) }
-                        showJoinDialog = false
-                    }
-                ) {
-                    Text("Join call only")
-                }
+            onJoinCallOnly = {
+                selectedRoom?.let { currentOnJoinCallOnly(it) }
+                showJoinDialog = false
             }
         )
     }
@@ -183,7 +297,6 @@ private fun RefreshButton(
     isRefreshing: Boolean,
     onClick: () -> Unit
 ) {
-    // ✅ Only run infinite animation while refreshing, otherwise stay at 0°
     val targetRotation = if (isRefreshing) 360f else 0f
     val rotation by animateFloatAsState(
         targetValue = targetRotation,

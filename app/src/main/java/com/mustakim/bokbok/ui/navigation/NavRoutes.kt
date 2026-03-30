@@ -70,4 +70,18 @@ sealed class NavRoutes(val route: String) {
             return "chat_members/$groupId"
         }
     }
+
+    object AppDetails : NavRoutes("app_details/{packageName}") {
+        fun createRoute(packageName: String): String {
+            require(packageName.isNotBlank()) { "Package name cannot be blank" }
+            return "app_details/$packageName"
+        }
+    }
+
+    object GameDetail : NavRoutes("game_detail/{packageName}") {
+        fun createRoute(packageName: String): String {
+            require(packageName.isNotBlank()) { "Package name cannot be blank" }
+            return "game_detail/$packageName"
+        }
+    }
 }

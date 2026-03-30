@@ -1,0 +1,10 @@
+#Sun Mar 29 13:32:56 BDT 2026
+base.0=G\:\\Doccuments\\bokbok-v2\\baselineprofile\\build\\intermediates\\dex\\benchmarkRelease\\mergeExtDexBenchmarkRelease\\classes.dex
+base.1=G\:\\Doccuments\\bokbok-v2\\baselineprofile\\build\\intermediates\\dex\\benchmarkRelease\\mergeProjectDexBenchmarkRelease\\0\\classes.dex
+base.2=G\:\\Doccuments\\bokbok-v2\\baselineprofile\\build\\intermediates\\dex\\benchmarkRelease\\mergeProjectDexBenchmarkRelease\\8\\classes.dex
+path.0=classes.dex
+path.1=0/classes.dex
+path.2=8/classes.dex
+renamed.0=classes.dex
+renamed.1=classes2.dex
+renamed.2=classes3.dex

@@ -80,6 +80,10 @@ class AICompanionViewModel @Inject constructor(
 
     fun getDownloadStatus(langCode: String) = modelDownloader.getDownloadStatus(langCode)
 
+    fun cancelDownload(langCode: String) {
+        modelDownloader.cancelDownload(langCode)
+    }
+
     fun dismissPermissionDialog() {
         _showPermissionDialog.value = false
         _showOverlayPermissionDialog.value = false

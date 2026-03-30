@@ -7,11 +7,13 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import com.mustakim.bokbok.data.fps.FpsDaemonManager
 import com.mustakim.bokbok.data.local.dao.GameDao
 import com.mustakim.bokbok.data.local.entity.AppEntity
 import com.mustakim.bokbok.data.local.entity.GameEntity
 import com.mustakim.bokbok.data.model.GameItem
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -58,7 +60,6 @@ class GameRepository @Inject constructor(
                         isUserAdded = entity?.isUserAdded ?: false,
                         installedTime = app.firstInstallTime,
                         apkSize = app.apkSize,
-                        optimizationProfile = entity?.optimizationProfile ?: com.mustakim.bokbok.data.model.OptimizationProfile.BALANCED,
                         customSettingsJson = entity?.customSettingsJson ?: "{}"
                     )
                 } else null
@@ -74,7 +75,8 @@ class GameRepository @Inject constructor(
             "com.miHoYo.", "com.tencent.", "com.supercell.",
             "com.king.", "com.ea.", "com.gameloft.", "com.roblox.",
             "com.mojang.", "com.activision.", "com.netease.", "com.garena.",
-            "com.epicgames.", "com.riotgames.", "com.square_enix.", "com.bandainamcoent."
+            "com.epicgames.", "com.riotgames.", "com.square_enix.", "com.bandainamcoent.",
+            "com.dts."
         )
         return prefixes.any { packageName.startsWith(it, ignoreCase = true) }
     }
@@ -105,6 +107,7 @@ class GameRepository @Inject constructor(
         val isHidden = !isAppEnabled(packageName)
         if (isHidden) {
             updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = true) }
+            syncGameListToShell()
         }
         return isHidden
     }
@@ -115,6 +118,7 @@ class GameRepository @Inject constructor(
         val isShown = isAppEnabled(packageName)
         if (isShown) {
             updateGameEntity(packageName) { it.copy(isHiddenFromLauncher = false) }
+            syncGameListToShell()
         }
         return isShown
     }
@@ -126,12 +130,14 @@ class GameRepository @Inject constructor(
 
     suspend fun addGameManually(packageName: String) {
         updateGameEntity(packageName) { it.copy(isUserAdded = true, isManuallyRemoved = false) }
+        syncGameListToShell()
     }
 
     suspend fun removeFromGameList(packageName: String) {
         // If it's naturally detected as a game (isGame), we can't just delete from DB.
         // We mark it as manually removed instead.
         updateGameEntity(packageName) { it.copy(isManuallyRemoved = true) }
+        syncGameListToShell()
     }
 
     suspend fun updateGameEntity(packageName: String, update: (GameEntity) -> GameEntity) {
@@ -139,34 +145,108 @@ class GameRepository @Inject constructor(
         gameDao.upsertGame(update(current))
     }
 
-    suspend fun batchUpdateGames(packageNames: List<String>, update: (GameEntity) -> GameEntity) {
-        val updates = packageNames.map { pkg ->
-            val current = gameDao.getGameByPackage(pkg) ?: GameEntity(pkg)
-            update(current)
+    suspend fun getGameEntity(packageName: String): GameEntity? {
+        return gameDao.getGameByPackage(packageName)
+    }
+
+    suspend fun applyOptimizations(packageName: String) {
+        val entity = getGameEntity(packageName) ?: return
+        val json = try { org.json.JSONObject(entity.customSettingsJson) } catch (e: Exception) { return }
+        
+        // Ensure we preserve the clean state before applying anything
+        checkAndCreateMasterSnapshot()
+
+        // 1. Kill background apps if requested
+        if (json.optString("kill_bg_apps") == "true") {
+            killBackgroundApps()
         }
-        gameDao.upsertGames(updates)
+
+        // 2. Apply each tweak from JSON
+        val keys = json.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key == "kill_bg_apps") continue
+            val value = json.optString(key)
+            if (value.isNotEmpty()) {
+                applyOptimization(key, value, packageName)
+            }
+        }
     }
 
     private val prefs = context.getSharedPreferences("game_mode_snapshots", Context.MODE_PRIVATE)
 
+    suspend fun syncGameListToShell() {
+        withContext(Dispatchers.IO) {
+            // Use the same logic as getGames() to ensure consistency
+            val games = getGames().first()
+            if (games.isEmpty()) {
+                android.util.Log.d("GameRepository", "No games to sync.")
+                executeShizukuCommandAndGet("rm /data/local/tmp/bokbok_games.list")
+                return@withContext
+            }
+            val packageList = games.joinToString("\\n") { it.packageName }
+            android.util.Log.d("GameRepository", "Syncing ${games.size} games to shell list.")
+            // Use direct execution to bypass sanitization for this internal trusted command
+            executeShizukuCommandAndGet("echo -e \"$packageList\" > /data/local/tmp/bokbok_games.list")
+            executeShizukuCommandAndGet("chmod 644 /data/local/tmp/bokbok_games.list")
+        }
+    }
+
+    private fun checkAndCreateMasterSnapshot() {
+        // If master snapshot already exists, DO NOTHING.
+        // The master snapshot represents the "Clean" state of the phone before ANY game was launched.
+        if (prefs.getBoolean("has_master_snapshot", false)) {
+            android.util.Log.d("GameRepository", "Master snapshot exists. Skipping new snapshot.")
+            return
+        }
+        
+        // We don't actually "save" the whole state here, we just mark that subsequent
+        // individual saveSnapshot calls are allowed to write to the 'master' record.
+        // However, since we use the same keys, we just need to ensure we don't OVERWRITE 
+        // existing keys if they are already there.
+        // The saveSnapshot function already has a check: if (!prefs.contains(compositeKey))
+        // So simply setting this flag acts as a semantic marker.
+        prefs.edit().putBoolean("has_master_snapshot", true).apply()
+        android.util.Log.d("GameRepository", "Marking start of MASTER snapshot session...")
+    }
+
     private fun sanitizeCommand(command: String): String {
-        // High-security sanitization: 
-        // 1. Block command chaining characters: ; & | > < `
-        // 2. Block command substitution: $( ... )
-        // 3. Block newlines and carriage returns
-        // 4. Block obvious dangerous paths/commands in user inputs
+        // Relaxed sanitization: allow redirection but still block chaining and subshells
+        // Chaining: ; & | ` 
+        // Subshell: $( )
         return command
-            .replace(Regex("[;&|><`]"), "")
+            .replace(Regex("[;&|`]"), "")
             .replace(Regex("\\$\\(.*\\)"), "") 
             .replace("\n", "")
             .replace("\r", "")
             .trim()
     }
 
-    private suspend fun executeShizukuCommand(command: String) {
+    suspend fun executeShizukuCommand(command: String) {
         val sanitized = sanitizeCommand(command)
         if (sanitized.isEmpty()) return
         executeShizukuCommandAndGet(sanitized)
+    }
+
+    suspend fun executeShizukuCommandRaw(command: String): String {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (Shizuku.pingBinder()) {
+                    val binder = Shizuku.getBinder()
+                    if (binder != null) {
+                        val service = IShizukuService.Stub.asInterface(binder)
+                        val process = service.newProcess(arrayOf("sh", "-c", command), null, null)
+                        val pfd = process?.inputStream
+                        val output = if (pfd != null) {
+                            ParcelFileDescriptor.AutoCloseInputStream(pfd).bufferedReader().use { it.readText() }
+                        } else ""
+                        process?.waitFor()
+                        return@withContext output
+                    }
+                }
+            } catch (e: Exception) {}
+            return@withContext ""
+        }
     }
 
     suspend fun applyOptimization(tweakId: String, value: String, packageName: String? = null) {
@@ -243,33 +323,13 @@ class GameRepository @Inject constructor(
                 saveSnapshot("global", "low_power", "settings get global low_power")
                 "settings put global low_power ${if (value == "true") 0 else 1}"
             }
-            "wm_size" -> {
-                if (value.isBlank() || value == "reset") {
-                    "wm size reset"
-                } else {
-                    if (value.matches(Regex("^\\d{3,4}x\\d{3,5}$"))) {
-                        val parts = value.split("x")
-                        val w = parts[0].toIntOrNull() ?: 0
-                        val h = parts[1].toIntOrNull() ?: 0
-                        
-                        // Dynamic Upper Bound: Check physical display size if possible
-                        val metrics = context.resources.displayMetrics
-                        val maxW = (metrics.widthPixels * 1.5).toInt().coerceAtLeast(3840)
-                        val maxH = (metrics.heightPixels * 1.5).toInt().coerceAtLeast(3840)
-
-                        if (w in 320..maxW && h in 320..maxH) {
-                            saveSnapshot("wm", tweakId, "wm size")
-                            "wm size $value"
-                        } else null
-                    } else null
-                }
-            }
             "wm_density" -> {
-                if (value.isBlank()) {
+                if (value.isBlank() || value == "reset") {
                     "wm density reset"
                 } else {
                     val dens = value.toIntOrNull() ?: 0
-                    if (dens in 72..1000) {
+                    // SAFETY: Most devices brick/glitch if density is < 120 or > 720
+                    if (dens in 120..720) {
                         saveSnapshot("wm", tweakId, "wm density")
                         "wm density $value"
                     } else null
@@ -325,9 +385,102 @@ class GameRepository @Inject constructor(
         executeShizukuCommand("cmd package compile -m $mode -f $packageName")
     }
 
-    suspend fun killBackgroundApps() {
-        // Simple am kill-all for now as requested
-        executeShizukuCommand("am kill-all")
+    suspend fun killBackgroundApps(activeGamePackage: String? = null) {
+        // Smart Memory Cleanup: Only target apps that are actually running in the background.
+        val myPackage = "com.mustakim.bokbok"
+        val exemptPackages = mutableSetOf(myPackage, "com.android.systemui", "android")
+        activeGamePackage?.let { exemptPackages.add(it) }
+
+        try {
+            // Get running processes. We look for 'proc' lines in dumpsys.
+            // Format: proc #idx: [app_name]/[uid]
+            val output = executeShizukuCommandAndGet("dumpsys activity processes | grep -E \"^\\s*proc\\s#\"").trim()
+            
+            val runningPackages = output.lines()
+                .mapNotNull { line ->
+                    // Extract package name. Usually looks like: proc #10: com.google.android.youtube/u0a123
+                    val match = Regex("proc\\s+#\\d+:\\s+([^/\\s:]+)").find(line)
+                    match?.groupValues?.get(1)
+                }
+                .filter { pkg -> 
+                    pkg.contains(".") && !exemptPackages.any { pkg.startsWith(it) }
+                }
+                .distinct()
+
+            if (runningPackages.isNotEmpty()) {
+                // Use 'am kill' for background processes (gentler than force-stop, frees RAM)
+                // or 'am force-stop' for more aggressive cleanup if 'am kill' isn't enough.
+                // We'll use force-stop for the specific targeted background apps.
+                runningPackages.chunked(10).forEach { chunk ->
+                    val chunkCmd = chunk.joinToString(" ; ") { "am force-stop $it" }
+                    executeShizukuCommand(chunkCmd)
+                }
+            }
+        } catch (_: Exception) {
+            // Silent fallback
+        }
+    }
+
+
+    /**
+     * Parses PROFILEDATA from "dumpsys gfxinfo <pkg> framestats"
+     * Column index 13 = FRAME_COMPLETED nanosecond timestamp
+     * Counts frames completed within the last 1 second window
+     */
+    private fun parseFramestatsFps(raw: String): Float {
+        android.util.Log.d("FPS-DEBUG", "=== RAW OUTPUT ===")
+        android.util.Log.d("FPS-DEBUG", raw.take(2000)) // First 2000 chars
+
+        val lines = raw.lines()
+        val startIdx = lines.indexOfFirst { it.trimStart().startsWith("---PROFILEDATA---") }
+        val endIdx   = lines.indexOfLast  { it.trimStart().startsWith("---PROFILEDATA---") }
+
+        android.util.Log.d("FPS-DEBUG", "startIdx=$startIdx endIdx=$endIdx totalLines=${lines.size}")
+
+        if (startIdx < 0 || endIdx <= startIdx) {
+            android.util.Log.d("FPS-DEBUG", "PROFILEDATA block not found!")
+            return 0f
+        }
+
+        val frameLines = lines.subList(startIdx + 2, endIdx)
+        android.util.Log.d("FPS-DEBUG", "frameLines count=${frameLines.size}")
+        android.util.Log.d("FPS-DEBUG", "first frameline: ${frameLines.firstOrNull()}")
+        android.util.Log.d("FPS-DEBUG", "last frameline: ${frameLines.lastOrNull()}")
+
+        val timestamps = frameLines.mapNotNull { line ->
+            line.split(",").getOrNull(13)?.trim()?.toLongOrNull()
+        }.filter { it > 0 }
+
+        android.util.Log.d("FPS-DEBUG", "valid timestamps count=${timestamps.size}")
+        android.util.Log.d("FPS-DEBUG", "last timestamp=${timestamps.lastOrNull()}")
+
+        if (timestamps.size < 2) return 0f
+
+        val nowNs          = timestamps.last()
+        val oneSecAgoNs    = nowNs - 1_000_000_000L
+        val framesInWindow = timestamps.count { it >= oneSecAgoNs }
+
+        android.util.Log.d("FPS-DEBUG", "framesInWindow=$framesInWindow")
+        return if (framesInWindow > 0) framesInWindow.toFloat() else 0f
+    }
+
+    /**
+     * Parses "dumpsys SurfaceFlinger --latency" output.
+     * Each line: <desired-present-ns> <actual-present-ns> <frame-ready-ns>
+     * We use column 2 (actual present time) to count frames in last 1s.
+     */
+    private fun parseSurfaceFlingerLatencyFps(raw: String): Float {
+        val timestamps = raw.lines().mapNotNull { line ->
+            line.trim().split("\\s+".toRegex()).getOrNull(1)?.toLongOrNull()
+        }.filter { it > 0 && it != Long.MAX_VALUE }
+
+        if (timestamps.size < 2) return 0f
+
+        val nowNs          = timestamps.last()
+        val oneSecAgoNs    = nowNs - 1_000_000_000L
+        val framesInWindow = timestamps.count { it in oneSecAgoNs..nowNs }
+
+        return if (framesInWindow > 0) framesInWindow.toFloat() else 0f
     }
 
     private suspend fun saveSnapshot(namespace: String, key: String, getCommand: String) {
@@ -353,11 +506,10 @@ class GameRepository @Inject constructor(
 
             val command = when (namespace) {
                 "wm" -> {
-                    // "wm size" output is "Physical size: 1080x2400"
                     if (value.contains("Physical") || value.contains("Override")) {
-                        "wm ${if(key == "wm_size") "size" else "density"} reset"
+                        "wm density reset"
                     } else {
-                        "wm ${if(key == "wm_size") "size" else "density"} $value"
+                        "wm density $value"
                     }
                 }
                 "activity" -> {
@@ -395,10 +547,45 @@ class GameRepository @Inject constructor(
         }
         
         prefs.edit().clear().apply()
+        // Reset the master snapshot flag
+        // prefs.edit().putBoolean("has_master_snapshot", false).apply() // clear() already does this
         
         // Re-enable common bloat that might have been disabled
         val bloat = listOf("com.miui.analytics", "com.miui.msa.global", "com.xiaomi.joyose")
         bloat.forEach { executeShizukuCommand("pm enable --user 0 $it") }
+    }
+
+    suspend fun restoreToMasterSnapshot() {
+        // Reverts settings but KEEPS the snapshot data so we can apply new optimizations 
+        // on top of a clean slate.
+        val allSnapshots = prefs.all
+        allSnapshots.forEach { (compositeKey, valueObj) ->
+            val value = valueObj.toString()
+            if (compositeKey == "affected_packages" || compositeKey == "has_master_snapshot") return@forEach
+            
+            val namespace = compositeKey.substringBefore("|")
+            val key = compositeKey.substringAfter("|")
+            
+            val command = when (namespace) {
+                "wm" -> if (value.contains("Physical") || value.contains("Override")) "wm density reset" else "wm density $value"
+                "activity" -> if (key == "bg_process_limit") "activity clear-process-limit" else null
+                "config" -> "device_config put ${key.substringBefore(":")} ${key.substringAfter(":")} $value"
+                "prop" -> "setprop $key $value"
+                "cmd" -> if (key == "performance_mode") "cmd power set-fixed-performance-mode-enabled false" else null
+                "pm" -> "pm enable --user 0 $key"
+                else -> "settings put $namespace $key $value"
+            }
+            command?.let { executeShizukuCommand(it) }
+        }
+        
+        // Reset game specific commands for affected packages
+        val affectedPackages = prefs.getStringSet("affected_packages", emptySet()) ?: emptySet()
+        affectedPackages.forEach { pkg ->
+             executeShizukuCommand("cmd game mode standard $pkg")
+             executeShizukuCommand("cmd game downscale reset $pkg")
+        }
+        
+        // DO NOT clear prefs or has_master_snapshot
     }
 
     suspend fun executeShizukuCommandAndGet(command: String): String {
@@ -421,6 +608,14 @@ class GameRepository @Inject constructor(
                 android.util.Log.e("GameRepository", "Shizuku command failed: $command", e)
             }
             return@withContext ""
+        }
+    }
+
+    suspend fun batchUpdateGames(packageNames: List<String>, transform: (com.mustakim.bokbok.data.local.entity.GameEntity) -> com.mustakim.bokbok.data.local.entity.GameEntity) {
+        withContext(Dispatchers.IO) {
+            val entities = packageNames.mapNotNull { gameDao.getGameByPackage(it) }
+            val updated = entities.map { transform(it) }
+            gameDao.upsertGames(updated)
         }
     }
 

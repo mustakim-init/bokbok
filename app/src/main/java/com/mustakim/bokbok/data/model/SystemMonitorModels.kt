@@ -26,6 +26,7 @@ data class CpuInfo(
     val socName: String? = null,
     val architecture: String? = null,
     val temperatureCelsius: Float? = null,
+    val fps: Float = 0f,
     val clusters: List<CpuClusterInfo> = emptyList()
 )
 
@@ -107,7 +108,8 @@ data class GpuInfo(
     val temperatureCelsius: Float? = null,
     val powerLevel: Int? = null,
     val maxPowerLevel: Int? = null,
-    val available: Boolean = false
+    val available: Boolean = false,
+    val gameFps: Float = 0f
 )
 
 @Immutable

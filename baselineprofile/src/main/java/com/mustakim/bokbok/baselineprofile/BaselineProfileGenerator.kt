@@ -86,36 +86,6 @@ class BaselineProfileGenerator {
                     Thread.sleep(2000)
                 }
 
-                // Swipe through all 6 Optimizer tabs
-                runStep("Optimizer - Tab Swiping Flow") {
-                    // Tabs: Game Boost -> App Manager -> Usage Stats -> Device Monitor -> Screen Record -> Security
-                    repeat(6) { tabIndex ->
-                        Log.d("BokBokProfiler", "Swiping to tab $tabIndex")
-                        waitForIdle()
-                        
-                        // Swipe Left to next tab
-                        val startX = (device.displayWidth * 0.85).toInt()
-                        val endX = (device.displayWidth * 0.15).toInt()
-                        val centerY = (device.displayHeight * 0.55).toInt()
-                        
-                        device.swipe(startX, centerY, endX, centerY, 30)
-                        Thread.sleep(1500) // Allow ViewModel initialization
-                        
-                        // Scroll content in each tab
-                        blindScroll()
-                    }
-                    
-                    // Swipe back through all tabs
-                    repeat(6) {
-                        val startX = (device.displayWidth * 0.15).toInt()
-                        val endX = (device.displayWidth * 0.85).toInt()
-                        val centerY = (device.displayHeight * 0.55).toInt()
-                        
-                        device.swipe(startX, centerY, endX, centerY, 30)
-                        Thread.sleep(800)
-                    }
-                }
-
                 // =============================================================================
                 // PHASE 5: AI COMPANION SCREEN
                 // =============================================================================

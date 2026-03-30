@@ -5,11 +5,13 @@ import com.mustakim.bokbok.data.bloatware.RemovalSafety
 import com.mustakim.bokbok.data.model.AppItem
 import com.mustakim.bokbok.data.repository.AppManagerRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -43,12 +45,23 @@ class AppManagerViewModel @Inject constructor(
     private val _selectedApp = MutableStateFlow<AppItem?>(null)
     val selectedApp: StateFlow<AppItem?> = _selectedApp.asStateFlow()
 
+    private val _isFilterSheetVisible = MutableStateFlow(false)
+    val isFilterSheetVisible = _isFilterSheetVisible.asStateFlow()
+
+    private val _isSortSheetVisible = MutableStateFlow(false)
+    val isSortSheetVisible = _isSortSheetVisible.asStateFlow()
+
     private val _appsFlow = repository.observeApps()
     
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private val debouncedSearchQuery = _searchQuery
+        .debounce(300)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
     // Combining flows to produce the final UI list
     val uiState: StateFlow<AppManagerUiState> = combine(
         combine(_appsFlow, _selectedPackages, _isLoading, _error, ::AppStatsData),
-        combine(_searchQuery, _filterType, _sortOrder, ::Triple)
+        combine(debouncedSearchQuery, _filterType, _sortOrder, ::Triple)
     ) { (apps, selected, isLoading, error), (query, filter, sort) ->
         val filteredApps = apps
             .map { it.copy(isSelected = selected.contains(it.packageName)) }
@@ -60,8 +73,9 @@ class AppManagerViewModel @Inject constructor(
                     AppFilterType.SYSTEM -> app.isInstalled && app.isSystemApp
                     AppFilterType.BLOATWARE -> app.isInstalled && app.isBloatware
                     AppFilterType.SAFE_TO_REMOVE -> app.isInstalled && app.isBloatware && 
-                        (app.removalSafety == RemovalSafety.SAFE || app.removalSafety == RemovalSafety.REPLACEABLE)
+                        (app.removalSafety == RemovalSafety.SAFE || app.removalSafety == RemovalSafety.REPLACEABLE || app.removalSafety == RemovalSafety.CAUTION)
                     AppFilterType.UNINSTALLED -> !app.isInstalled // Show only uninstalled (restore candidates)
+                    AppFilterType.DISABLED -> app.isInstalled && !app.isEnabled
                 }
             }
             .filter { app ->
@@ -78,14 +92,18 @@ class AppManagerViewModel @Inject constructor(
                     AppSortOrder.SIZE -> filteredList.sortedByDescending { it.apkSize }
                     AppSortOrder.INSTALL_DATE -> filteredList.sortedByDescending { it.firstInstallTime }
                     AppSortOrder.UPDATE_DATE -> filteredList.sortedByDescending { it.lastUpdateTime }
-                    AppSortOrder.BLOATWARE_FIRST -> filteredList.sortedByDescending { it.isBloatware }
+                    AppSortOrder.BLOATWARE_FIRST -> filteredList.sortedWith(
+                        compareByDescending<AppItem> { it.isBloatware }.thenBy { it.label.lowercase() }
+                    )
+                    AppSortOrder.PACKAGE_NAME -> filteredList.sortedBy { it.packageName }
+                    AppSortOrder.TARGET_SDK -> filteredList.sortedByDescending { it.targetSdk }
                 }
             }
 
         // Calculate bloatware stats
-        val bloatwareCount = apps.count { it.isBloatware }
+        val bloatwareCount = apps.count { it.isInstalled && it.isBloatware }
         val safeToRemoveCount = apps.count { 
-            it.isBloatware && (it.removalSafety == RemovalSafety.SAFE || it.removalSafety == RemovalSafety.REPLACEABLE)
+            it.isInstalled && it.isBloatware && (it.removalSafety == RemovalSafety.SAFE || it.removalSafety == RemovalSafety.REPLACEABLE || it.removalSafety == RemovalSafety.CAUTION)
         }
 
         AppManagerUiState(
@@ -108,6 +126,15 @@ class AppManagerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             // Attempt to grant Usage Stats permission via Shizuku
             repository.grantSelfPermissions()
+            
+            // 🚀 LAZY LOADING: Trigger initial scan only when entering this feature
+            // and only if the database hasn't been populated yet.
+            if (uiState.value.apps.isEmpty()) {
+                repository.refreshApps()
+            }
+            
+            // Check for debloat database updates in the background
+            checkForDatabaseUpdates()
         }
     }
 
@@ -142,6 +169,11 @@ class AppManagerViewModel @Inject constructor(
         // Open our custom details screen
         _selectedApp.value = app
     }
+
+    fun showFilterSheet() { _isFilterSheetVisible.value = true }
+    fun hideFilterSheet() { _isFilterSheetVisible.value = false }
+    fun showSortSheet() { _isSortSheetVisible.value = true }
+    fun hideSortSheet() { _isSortSheetVisible.value = false }
     
     fun clearSelectedApp() {
         _selectedApp.value = null
@@ -210,7 +242,13 @@ class AppManagerViewModel @Inject constructor(
     }
 
     fun onRefresh() {
-        loadApps(forceRefresh = true)
+        viewModelScope.launch {
+            _isLoading.value = true
+            // Fake animation delay for better UX
+            delay(1500)
+            loadApps(forceRefresh = true)
+            _isLoading.value = false
+        }
     }
 
     fun checkForDatabaseUpdates() {
@@ -243,6 +281,6 @@ data class AppStatsData(
     val error: String?
 )
 
-enum class AppFilterType { ALL, USER, SYSTEM, BLOATWARE, SAFE_TO_REMOVE, UNINSTALLED }
-enum class AppSortOrder { NAME_ASC, NAME_DESC, SIZE, INSTALL_DATE, UPDATE_DATE, BLOATWARE_FIRST }
+enum class AppFilterType { ALL, USER, SYSTEM, BLOATWARE, SAFE_TO_REMOVE, UNINSTALLED, DISABLED }
+enum class AppSortOrder { NAME_ASC, NAME_DESC, SIZE, INSTALL_DATE, UPDATE_DATE, BLOATWARE_FIRST, PACKAGE_NAME, TARGET_SDK }
 

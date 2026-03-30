@@ -6,7 +6,6 @@ object TweakCatalog {
     const val CAT_DISPLAY = "Display & Animation"
     const val CAT_GPU = "GPU & Graphics"
     const val CAT_MEMORY = "Memory & Processes"
-    const val CAT_COMPILER = "AOT Compilation"
     const val CAT_NETWORK = "Network & Latency"
     const val CAT_SYSTEM = "System & Utility"
     const val CAT_INPUT = "Touch & Response"
@@ -15,15 +14,15 @@ object TweakCatalog {
         // --- Display & Animation ---
         TweakDef(
             id = "peak_refresh_rate",
-            title = "Force Peak Refresh Rate",
-            description = "Force the display to stay at maximum frequency (e.g. 120Hz).",
+            title = "Enforce Smooth Display",
+            description = "Forces your screen to run at its highest speed (like 120Hz) for the smoothest gaming experience.",
             category = CAT_DISPLAY,
             minSdk = Build.VERSION_CODES.Q
         ),
         TweakDef(
             id = "window_animation_scale",
-            title = "Window Animation Scale",
-            description = "Adjust speed of window animations. Lower is faster.",
+            title = "Window Speed Boost",
+            description = "Makes menu windows open and close much faster or instantly.",
             type = TweakType.SELECT,
             isGlobal = true,
             options = listOf("0", "0.25", "0.5", "0.75", "1.0"),
@@ -31,8 +30,8 @@ object TweakCatalog {
         ),
         TweakDef(
             id = "transition_animation_scale",
-            title = "Transition Animation Scale",
-            description = "Adjust speed of transition animations. 0 is instant.",
+            title = "Transition Speed Boost",
+            description = "Makes the switch between different screens feel much faster.",
             type = TweakType.SELECT,
             isGlobal = true,
             options = listOf("0", "0.25", "0.5", "0.75", "1.0"),
@@ -40,8 +39,8 @@ object TweakCatalog {
         ),
         TweakDef(
             id = "animator_duration_scale",
-            title = "Animator Duration Scale",
-            description = "Adjust duration of overall system animations.",
+            title = "Overall Animation Speed",
+            description = "Speeds up every single animation in the entire system for a snappier feel.",
             type = TweakType.SELECT,
             isGlobal = true,
             options = listOf("0", "0.25", "0.5", "0.75", "1.0"),
@@ -49,8 +48,8 @@ object TweakCatalog {
         ),
         TweakDef(
             id = "disable_window_blurs",
-            title = "Disable UI Blurs",
-            description = "Reduces GPU load by disabling background blurs in menus.",
+            title = "Disable Fancy Blurs",
+            description = "Turns off see-through blur effects in menus to give your graphics chip more power for the game.",
             category = CAT_DISPLAY,
             minSdk = Build.VERSION_CODES.S // Android 12
         ),
@@ -90,28 +89,28 @@ object TweakCatalog {
         // --- Memory & Processes ---
         TweakDef(
             id = "kill_bg_apps",
-            title = "Aggressive Background Kill",
-            description = "Kills background processes before launching the game.",
+            title = "Clear Background Apps",
+            description = "Forcefully closes other apps running in the background to free up memory for your game.",
             category = CAT_MEMORY
         ),
         TweakDef(
             id = "max_phantom_processes",
-            title = "Phantom Process Boost",
-            description = "Increase limit for sub-processes. Prevents crashes in tools.",
+            title = "Stability Boost (Phantom)",
+            description = "Allows the game to use more sub-processes. Essential for preventing crashes in heavy modern games.",
             category = CAT_MEMORY,
             minSdk = Build.VERSION_CODES.S
         ),
         TweakDef(
             id = "app_standby_active",
-            title = "Force Active State",
-            description = "Prevents OS from putting the game in standby mode.",
+            title = "Prevent Game Sleep",
+            description = "Stops the system from putting your game in 'standby' mode while you are playing.",
             category = CAT_MEMORY,
             minSdk = Build.VERSION_CODES.P
         ),
         TweakDef(
             id = "bg_process_limit",
-            title = "Background Process Limit",
-            description = "Restricts number of processes kept in background.",
+            title = "Background Limit",
+            description = "Limits how many other apps can stay alive while you play. Fewer apps means more power for the game.",
             type = TweakType.SELECT,
             options = listOf("Standard", "0", "1", "2", "3", "4"),
             category = CAT_MEMORY
@@ -120,48 +119,48 @@ object TweakCatalog {
         // --- Touch & Response ---
         TweakDef(
             id = "long_press_timeout",
-            title = "Long Press Latency",
-            description = "Reduces time to trigger long-press actions.",
+            title = "Hold Response Boost",
+            description = "Reduces the time you need to hold your finger down to trigger a long-press action.",
             type = TweakType.SELECT,
             options = listOf("Default", "250", "300", "400"),
             category = CAT_INPUT
         ),
         TweakDef(
             id = "tap_duration_threshold",
-            title = "Tap Speed Boost",
-            description = "Reduces confirmation delay for taps.",
+            title = "Instant Tap Response",
+            description = "Removes the system's wait time to confirm a tap, making your inputs feel much faster.",
             category = CAT_INPUT
         ),
         TweakDef(
             id = "touch_blocking_period",
-            title = "Zero Touch Block",
-            description = "Prevents system from ignoring accidental touches.",
+            title = "Ignore Ghost Touches",
+            description = "Stops the system from accidentally ignoring your rapid taps during intense gameplay.",
             category = CAT_INPUT
         ),
 
         // --- Network & Latency ---
         TweakDef(
             id = "wifi_power_save",
-            title = "Disable Wi-Fi Power Save",
-            description = "Ensures network chip never sleeps during gameplay. Reduces lag.",
+            title = "Extreme Wi-Fi Mode",
+            description = "Prevents the Wi-Fi chip from ever sleeping, ensuring your connection is always ready and stable.",
             category = CAT_NETWORK
         ),
         TweakDef(
             id = "cellular_data_throttle",
-            title = "Disable Data Throttling",
-            description = "Prevents carrier speed limits during active usage.",
+            title = "Unleash Mobile Data",
+            description = "Stops the system from slowing down your mobile data speed to save power.",
             category = CAT_NETWORK
         ),
         TweakDef(
             id = "wifi_scan_always_enabled",
-            title = "Disable WiFi Scanning",
-            description = "Reduces ping spikes by disabling background scanning.",
+            title = "Reduce Ping Spikes",
+            description = "Stops the phone from searching for other Wi-Fi networks in the background while you play.",
             category = CAT_NETWORK
         ),
         TweakDef(
             id = "adaptive_connectivity",
-            title = "Disable Adaptive Network",
-            description = "Prevents mid-game network switching (5G/WiFi).",
+            title = "Stable Network Lock",
+            description = "Prevents the phone from switching between 5G and Wi-Fi mid-game, which often causes lag.",
             category = CAT_NETWORK,
             minSdk = Build.VERSION_CODES.R
         ),
@@ -169,52 +168,37 @@ object TweakCatalog {
         // --- System & Utility ---
         TweakDef(
             id = "native_game_mode",
-            title = "OS Game Mode",
-            description = "Enables Android's official internal performance profile.",
+            title = "Android Game Engine",
+            description = "Activates the official hidden performance mode built into Android for games.",
             category = CAT_SYSTEM,
             minSdk = Build.VERSION_CODES.S
         ),
         TweakDef(
             id = "fixed_performance_mode",
-            title = "Fixed Performance Mode",
-            description = "Locks CPU/GPU clocks for sustained performance.",
+            title = "Maximum Clock Lock",
+            description = "Forces your CPU to run at its highest speed constantly for zero lag.",
             category = CAT_SYSTEM,
             minSdk = Build.VERSION_CODES.R,
             warning = "Device may get hot. Use only if you have good cooling."
         ),
         TweakDef(
             id = "disable_gos",
-            title = "Kill Game Optimizer (GOS)",
-            description = "Disables Samsung's built-in throttling service.",
+            title = "Kill Throttling (Samsung)",
+            description = "Stops Samsung phones from intentionally slowing down the game to save heat.",
             category = CAT_SYSTEM,
             manufacturer = "samsung"
         ),
         TweakDef(
             id = "zen_mode",
-            title = "Gaming DND",
-            description = "Block all notifications and calls while gaming.",
+            title = "Notification Blocker",
+            description = "Automatically hides all calls and notifications so you aren't interrupted.",
             category = CAT_SYSTEM
-        ),
-        // ... compilation, resolution, dpi remain same but omitted for brevity in response if needed
-        TweakDef(
-            id = "compile_speed",
-            title = "Speed Compilation (AOT)",
-            description = "Compiles the app for maximum execution speed.",
-            category = CAT_COMPILER
         ),
         TweakDef(
             id = "low_power_disable",
-            title = "Disable Battery Saver",
-            description = "Forces battery saver off for maximum power.",
+            title = "Force High Power",
+            description = "Ensures your phone doesn't enter battery saver mode while gaming.",
             category = CAT_SYSTEM
-        ),
-        TweakDef(
-            id = "wm_size",
-            title = "Resolution Overrider",
-            description = "Downscale resolution to improve FPS (e.g. 720p).",
-            type = TweakType.INPUT,
-            category = CAT_SYSTEM,
-            warning = "May shift some UI icons. Use 'Reset' if screen looks weird."
         ),
         TweakDef(
             id = "wm_density",

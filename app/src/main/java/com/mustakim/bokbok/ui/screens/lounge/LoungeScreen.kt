@@ -42,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +55,7 @@ import com.mustakim.bokbok.state.JoinMode
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.components.FriendsStatusSection
 import com.mustakim.bokbok.ui.components.LoungeSkeletonLoader
-import com.mustakim.bokbok.ui.components.PublicRoomsSection
+import com.mustakim.bokbok.ui.components.publicRoomsItems
 import com.mustakim.bokbok.ui.components.RoundedParallaxCarousel
 import com.mustakim.bokbok.ui.components.VoiceRoomCard
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
@@ -284,7 +285,7 @@ private fun LoungeContent(
                 publicRooms = uiState.publicRooms,
                 onJoinCallOnly = onJoinCallOnly,
                 onJoinPermanently = onJoinPermanently,
-                animationDelay = 0
+                animationDelay = 0 // Immediate for first section
             )
 
             myRoomsSection(
@@ -294,18 +295,17 @@ private fun LoungeContent(
                 onDeleteRoom = onDeleteRoom,
                 onLeaveRoom = onLeaveRoom,
                 onCreateRoom = onCreateRoom,
-                animationDelay = 100
+                animationDelay = 50 // Reduced from 100
             )
 
-            publicRoomsSection(
-                rooms = uiState.publicRooms,
+            publicRoomsItems(
+                rooms = uiState.publicRooms.take(20), // LIMIT count for better performance
                 totalRooms = uiState.totalActiveRooms,
                 totalParticipants = uiState.totalOnlineUsers,
                 isRefreshing = uiState.isRefreshingPublicRooms,
                 onRefresh = onRefreshPublicRooms,
                 onJoinCallOnly = onJoinCallOnly,
-                onJoinPermanently = onJoinPermanently,
-                animationDelay = 300
+                onJoinPermanently = onJoinPermanently
             )
         }
 
@@ -344,73 +344,71 @@ private fun LazyListScope.friendsSection(
     if (friends.isEmpty()) return
 
     item(key = "friends_section", contentType = "friends") {
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(animationSpec = tween(500, delayMillis = animationDelay)) + slideInHorizontally(
-                animationSpec = tween(500, delayMillis = animationDelay),
-                initialOffsetX = { it / 2 } // Slide from right
-            )
+        var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
+        var showJoinDialog by remember { mutableStateOf(false) }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
         ) {
-            var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
-            var showJoinDialog by remember { mutableStateOf(false) }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp)
-            ) {
-                FriendsStatusSection(
-                    friends = friends,
-                    onFriendClick = { friend ->
+            val currentOnJoinCallOnly by rememberUpdatedState(onJoinCallOnly)
+            
+            FriendsStatusSection(
+                friends = friends,
+                onFriendClick = remember(myRooms, publicRooms) {
+                    { friend ->
                         // Tap: join their current room as call-only
-                        val roomId = friend.currentRoomId ?: return@FriendsStatusSection
+                        val roomId = friend.currentRoomId ?: return@remember
 
                         val room = myRooms.firstOrNull { it.id == roomId }
                             ?: publicRooms.firstOrNull { it.id == roomId }
-                            ?: return@FriendsStatusSection
+                            ?: return@remember
 
-                        onJoinCallOnly(room)
-                    },
-                    onFriendLongClick = { friend ->
+                        currentOnJoinCallOnly(room)
+                    }
+                },
+                onFriendLongClick = remember(myRooms, publicRooms) {
+                    { friend ->
                         // Long press: show dialog with same options as PublicRoomsSection
-                        val roomId = friend.currentRoomId ?: return@FriendsStatusSection
+                        val roomId = friend.currentRoomId ?: return@remember
 
                         val room = myRooms.firstOrNull { it.id == roomId }
                             ?: publicRooms.firstOrNull { it.id == roomId }
-                            ?: return@FriendsStatusSection
+                            ?: return@remember
 
                         selectedRoom = room
                         showJoinDialog = true
                     }
-                )
-
-                if (showJoinDialog && selectedRoom != null) {
-                    AlertDialog(
-                        onDismissRequest = { showJoinDialog = false },
-                        title = { Text("Join room") },
-                        text = { Text("How do you want to join this room?") },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    selectedRoom?.let { onJoinPermanently(it) }
-                                    showJoinDialog = false
-                                }
-                            ) {
-                                Text("Join permanently")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = {
-                                    selectedRoom?.let { onJoinCallOnly(it) }
-                                    showJoinDialog = false
-                                }
-                            ) {
-                                Text("Join call only")
-                            }
-                        }
-                    )
                 }
+            )
+
+            if (showJoinDialog && selectedRoom != null) {
+                AlertDialog(
+                    onDismissRequest = { showJoinDialog = false },
+                    title = { Text("Join room") },
+                    text = { Text("How do you want to join this room?") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                selectedRoom?.let { onJoinPermanently(it) }
+                                showJoinDialog = false
+                            }
+                        ) {
+                            Text("Join permanently")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                selectedRoom?.let { onJoinCallOnly(it) }
+                                showJoinDialog = false
+                            }
+                        ) {
+                            Text("Join call only")
+                        }
+                    }
+                )
             }
         }
     }
@@ -426,163 +424,116 @@ private fun LazyListScope.myRoomsSection(
     animationDelay: Int = 0
 ) {
     item(key = "my_rooms_header", contentType = "header") {
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(animationSpec = tween(500, delayMillis = animationDelay)) + slideInHorizontally(
-                animationSpec = tween(500, delayMillis = animationDelay),
-                initialOffsetX = { it / 2 } // Slide from right
-            )
+        Column(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
-            ) {
-                Text(
-                    text = "My Rooms",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = if (rooms.isEmpty()) "Create your first room" else "${rooms.size} active rooms",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Text(
+                text = "My Rooms",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (rooms.isEmpty()) "Create your first room" else "${rooms.size} active rooms",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 
     item(key = "my_rooms_carousel", contentType = "carousel") {
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(animationSpec = tween(500, delayMillis = animationDelay + 50)) + slideInHorizontally(
-                animationSpec = tween(500, delayMillis = animationDelay + 50),
-                initialOffsetX = { it / 2 } // Slide from right
-            )
-        ) {
-            var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
-            var showDeleteDialog by remember { mutableStateOf(false) }
-            var showLeaveDialog by remember { mutableStateOf(false) }
+        var selectedRoom by remember { mutableStateOf<VoiceRoom?>(null) }
+        var showDeleteDialog by remember { mutableStateOf(false) }
+        var showLeaveDialog by remember { mutableStateOf(false) }
 
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp)
+        ) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 32.dp)
+                    .height(420.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(420.dp)
-                ) {
-                    if (rooms.isEmpty()) {
-                        EmptyRoomsCard(onCreateRoom = onCreateRoom)
-                    } else {
-                        RoundedParallaxCarousel(
-                            items = rooms,
-                            modifier = Modifier.fillMaxSize()
-                        ) { room, _ ->
-                            VoiceRoomCard(
-                                room = room,
-                                onClick = { onRoomClick(room) },
-                                onLongClick = {
-                                    selectedRoom = room
-                                    if (currentUserId != null && room.hostId == currentUserId) {
-                                        showDeleteDialog = true
-                                    } else {
-                                        showLeaveDialog = true
-                                    }
+                if (rooms.isEmpty()) {
+                    EmptyRoomsCard(onCreateRoom = onCreateRoom)
+                } else {
+                    RoundedParallaxCarousel(
+                        items = rooms,
+                        modifier = Modifier.fillMaxSize()
+                    ) { room, _ ->
+                        VoiceRoomCard(
+                            room = room,
+                            onClick = { onRoomClick(room) },
+                            onLongClick = {
+                                selectedRoom = room
+                                if (currentUserId != null && room.hostId == currentUserId) {
+                                    showDeleteDialog = true
+                                } else {
+                                    showLeaveDialog = true
                                 }
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
-
-            if (showDeleteDialog && selectedRoom != null) {
-                AlertDialog(
-                    onDismissRequest = { showDeleteDialog = false },
-                    title = { Text("Delete room") },
-                    text = { Text("Are you sure you want to delete this room for everyone?") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                selectedRoom?.let { onDeleteRoom(it) }
-                                showDeleteDialog = false
-                            }
-                        ) {
-                            Text("Delete")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showDeleteDialog = false }
-                        ) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
-
-            if (showLeaveDialog && selectedRoom != null) {
-                AlertDialog(
-                    onDismissRequest = { showLeaveDialog = false },
-                    title = { Text("Leave room") },
-                    text = { Text("Leave this room and remove it from your My Rooms list?") },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                selectedRoom?.let { onLeaveRoom(it) }
-                                showLeaveDialog = false
-                            }
-                        ) {
-                            Text("Leave")
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = { showLeaveDialog = false }
-                        ) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
         }
-    }
-}
 
-private fun LazyListScope.publicRoomsSection(
-    rooms: List<VoiceRoom>,
-    totalRooms: Int,
-    totalParticipants: Int,
-    isRefreshing: Boolean,
-    onRefresh: () -> Unit,
-    onJoinCallOnly: (VoiceRoom) -> Unit,
-    onJoinPermanently: (VoiceRoom) -> Unit,
-    animationDelay: Int = 0
-) {
-    if (rooms.isEmpty()) return
-
-    item(key = "public_rooms_section", contentType = "public_rooms") {
-        AnimatedVisibility(
-            visible = true,
-            enter = fadeIn(animationSpec = tween(500, delayMillis = animationDelay)) + slideInVertically(
-                animationSpec = tween(500, delayMillis = animationDelay),
-                initialOffsetY = { it / 2 } // Slide from bottom
+        if (showDeleteDialog && selectedRoom != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("Delete room") },
+                text = { Text("Are you sure you want to delete this room for everyone?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            selectedRoom?.let { onDeleteRoom(it) }
+                            showDeleteDialog = false
+                        }
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showDeleteDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
             )
-        ) {
-            PublicRoomsSection(
-                rooms = rooms.take(10),
-                totalRooms = totalRooms,
-                totalParticipants = totalParticipants,
-                isRefreshing = isRefreshing,
-                onRefresh = onRefresh,
-                onJoinCallOnly = onJoinCallOnly,
-                onJoinPermanently = onJoinPermanently
+        }
+
+        if (showLeaveDialog && selectedRoom != null) {
+            AlertDialog(
+                onDismissRequest = { showLeaveDialog = false },
+                title = { Text("Leave room") },
+                text = { Text("Leave this room and remove it from your My Rooms list?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            selectedRoom?.let { onLeaveRoom(it) }
+                            showLeaveDialog = false
+                        }
+                    ) {
+                        Text("Leave")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showLeaveDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
             )
         }
     }
 }
+
+// DELETED publicRoomsSection wrapper as we are using publicRoomsItems directly
 
 @Composable
 private fun EmptyRoomsCard(onCreateRoom: () -> Unit) {

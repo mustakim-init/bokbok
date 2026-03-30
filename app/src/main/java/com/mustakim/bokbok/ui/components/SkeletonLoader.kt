@@ -44,9 +44,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 
-fun Modifier.shimmerEffect(): Modifier = composed {
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
+
+// CompositionLocal to provide a shared shimmer offset
+val LocalShimmerOffset = compositionLocalOf { 0f }
+val LocalShimmerSize = compositionLocalOf { IntSize.Zero }
+
+@Composable
+fun ShimmerHost(
+    content: @Composable () -> Unit
+) {
     var size by remember { mutableStateOf(IntSize.Zero) }
-    val transition = rememberInfiniteTransition(label = "Shimmer")
+    val transition = rememberInfiniteTransition(label = "SharedShimmer")
+    
     val startOffsetX by transition.animateFloat(
         initialValue = -2 * size.width.toFloat(),
         targetValue = 2 * size.width.toFloat(),
@@ -57,10 +68,26 @@ fun Modifier.shimmerEffect(): Modifier = composed {
             ),
             repeatMode = RepeatMode.Restart
         ),
-        label = "ShimmerOffset"
+        label = "SharedShimmerOffset"
     )
+
+    CompositionLocalProvider(
+        LocalShimmerOffset provides startOffsetX,
+        LocalShimmerSize provides size
+    ) {
+        Box(
+            modifier = Modifier
+                .onGloballyPositioned { size = it.size }
+        ) {
+            content()
+        }
+    }
+}
+
+fun Modifier.shimmerEffect(): Modifier = composed {
+    val startOffsetX = LocalShimmerOffset.current
+    val size = LocalShimmerSize.current
     
-    // Use theme-aware colors for better visibility
     val shimmerColorScheme = MaterialTheme.colorScheme
     val baseColor = shimmerColorScheme.surfaceVariant.copy(alpha = 0.4f)
     val highlightColor = shimmerColorScheme.surface.copy(alpha = 0.7f)
@@ -76,121 +103,120 @@ fun Modifier.shimmerEffect(): Modifier = composed {
             end = Offset(startOffsetX + size.width.toFloat(), size.height.toFloat())
         )
     )
-        .onGloballyPositioned {
-            size = it.size
-        }
 }
 
 @Composable
 fun LoungeSkeletonLoader(
     paddingValues: PaddingValues
 ) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(paddingValues),
-        contentPadding = PaddingValues(bottom = 100.dp)
-    ) {
-        // Top Spacer
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        
-        // Friends Section
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp)
-            ) {
-                Text(
-                    text = "Friends",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-                )
-                Row(
+    ShimmerHost {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(bottom = 100.dp)
+        ) {
+            // Top Spacer
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+            
+            // Friends Section
+            item {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(bottom = 24.dp)
                 ) {
-                    repeat(5) {
-                        SkeletonFriendCard()
+                    Text(
+                        text = "Friends",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        repeat(5) {
+                            SkeletonFriendCard()
+                        }
                     }
                 }
             }
-        }
 
-        // My Rooms Section
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "My Rooms",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .height(420.dp)
-                        .padding(bottom = 32.dp)
-                ) {
-                    SkeletonVoiceRoomCard()
-                }
-            }
-        }
-
-        // Public Rooms Section
-        item {
-            Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // My Rooms Section
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Public Rooms",
+                        text = "My Rooms",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp)
                     )
                     Box(
                         modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .shimmerEffect()
-                    )
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp)
+                            .height(420.dp)
+                            .padding(bottom = 32.dp)
+                    ) {
+                        SkeletonVoiceRoomCard()
+                    }
                 }
+            }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            // Public Rooms Section
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    SkeletonStatCard(modifier = Modifier.weight(1f))
-                    SkeletonStatCard(modifier = Modifier.weight(1f))
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Public Rooms",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .shimmerEffect()
+                        )
+                    }
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(400.dp)
-                ) {
-                    items(4) {
-                        SkeletonCompactRoomCard()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SkeletonStatCard(modifier = Modifier.weight(1f))
+                        SkeletonStatCard(modifier = Modifier.weight(1f))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(400.dp)
+                    ) {
+                        items(4) {
+                            SkeletonCompactRoomCard()
+                        }
                     }
                 }
             }

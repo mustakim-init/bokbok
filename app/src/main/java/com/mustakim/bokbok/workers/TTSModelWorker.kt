@@ -32,9 +32,11 @@ class TTSModelWorker @AssistedInject constructor(
             val tempFile = File(destDir, "model_temp.$extension")
             
             android.util.Log.d("TTSModelWorker", "Downloading $modelUrl...")
-            downloadFile(modelUrl, tempFile)
+            downloadFileResumable(modelUrl, tempFile)
             
+            setProgress(androidx.work.workDataOf("STATUS" to "EXTRACTING", "PROGRESS" to 100f))
             android.util.Log.d("TTSModelWorker", "Extracting $tempFile...")
+            
             if (extension == "tar.bz2") {
                 extractTarBz2(tempFile, destDir)
             } else {
@@ -43,7 +45,7 @@ class TTSModelWorker @AssistedInject constructor(
             
             tempFile.delete()
             
-            // Update PreferencesManager (HiltWorker can't easily inject, we use manual instance for now or EntryPoint)
+            // Update Preferences
             val preferencesManager = PreferencesManager(applicationContext)
             preferencesManager.addDownloadedLanguage(langCode)
             
@@ -51,14 +53,60 @@ class TTSModelWorker @AssistedInject constructor(
             Result.success()
         } catch (e: Exception) {
             android.util.Log.e("TTSModelWorker", "Download/Extraction failed", e)
-            Result.failure()
+            Result.retry()
         }
     }
 
-    private fun downloadFile(url: String, dest: File) {
-        URL(url).openStream().use { input ->
-            FileOutputStream(dest).use { output ->
-                input.copyTo(output)
+    private val client = okhttp3.OkHttpClient()
+
+    private suspend fun downloadFileResumable(url: String, dest: File) {
+        var downloadedBytes = 0L
+        if (dest.exists()) {
+            downloadedBytes = dest.length()
+        }
+
+        val requestBuilder = okhttp3.Request.Builder().url(url)
+        if (downloadedBytes > 0) {
+            requestBuilder.header("Range", "bytes=$downloadedBytes-")
+        }
+
+        val response = client.newCall(requestBuilder.build()).execute()
+        if (!response.isSuccessful) {
+             if (response.code == 416) {
+                // Range not satisfiable, restart
+                dest.delete()
+                downloadFileResumable(url, dest)
+                return
+            }
+            throw Exception("Download failed with code ${response.code}")
+        }
+
+        val body = response.body ?: throw Exception("Response body is null")
+        val contentLength = body.contentLength() + downloadedBytes
+        
+        body.byteStream().use { input ->
+            FileOutputStream(dest, downloadedBytes > 0).use { output ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                var bytesSinceUpdate = 0L
+
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    output.write(buffer, 0, bytesRead)
+                    downloadedBytes += bytesRead
+                    bytesSinceUpdate += bytesRead
+
+                    if (bytesSinceUpdate > 1024 * 100) { // Update every 100KB
+                        val progress = if (contentLength > 0) downloadedBytes.toFloat() / contentLength else 0f
+                        setProgress(
+                            androidx.work.workDataOf(
+                                "PROGRESS" to progress * 100f,
+                                "STATUS" to "DOWNLOADING"
+                            )
+                        )
+                        bytesSinceUpdate = 0
+                    }
+                }
+                output.flush()
             }
         }
     }

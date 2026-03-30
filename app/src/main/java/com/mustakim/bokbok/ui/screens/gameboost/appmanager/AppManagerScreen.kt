@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -19,19 +18,21 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -43,36 +44,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.mustakim.bokbok.ui.screens.gameboost.appmanager.components.AppFilterBottomSheet
+import com.mustakim.bokbok.ui.screens.gameboost.appmanager.components.AppSortBottomSheet
 import com.mustakim.bokbok.viewmodel.AppFilterType
 import com.mustakim.bokbok.viewmodel.AppManagerViewModel
-import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppManagerScreen(
+    navController: androidx.navigation.NavController,
     viewModel: AppManagerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val filterType by viewModel.filterType.collectAsState()
-    val selectedApp by viewModel.selectedApp.collectAsState()
-
-    var showFilters by remember { mutableStateOf(false) }
+    val isFilterSheetVisible by viewModel.isFilterSheetVisible.collectAsState()
+    val isSortSheetVisible by viewModel.isSortSheetVisible.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
+    
     var isSearchActive by remember { mutableStateOf(searchQuery.isNotEmpty()) }
     val listState = rememberLazyListState()
     
-    // Show App Details Screen if an app is selected
-    selectedApp?.let { app ->
-        AppDetailsScreen(
-            app = app,
-            repository = viewModel.getRepository(),
-            onBack = { viewModel.clearSelectedApp() },
-            onAppUninstalled = {
-                viewModel.clearSelectedApp()
-                viewModel.onRefresh()
-            }
+    // Bottom Sheets
+    if (isFilterSheetVisible) {
+        AppFilterBottomSheet(
+            selectedFilter = filterType,
+            onFilterSelected = { 
+                viewModel.onFilterChanged(it)
+                viewModel.hideFilterSheet()
+            },
+            onDismiss = { viewModel.hideFilterSheet() },
+            bloatwareCount = uiState.bloatwareCount,
+            safeToRemoveCount = uiState.safeToRemoveCount
         )
-        return@AppManagerScreen
+    }
+
+    if (isSortSheetVisible) {
+        AppSortBottomSheet(
+            selectedOrder = sortOrder,
+            onOrderSelected = {
+                viewModel.onSortOrderChanged(it)
+                viewModel.hideSortSheet()
+            },
+            onDismiss = { viewModel.hideSortSheet() }
+        )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -141,10 +157,16 @@ fun AppManagerScreen(
                             },
                             trailingIcon = {
                                 Row {
-                                    IconButton(onClick = { showFilters = !showFilters }) {
+                                    IconButton(onClick = { viewModel.showFilterSheet() }) {
                                         Icon(
-                                            imageVector = if (showFilters) Icons.Default.FilterList else Icons.AutoMirrored.Filled.Sort,
+                                            imageVector = Icons.Outlined.FilterAlt,
                                             contentDescription = "Filter"
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.showSortSheet() }) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Sort,
+                                            contentDescription = "Sort"
                                         )
                                     }
                                 }
@@ -174,78 +196,23 @@ fun AppManagerScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             
-                            Row {
-                                IconButton(onClick = { isSearchActive = true }) {
-                                    Icon(Icons.Default.Search, contentDescription = "Search")
+                                Row {
+                                    IconButton(onClick = { isSearchActive = true }) {
+                                        Icon(Icons.Default.Search, contentDescription = "Search")
+                                    }
+                                    IconButton(onClick = { viewModel.showFilterSheet() }) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.FilterAlt,
+                                            contentDescription = "Filter"
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.showSortSheet() }) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Sort,
+                                            contentDescription = "Sort"
+                                        )
+                                    }
                                 }
-                                IconButton(onClick = { showFilters = !showFilters }) {
-                                    Icon(
-                                        imageVector = if (showFilters) Icons.Default.FilterList else Icons.AutoMirrored.Filled.Sort,
-                                        contentDescription = "Filter"
-                                    )
-                                }
-                                IconButton(onClick = { viewModel.onRefresh() }) {
-                                    Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                if (showFilters) {
-                    androidx.compose.foundation.lazy.LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp)
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.ALL,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.ALL) },
-                                label = { Text("All") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.USER,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.USER) },
-                                label = { Text("User") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.SYSTEM,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.SYSTEM) },
-                                label = { Text("System") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.BLOATWARE,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.BLOATWARE) },
-                                label = { Text("Bloatware (${uiState.bloatwareCount})") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.SAFE_TO_REMOVE,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.SAFE_TO_REMOVE) },
-                                label = { Text("Safe Remove (${uiState.safeToRemoveCount})") }
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = filterType == AppFilterType.UNINSTALLED,
-                                onClick = { viewModel.onFilterChanged(AppFilterType.UNINSTALLED) },
-                                label = { Text("Recycle Bin") },
-                                colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer
-                                ),
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                            )
                         }
                     }
                 }
@@ -268,22 +235,29 @@ fun AppManagerScreen(
                     )
                 }
             } else {
-                LazyColumn(
-                    state = listState,
-                    contentPadding = PaddingValues(bottom = 80.dp)
+                PullToRefreshBox(
+                    isRefreshing = uiState.isLoading,
+                    onRefresh = { viewModel.onRefresh() },
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    items(
-                        items = uiState.apps,
-                        key = { it.packageName }
-                    ) { app ->
-                        AppListItem(
-                            app = app,
-                            onClick = { 
-                                if (uiState.selectedCount > 0) viewModel.onAppLongClicked(app)
-                                else viewModel.onAppClicked(app)
-                            },
-                            onLongClick = { viewModel.onAppLongClicked(app) }
-                        )
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 80.dp)
+                    ) {
+                        items(
+                            items = uiState.apps,
+                            key = { it.packageName }
+                        ) { app ->
+                            AppListItem(
+                                app = app,
+                                onClick = { 
+                                    if (uiState.selectedCount > 0) viewModel.onAppLongClicked(app)
+                                    else navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.AppDetails.createRoute(app.packageName))
+                                },
+                                onLongClick = { viewModel.onAppLongClicked(app) }
+                            )
+                        }
                     }
                 }
             }

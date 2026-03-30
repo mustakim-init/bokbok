@@ -103,26 +103,25 @@ class PresenceRepository @Inject constructor(
         }
     }
 
+    private val reconnectionListeners = mutableMapOf<String, ValueEventListener>()
+
     private fun startReconnectionMonitor(roomId: String) {
+        // Stop existing monitor for this room if any
+        stopReconnectionMonitor(roomId)
+
         val connectedRef = db.getReference(".info/connected")
-        connectedRef.addValueEventListener(object : ValueEventListener {
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val connected = snapshot.getValue(Boolean::class.java) ?: false
                 if (connected) {
-                    // We just reconnected!
-                    // Check if we are still listed in the room. If not, re-join.
                     val userId = uid()
                     val roomRef = presenceRoot.child(roomId)
 
                     roomRef.child(userId).addListenerForSingleValueEvent(object : ValueEventListener {
                         override fun onDataChange(snap: DataSnapshot) {
                             if (!snap.exists()) {
-                                // We were removed (likely due to onDisconnect firing during a flicker).
-                                // Re-assert our presence!
                                 android.util.Log.d("PresenceRepo", "Reconnected and re-asserting presence in $roomId")
                                 roomRef.child(userId).setValue(true)
-
-                                // Re-arm the onDisconnect handler
                                 setupPresenceAfterJoin(roomId)
                             }
                         }
@@ -131,7 +130,16 @@ class PresenceRepository @Inject constructor(
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
-        })
+        }
+        connectedRef.addValueEventListener(listener)
+        reconnectionListeners[roomId] = listener
+    }
+
+    private fun stopReconnectionMonitor(roomId: String) {
+        reconnectionListeners[roomId]?.let {
+            db.getReference(".info/connected").removeEventListener(it)
+            reconnectionListeners.remove(roomId)
+        }
     }
 
     // Atomic join using Transaction
@@ -187,6 +195,9 @@ class PresenceRepository @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun leaveCall(roomId: String) = suspendCancellableCoroutine<Unit> { cont ->
+        // Stop reconnection monitoring
+        stopReconnectionMonitor(roomId)
+
         // Per-room presence
         val ref = presenceRoot.child(roomId).child(uid())
 
@@ -249,6 +260,19 @@ class PresenceRepository @Inject constructor(
             ref.addListenerForSingleValueEvent(listener)
             cont.invokeOnCancellation { ref.removeEventListener(listener) }
         }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun getAllRoomOnlineCounts(): Map<String, Int> = suspendCancellableCoroutine { cont ->
+        presenceRoot.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val counts = snapshot.children.associate { it.key!! to it.childrenCount.toInt() }
+                if (cont.isActive) cont.resume(counts) {}
+            }
+            override fun onCancelled(error: DatabaseError) {
+                if (cont.isActive) cont.resume(emptyMap()) {}
+            }
+        })
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun kickUser(roomId: String, userId: String): Result<Unit> = suspendCancellableCoroutine { cont ->

@@ -44,8 +44,12 @@ class ModelDownloader @Inject constructor(
         return destDir.exists() && destDir.listFiles()?.isNotEmpty() == true
     }
 
-    fun getDownloadStatus(langCode: String): Flow<WorkInfo.State?> {
+    fun getDownloadStatus(langCode: String): Flow<WorkInfo?> {
         return workManager.getWorkInfosForUniqueWorkFlow("TTS_MODEL_DOWNLOAD_$langCode")
-            .map { it.firstOrNull()?.state }
+            .map { it.firstOrNull() }
+    }
+
+    fun cancelDownload(langCode: String) {
+        workManager.cancelUniqueWork("TTS_MODEL_DOWNLOAD_$langCode")
     }
 }

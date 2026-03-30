@@ -14,9 +14,8 @@ import com.google.firebase.firestore.snapshots
 import com.mustakim.bokbok.data.repository.AuthRepository
 import com.mustakim.bokbok.data.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -191,15 +190,20 @@ class FriendsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<FriendsUiState>(FriendsUiState.Idle)
     val uiState: StateFlow<FriendsUiState> = _uiState.asStateFlow()
 
+    private val _searchJob = MutableStateFlow<Job?>(null)
+
     fun searchUsers(query: String) {
         _searchQuery.value = query
 
         if (query.length < 2) {
             _searchResults.value = emptyList()
+            _searchJob.value?.cancel()
             return
         }
 
-        viewModelScope.launch {
+        _searchJob.value?.cancel()
+        _searchJob.value = viewModelScope.launch {
+            delay(300) // Debounce
             _isSearching.value = true
 
             friendsRepository.searchUsersByUsername(query)

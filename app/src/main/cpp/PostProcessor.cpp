@@ -309,6 +309,10 @@ bool PostProcessor::process(const Config& config) {
     if (intExportOut.is_open()) intExportOut.close();
     LOGI("Processing complete. %zu samples.", processedSamples);
 
+    // Explicitly release memory-heavy resources before expensive muxing
+    deepFilter_.reset();
+    aec3_.reset();
+
     if (shouldCancel_.load()) return false;
 
     // --- STAGE 8: Separate Track Muxing (M4A) ---

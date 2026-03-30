@@ -3,21 +3,16 @@ package com.mustakim.bokbok.ui.screens.gameboost.games
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.navigation.NavController
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 
 @Composable
 fun GameBoostTabScreen(
+    navController: NavController,
     viewModel: GameSpaceViewModel
 ) {
-    val selectedGame by viewModel.selectedGame.collectAsState()
-
-    selectedGame?.let { game ->
-        GameDetailScreen(
-            game = game,
-            viewModel = viewModel,
-            onBack = { viewModel.clearSelectedGame() }
-        )
-    } ?: run {
-        GameListScreen(viewModel = viewModel)
-    }
+    GameListScreen(
+        navController = navController,
+        viewModel = viewModel
+    )
 }

@@ -5,6 +5,7 @@ import com.mustakim.bokbok.data.local.BokBokDatabase
 import com.mustakim.bokbok.data.local.dao.GameDao
 import com.mustakim.bokbok.data.local.dao.AppDao
 import com.mustakim.bokbok.data.local.dao.UsageStatsDao
+import com.mustakim.bokbok.data.local.dao.SystemConfigDao
 import com.mustakim.bokbok.data.repository.AppManagerRepository
 import com.mustakim.bokbok.data.repository.UsageStatsRepository
 import com.mustakim.bokbok.data.repository.GameRepository
@@ -53,9 +54,18 @@ object DataModule {
     }
 
     @Provides
+    fun provideSystemConfigDao(database: BokBokDatabase): SystemConfigDao {
+        return database.systemConfigDao()
+    }
+
+    @Provides
     @Singleton
-    fun provideAppManagerRepository(@ApplicationContext context: Context, appDao: AppDao): AppManagerRepository {
-        return AppManagerRepository(context, appDao)
+    fun provideAppManagerRepository(
+        @ApplicationContext context: Context, 
+        appDao: AppDao,
+        configDao: SystemConfigDao
+    ): AppManagerRepository {
+        return AppManagerRepository(context, appDao, configDao)
     }
 
     @Provides
@@ -165,5 +175,12 @@ object DataModule {
         imgBBApi: com.mustakim.bokbok.data.api.ImgBBApi
     ): com.mustakim.bokbok.data.repository.RoomRepository {
         return com.mustakim.bokbok.data.repository.RoomRepository(auth, firestore, imgBBApi)
+    }
+
+    @Provides
+    @Singleton
+    fun provideAdbKeyStore(@ApplicationContext context: Context): com.mustakim.bokbok.data.adb.AdbKeyStore {
+        val prefs = context.getSharedPreferences("adb_keys", Context.MODE_PRIVATE)
+        return com.mustakim.bokbok.data.adb.SharedPreferencesAdbKeyStore(prefs)
     }
 }

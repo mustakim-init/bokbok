@@ -42,11 +42,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import com.mustakim.bokbok.data.model.*
+import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameListScreen(
+    navController: NavController,
     viewModel: GameSpaceViewModel
 ) {
     val games by viewModel.filteredGames.collectAsState()
@@ -183,10 +187,16 @@ fun GameListScreen(
                             game = game,
                             isSelected = selectedGames.contains(game.packageName),
                             isSelectionMode = isSelectionMode,
-                            onClick = { viewModel.selectGame(game) },
-                            onLongClick = { viewModel.enterSelectionMode(game.packageName) },
-                            onLaunchClick = { viewModel.launchGame(game) }
-                        )
+                             onClick = { 
+                                 if (isSelectionMode) {
+                                     viewModel.toggleGameSelection(game.packageName)
+                                 } else {
+                                     navController.navigate(NavRoutes.GameDetail.createRoute(game.packageName))
+                                 }
+                             },
+                             onLongClick = { viewModel.enterSelectionMode(game.packageName) },
+                             onLaunchClick = { viewModel.launchGame(game) }
+                         )
                     }
                 }
             }

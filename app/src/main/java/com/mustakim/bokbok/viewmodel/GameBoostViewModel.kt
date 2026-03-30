@@ -11,6 +11,7 @@ import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
 enum class GameBoostTab(val title: String) {
+    DASHBOARD("Optimizer"),
     GAME_BOOST("Game Boost"),
     APP_MANAGER("App Manager"),
     DEVICE_MONITOR("Device Monitor"),
@@ -19,7 +20,7 @@ enum class GameBoostTab(val title: String) {
     SECURITY("Security");
     
     companion object {
-        fun getByIndex(index: Int): GameBoostTab = entries.getOrElse(index) { GAME_BOOST }
+        fun getByIndex(index: Int): GameBoostTab = entries.getOrElse(index) { DASHBOARD }
     }
 }
 
@@ -28,12 +29,12 @@ enum class GameBoostTab(val title: String) {
 @HiltViewModel
 class GameBoostViewModel @Inject constructor() : ViewModel() {
 
-    private val _selectedTab = MutableStateFlow(GameBoostTab.GAME_BOOST)
+    private val _selectedTab = MutableStateFlow(GameBoostTab.DASHBOARD)
     val selectedTab: StateFlow<GameBoostTab> = _selectedTab.asStateFlow()
 
     val tabs = GameBoostTab.entries
 
-    private val _shizukuActive = MutableStateFlow(true)
+    private val _shizukuActive = MutableStateFlow(false)
     val shizukuActive: StateFlow<Boolean> = _shizukuActive.asStateFlow()
 
     private val _showShizukuWarning = MutableStateFlow(false)
@@ -45,10 +46,6 @@ class GameBoostViewModel @Inject constructor() : ViewModel() {
 
     init {
         verifyShizukuStatus()
-        // If Shizuku is NOT active and we haven't shown the warning this session, show it.
-        if (!_shizukuActive.value && !hasShownSessionWarning) {
-            _showShizukuWarning.value = true
-        }
     }
 
     fun dismissShizukuWarning() {
@@ -74,6 +71,11 @@ class GameBoostViewModel @Inject constructor() : ViewModel() {
                 false
             }
             _shizukuActive.value = isActive
+            
+            // Automatically show warning if not active and haven't shown it yet in this session
+            if (!isActive && !hasShownSessionWarning) {
+                _showShizukuWarning.value = true
+            }
         }
     }
 }

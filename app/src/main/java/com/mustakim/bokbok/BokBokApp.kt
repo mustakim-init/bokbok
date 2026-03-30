@@ -23,6 +23,11 @@ class BokBokApp : Application(), Configuration.Provider, coil.ImageLoaderFactory
             
     override fun newImageLoader(): coil.ImageLoader {
         return coil.ImageLoader.Builder(this)
+            .memoryCache {
+                coil.memory.MemoryCache.Builder(this@BokBokApp)
+                    .maxSizePercent(0.15) // Limit to 15% of available RAM
+                    .build()
+            }
             .components {
                 add(com.mustakim.bokbok.utils.AppIconKeyer())
                 add(com.mustakim.bokbok.utils.AppIconFetcher.Factory(this@BokBokApp))
@@ -34,9 +39,17 @@ class BokBokApp : Application(), Configuration.Provider, coil.ImageLoaderFactory
     override fun onCreate() {
         super.onCreate()
 
+        // Bypass hidden API restrictions for Conscrypt (required by libadb-android for ADB pairing)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions(
+                "Lcom/android/org/conscrypt/",
+                "Lcom/google/android/gms/org/conscrypt/"
+            )
+        }
+
         // Enable Firestore offline persistence (New API)
         val cacheSettings = com.google.firebase.firestore.PersistentCacheSettings.newBuilder()
-            .setSizeBytes(com.google.firebase.firestore.FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+            .setSizeBytes(100 * 1024 * 1024) // 100MB limit
             .build()
 
         val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
@@ -45,10 +58,10 @@ class BokBokApp : Application(), Configuration.Provider, coil.ImageLoaderFactory
 
         com.google.firebase.firestore.FirebaseFirestore.getInstance().firestoreSettings = settings
         
-        // Schedule scans (non-blocking)
-        scheduleBloatwareSync()
-        triggerAppScan()
-        triggerUsageScan()
+        // Workers and Services are now triggered lazily on-demand to optimize startup performance
+        
+        // Start background watchdog for game detection and Shizuku health
+        com.mustakim.bokbok.data.service.GameWatchdogService.start(this)
     }
 
     private fun triggerAppScan() {
@@ -102,5 +115,13 @@ class BokBokApp : Application(), Configuration.Provider, coil.ImageLoaderFactory
             ExistingWorkPolicy.KEEP, // Don't restart if already running
             syncRequest
         )
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Clear Coil memory cache on pressure or when backgrounded
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            coil.Coil.imageLoader(this).memoryCache?.clear()
+        }
     }
 }

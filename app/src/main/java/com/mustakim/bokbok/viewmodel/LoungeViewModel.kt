@@ -32,6 +32,9 @@ data class LoungeUiState(
     val friends: List<FriendStatus> = emptyList(),
     val myRooms: List<VoiceRoom> = emptyList(),
     val publicRooms: List<VoiceRoom> = emptyList(),
+    val lastDocument: com.google.firebase.firestore.DocumentSnapshot? = null,
+    val isLastPage: Boolean = false,
+    val isLoadingMore: Boolean = false,
     val totalActiveRooms: Int = 0,
     val totalOnlineUsers: Int = 0,
     val isLoading: Boolean = false,
@@ -101,74 +104,61 @@ class LoungeViewModel @Inject constructor(
 
 
     // Load public rooms from Firestore instead of dummy data
-    private fun loadPublicRoomsFromFirestore() {
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isLoading = true,
-                    isRefreshingPublicRooms = true,
-                    error = null
-                )
-            }
-            val result = roomRepository.getActiveRooms()
+    private suspend fun fetchPublicRooms(): Boolean {
+        return try {
+            val result = roomRepository.getActiveRoomsSnapshot(null)
             result.fold(
-                onSuccess = { rooms ->
-                    viewModelScope.launch {
-                        // 🎤 CHANGED: Use helper function
-                        val enriched = enrichWithOnlineCounts(rooms)
-                        val totalOnline = enriched.sumOf { it.currentOnline }
-                        _uiState.update {
-                            it.copy(
-                                publicRooms = enriched,
-                                totalActiveRooms = enriched.size,
-                                totalOnlineUsers = totalOnline,
-                                isLoading = false,
-                                isRefreshingPublicRooms = false
-                            )
-                        }
-                    }
-                },
-                onFailure = { e ->
+                onSuccess = { (rooms, lastDoc) ->
+                    val enriched = enrichWithOnlineCounts(rooms)
+                    val totalOnline = enriched.sumOf { it.currentOnline }
                     _uiState.update {
                         it.copy(
-                            isLoading = false,
-                            isRefreshingPublicRooms = false,
-                            error = "Failed to load rooms: ${e.message}"
+                            publicRooms = enriched,
+                            lastDocument = lastDoc,
+                            isLastPage = rooms.size < 20,
+                            totalActiveRooms = enriched.size,
+                            totalOnlineUsers = totalOnline,
+                            error = null
                         )
                     }
+                    true
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = "Failed to load public rooms: ${e.message}") }
+                    false
                 }
             )
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to load public rooms: ${e.message}") }
+            false
         }
     }
 
     /**
      * Load my rooms from Firestore.
      */
-    private fun loadMyRoomsFromFirestore() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+    private suspend fun fetchMyRooms(): Boolean {
+        return try {
             val result = roomRepository.getMyRooms()
             result.fold(
                 onSuccess = { rooms ->
-                    // 🎤 CHANGED: Fetch online counts
                     val enriched = enrichWithOnlineCounts(rooms)
-
                     _uiState.update {
                         it.copy(
                             myRooms = enriched,
-                            isLoading = false
+                            error = null
                         )
                     }
+                    true
                 },
                 onFailure = { e ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Failed to load my rooms: ${e.message}"
-                        )
-                    }
+                    _uiState.update { it.copy(error = "Failed to load my rooms: ${e.message}") }
+                    false
                 }
             )
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to load my rooms: ${e.message}") }
+            false
         }
     }
 
@@ -180,31 +170,57 @@ class LoungeViewModel @Inject constructor(
         }
     }
 
-
     // ✅ Pull-to-refresh function
     fun refreshAllData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true, error = null) }
-            try {
-                delay(1500)
-                loadMyRoomsFromFirestore()
-                loadPublicRoomsFromFirestore()
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isRefreshing = false,
-                        error = "Failed to refresh: ${e.message}"
-                    )
-                }
-                return@launch
+            _uiState.update { it.copy(isRefreshing = true, lastDocument = null, isLastPage = false, error = null) }
+            
+            kotlinx.coroutines.supervisorScope {
+                val pubDef = async { fetchPublicRooms() }
+                val myDef = async { fetchMyRooms() }
+                pubDef.await()
+                myDef.await()
             }
             _uiState.update { it.copy(isRefreshing = false) }
         }
     }
 
+    /**
+     * Load more public rooms for pagination.
+     */
+    fun loadMoreRooms() {
+        val state = _uiState.value
+        if (state.isLoadingMore || state.isLastPage || state.lastDocument == null) return
+
+        _uiState.update { it.copy(isLoadingMore = true) }
+        viewModelScope.launch {
+            val result = roomRepository.getActiveRoomsSnapshot(state.lastDocument)
+            result.fold(
+                onSuccess = { (newRooms, lastDoc) ->
+                    val enriched = enrichWithOnlineCounts(newRooms)
+                    _uiState.update {
+                        it.copy(
+                            publicRooms = it.publicRooms + enriched,
+                            lastDocument = lastDoc,
+                            isLastPage = newRooms.size < 20,
+                            isLoadingMore = false
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isLoadingMore = false, error = "Failed to load more rooms: ${e.message}") }
+                }
+            )
+        }
+    }
+
+
     fun refreshPublicRooms() {
-        // Just trigger Firestore reload; flags are handled inside
-        loadPublicRoomsFromFirestore()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshingPublicRooms = true) }
+            fetchPublicRooms()
+            _uiState.update { it.copy(isRefreshingPublicRooms = false) }
+        }
     }
 
     fun createRoom(
@@ -249,7 +265,7 @@ class LoungeViewModel @Inject constructor(
                                     )
                                 }
                                 if (room.isPublic) {
-                                    loadPublicRoomsFromFirestore()
+                                    fetchPublicRooms()
                                 }
                             },
                             onFailure = { e ->
@@ -350,9 +366,14 @@ class LoungeViewModel @Inject constructor(
         }
         
         viewModelScope.launch {
-            // Load rooms in parallel for faster startup
-            launch { loadPublicRoomsFromFirestore() }
-            launch { loadMyRoomsFromFirestore() }
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            kotlinx.coroutines.supervisorScope {
+                val pubDef = async { fetchPublicRooms() }
+                val myDef = async { fetchMyRooms() }
+                pubDef.await()
+                myDef.await()
+            }
+            _uiState.update { it.copy(isLoading = false) }
         }
     }
 

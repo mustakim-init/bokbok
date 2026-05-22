@@ -15,6 +15,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
 import coil.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -26,7 +29,20 @@ fun ReactionSummarySheet(
     onDismiss: () -> Unit,
     onRemoveReaction: () -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f),
+        tonalElevation = 6.dp,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            )
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -34,78 +50,97 @@ fun ReactionSummarySheet(
         ) {
             Text(
                 text = "Reactions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(16.dp)
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.padding(24.dp)
             )
 
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
             if (reactions.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(32.dp),
+                        .padding(48.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No reactions yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("No reactions yet", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                LazyColumn {
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                ) {
                     items(reactions.entries.toList()) { (userId, emoji) ->
                         val user = userMap[userId]
                         val isMe = userId == currentUserId
 
-                        Row(
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(enabled = isMe) {
-                                    if (isMe) {
-                                        onRemoveReaction()
-                                        onDismiss()
-                                    }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(modifier = Modifier.size(40.dp)) {
-                                if (user != null && user.profileImageUrl.isNotEmpty()) {
-                                    AsyncImage(
-                                        model = user.profileImageUrl,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = (user?.displayName?.take(1) ?: userId.take(1)).uppercase(),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                }
-                                
-                                // Emoji badge
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .offset(x = 4.dp, y = 4.dp)
-                                        .size(20.dp)
-                                        .background(MaterialTheme.colorScheme.surface, CircleShape)
-                                        .padding(2.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(text = emoji, fontSize = 10.sp)
+                                .padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            color = if (isMe) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f) else Color.Transparent,
+                            border = if (isMe) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)) else null,
+                            onClick = {
+                                if (isMe) {
+                                    onRemoveReaction()
+                                    onDismiss()
                                 }
                             }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                                        .padding(2.dp)
+                                ) {
+                                    if (user != null && user.profileImageUrl.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = user.profileImageUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(14.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = (user?.displayName?.take(1) ?: userId.take(1)).uppercase(),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                    }
+                                    
+                                    // Emoji badge
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .offset(x = 4.dp, y = 4.dp)
+                                            .size(22.dp)
+                                            .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), CircleShape)
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = emoji, fontSize = 12.sp)
+                                    }
+                                }
 
                             Spacer(modifier = Modifier.width(12.dp))
 
@@ -134,4 +169,5 @@ fun ReactionSummarySheet(
             }
         }
     }
+}
 }

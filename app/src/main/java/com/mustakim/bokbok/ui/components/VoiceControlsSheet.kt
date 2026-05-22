@@ -54,12 +54,25 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+
+private enum class VoiceButtonType { NONE, MIC, CHAT, EFFECTS, MORE, LEAVE }
+
 @Composable
 fun VoiceControlsSheet(
     isMuted: Boolean,
     isSpeakerOn: Boolean,
     isA2dpModeOn: Boolean,
-    isHighQuality: Boolean,
+    bitrate: Int,
+    isStereo: Boolean,
     micVolume: Float,
     outputVolume: Float,
     expansionFraction: Float,
@@ -69,75 +82,92 @@ fun VoiceControlsSheet(
     onOpenChat: () -> Unit,
     onOpenVoiceEffects: () -> Unit,
     onToggleAudioMode: () -> Unit,
-    onToggleQuality: () -> Unit,
+    onBitrateChange: (Int) -> Unit,
+    onToggleStereo: () -> Unit,
     onMoreClick: () -> Unit,
     onLeaveRoom: () -> Unit,
     onMicVolumeChange: (Float) -> Unit,
     onOutputVolumeChange: (Float) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+    var lastPressed by remember { mutableStateOf<VoiceButtonType?>(null) }
+    
+    // Auto-release the "expansion" after a delay (similar to PixelPlayer)
+    LaunchedEffect(lastPressed) {
+        if (lastPressed != null && lastPressed != VoiceButtonType.MIC) {
+            kotlinx.coroutines.delay(300)
+            lastPressed = null
+        }
+    }
+
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     // 1. Interpolate Padding & Dimensions
-    val horizontalPadding = lerp(16.dp, 0.dp, expansionFraction)
+    // 🎤 NEW: "Snappy Morph" logic.
+    // The width and corners "snap" to the sheet state at 5%, but height stays linear.
+    val isPastThreshold = expansionFraction >= 0.05f
+    val visualMorphProgress by animateFloatAsState(
+        targetValue = if (isPastThreshold) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "morph"
+    )
+    
+    // Collapsed: 16dp (Wider Pill) -> Expanded: 0dp (Full Width)
+    val horizontalPadding = lerp(16.dp, 0.dp, visualMorphProgress)
+    val bottomGap = lerp(24.dp, 0.dp, visualMorphProgress)
 
-    // Floating gap at bottom: 24dp (floating) -> 0dp (docked)
-    // We reduce this slightly so it doesn't look like it's flying too high
-    val bottomGap = lerp(24.dp, 0.dp, expansionFraction)
-
-    // Corner Radius: 32dp (Pill) -> 0dp (Full Sheet at bottom) / 24dp (Sheet at top)
-    val topCornerRadius = lerp(32.dp, 24.dp, expansionFraction)
-    val bottomCornerRadius = lerp(32.dp, 0.dp, expansionFraction)
+    // Corner Radius: 40dp (Fully Rounded Pill) -> 24dp (Sheet at top)
+    val topCornerRadius = lerp(40.dp, 24.dp, visualMorphProgress)
+    val bottomCornerRadius = lerp(40.dp, 0.dp, visualMorphProgress)
 
     // 2. Height Calculation
-    // Collapsed: Just enough to show the row (approx 110dp)
-    // Expanded: Full screen height
-    val collapsedHeight = 110.dp
-    val targetHeight = screenHeight - bottomGap // Subtract gap so it doesn't push off screen
-    val currentHeight = lerp(collapsedHeight, targetHeight, expansionFraction)
+    val collapsedHeight = 104.dp 
+    val peekHeight = 130.dp 
+    
+    val currentHeight = if (isPastThreshold) {
+        // Once past 5%, the sheet must be tall enough to reach from the bottom of the screen
+        // to the top of the expanding scaffold.
+        lerp(peekHeight, screenHeight, expansionFraction)
+    } else {
+        // In pill state, we use the fixed pill height
+        collapsedHeight
+    }
 
     // 3. Content Padding (Top)
-    // When expanded, we need to push content down to avoid status bar
-    val topContentPadding = lerp(0.dp, statusBarHeight, expansionFraction)
+    // Only apply status bar padding when threshold is passed
+    val topContentPadding = lerp(0.dp, statusBarHeight, visualMorphProgress)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = bottomGap) // This creates the "float" effect
-            .height(currentHeight) // Use simple height lerp
+            .padding(bottom = bottomGap)
+            .height(currentHeight)
     ) {
         // --- BACKGROUND CARD ---
-        Box(
+        Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = horizontalPadding)
-                .shadow(
-                    elevation = if (expansionFraction < 0.95f) 8.dp else 0.dp,
-                    shape = RoundedCornerShape(
-                        topStart = topCornerRadius,
-                        topEnd = topCornerRadius,
-                        bottomStart = bottomCornerRadius,
-                        bottomEnd = bottomCornerRadius
-                    ),
-                    clip = false
-                )
-                .clip(
-                    RoundedCornerShape(
-                        topStart = topCornerRadius,
-                        topEnd = topCornerRadius,
-                        bottomStart = bottomCornerRadius,
-                        bottomEnd = bottomCornerRadius
-                    )
-                )
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-        )
-
-        // --- CONTENT ---
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = horizontalPadding)
-                .padding(top = topContentPadding) // Protect status bar
+                .padding(horizontal = horizontalPadding),
+            shape = RoundedCornerShape(
+                topStart = topCornerRadius,
+                topEnd = topCornerRadius,
+                bottomStart = bottomCornerRadius,
+                bottomEnd = bottomCornerRadius
+            ),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f),
+            tonalElevation = 8.dp,
+            shadowElevation = if (expansionFraction < 0.95f) 8.dp else 0.dp
         ) {
+            // --- CONTENT ---
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp)
+                    .padding(top = topContentPadding)
+            ) {
             // 4. DRAG HANDLE ("The Stick")
             Box(
                 modifier = Modifier
@@ -158,46 +188,70 @@ fun VoiceControlsSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                    .height(collapsedHeight)
+                    .padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Mute Button (Persistent State)
+                // Fixed weights to prevent squeezing
+                val baseWeight = 1.0f
+
                 VoiceControlButton(
                     icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                     label = if (isMuted) "Unmute" else "Mute",
                     isExpanded = isMuted,
                     isActive = !isMuted,
-                    onClick = onToggleMic
+                    weight = baseWeight,
+                    onClick = {
+                        lastPressed = VoiceButtonType.MIC
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleMic()
+                    }
                 )
 
-                // Chat Button (Momentary)
                 VoiceControlButton(
                     icon = Icons.AutoMirrored.Filled.Chat,
                     label = "Chat",
-                    onClick = onOpenChat
+                    weight = baseWeight,
+                    onClick = {
+                        lastPressed = VoiceButtonType.CHAT
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenChat()
+                    }
                 )
 
-                // Effects Button (Momentary)
                 VoiceControlButton(
                     icon = Icons.Default.MusicNote,
                     label = "Effects",
-                    onClick = onOpenVoiceEffects
+                    weight = baseWeight,
+                    onClick = {
+                        lastPressed = VoiceButtonType.EFFECTS
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onOpenVoiceEffects()
+                    }
                 )
 
-                // More Button (Momentary)
                 VoiceControlButton(
                     icon = Icons.Default.MoreHoriz,
                     label = "More",
-                    onClick = onMoreClick
+                    weight = baseWeight,
+                    onClick = {
+                        lastPressed = VoiceButtonType.MORE
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onMoreClick()
+                    }
                 )
 
-                // Leave Button (Momentary)
                 VoiceControlButton(
                     icon = Icons.Default.CallEnd,
                     label = "Leave",
                     isDestructive = true,
-                    onClick = onLeaveRoom
+                    weight = baseWeight,
+                    onClick = {
+                        lastPressed = VoiceButtonType.LEAVE
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLeaveRoom()
+                    }
                 )
             }
 
@@ -278,37 +332,15 @@ fun VoiceControlsSheet(
                                 onToggle = onToggleAudioMode
                             )
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = "Audio Quality",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isHighQuality)
-                                        "High (64kbps Stereo)"
-                                    else
-                                        "Low (32kbps Mono)",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            QualityModeToggle(
-                                isHighQuality = isHighQuality,
-                                onToggle = onToggleQuality
-                            )
-                        }
+                        QualityControls(
+                            bitrate = bitrate,
+                            isStereo = isStereo,
+                            onBitrateChange = onBitrateChange,
+                            onToggleStereo = onToggleStereo
+                        )
                     }
                 }
+            }
             }
         }
     }
@@ -323,39 +355,56 @@ private fun RowScope.VoiceControlButton(
     isExpanded: Boolean = false,
     isActive: Boolean = false,
     isDestructive: Boolean = false,
+    weight: Float = 1f,
     onClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val targetExpanded = isExpanded || isPressed
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    
+    // Visual state combines logical expansion (like muted) and interaction
+    val isVisuallyExpanded = isExpanded || isPressed || isHovered
 
-    val weight by animateFloatAsState(
-        targetValue = if (targetExpanded) 1.5f else 1f,
+    val animatedWeight by animateFloatAsState(
+        targetValue = weight,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
+            dampingRatio = Spring.DampingRatioLowBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
         label = "weight"
     )
 
     val cornerRadiusPercent by animateIntAsState(
-        targetValue = if (targetExpanded) 20 else 50,
+        targetValue = if (isVisuallyExpanded) 24 else 50,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
+            stiffness = Spring.StiffnessLow
         ),
         label = "cornerRadius"
+    )
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.92f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "scale"
     )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.Center,
         modifier = Modifier.weight(weight)
     ) {
         Box(
             modifier = Modifier
-                .height(56.dp)
+                .height(52.dp)
                 .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
                 .clip(RoundedCornerShape(cornerRadiusPercent))
                 .background(
                     when {
@@ -371,22 +420,28 @@ private fun RowScope.VoiceControlButton(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = when {
-                    isDestructive -> MaterialTheme.colorScheme.onError
-                    isActive -> MaterialTheme.colorScheme.onPrimary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(24.dp)
-            )
+            Crossfade(
+                targetState = icon,
+                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                label = "iconMorph"
+            ) { targetIcon ->
+                Icon(
+                    imageVector = targetIcon,
+                    contentDescription = label,
+                    tint = when {
+                        isDestructive -> MaterialTheme.colorScheme.onError
+                        isActive -> MaterialTheme.colorScheme.onPrimary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
         
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isVisuallyExpanded) 1f else 0.7f),
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -518,5 +573,79 @@ private fun VolumeControlRow(
             ),
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+@Composable
+private fun QualityControls(
+    bitrate: Int,
+    isStereo: Boolean,
+    onBitrateChange: (Int) -> Unit,
+    onToggleStereo: () -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        // Bitrate Slider
+        var sliderValue by remember(bitrate) { mutableStateOf(bitrate.toFloat()) }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Bitrate",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${sliderValue.toInt()}kbps",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            androidx.compose.material3.Slider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { 
+                    onBitrateChange(sliderValue.toInt()) 
+                },
+                valueRange = 8f..32f,
+                steps = 23, // 1kbps increments
+                modifier = Modifier.height(24.dp)
+            )
+            Text(
+                text = "Lower bitrate saves bandwidth on weak networks.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // Stereo Toggle
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Stereo Audio",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (isStereo) "Dual channel" else "Single channel (Efficient)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = isStereo,
+                onCheckedChange = { onToggleStereo() }
+            )
+        }
     }
 }

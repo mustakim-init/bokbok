@@ -25,45 +25,70 @@ class RoomRepository @Inject constructor(
     private val CACHE_TTL = 2 * 60 * 1000L // 2 minutes
 
     /**
-     * Load active rooms from Firestore.
-     * Filtered by isPublic = true to hide private rooms.
+     * Load active rooms from Firestore with pagination.
+     * @param lastDocument The last document from the previous page for cursor-based paging.
      */
-    suspend fun getActiveRooms(): Result<List<VoiceRoom>> {
-        // 1. Try Disk Cache
-        try {
-            val cachedSnapshot = roomsCollection
-                .whereEqualTo("isPublic", true)
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(20)
-                .get(Source.CACHE)
-                .await()
-            
-            if (!cachedSnapshot.isEmpty) {
-                 val rooms = cachedSnapshot.documents.mapNotNull { doc ->
-                    doc.data?.let { VoiceRoom.fromMap(it) }
+    suspend fun getActiveRooms(lastDocument: com.google.firebase.firestore.DocumentSnapshot? = null): Result<List<VoiceRoom>> {
+        val query = roomsCollection
+            .whereEqualTo("isPublic", true)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(20)
+
+        val paginatedQuery = if (lastDocument != null) {
+            query.startAfter(lastDocument)
+        } else {
+            query
+        }
+
+        // 1. Try Disk Cache (Only for first page)
+        if (lastDocument == null) {
+            try {
+                val cachedSnapshot = query.get(Source.CACHE).await()
+                if (!cachedSnapshot.isEmpty) {
+                    val rooms = cachedSnapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { VoiceRoom.fromMap(it) }
+                    }
+                    if (rooms.isNotEmpty()) return Result.success(rooms)
                 }
-                // Return cache immediately. 
-                // Note: We might want to trigger a background refresh, but that depends on the ViewModel strategy.
-                // For "offline mode", this is sufficient.
-                // Assuming ViewModel handles refresh via SwipeToRefresh or similar if new data is needed.
-                if (rooms.isNotEmpty()) return Result.success(rooms)
+            } catch (e: Exception) {
+                // Cache miss
             }
-        } catch (e: Exception) {
-            // Cache miss
         }
 
         // 2. Network Fetch
         return try {
-            val snapshot = roomsCollection
-                .whereEqualTo("isPublic", true) // ✅ Added filter
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(20) // Limit matches cache query
-                .get()
-                .await()
+            val snapshot = paginatedQuery.get().await()
             val rooms = snapshot.documents.mapNotNull { doc ->
                 doc.data?.let { VoiceRoom.fromMap(it) }
             }
             Result.success(rooms)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get the last document snapshot for paging.
+     */
+    suspend fun getActiveRoomsSnapshot(lastDocument: com.google.firebase.firestore.DocumentSnapshot? = null): Result<Pair<List<VoiceRoom>, com.google.firebase.firestore.DocumentSnapshot?>> {
+        val query = roomsCollection
+            .whereEqualTo("isPublic", true)
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(20)
+
+        val paginatedQuery = if (lastDocument != null) {
+            query.startAfter(lastDocument)
+        } else {
+            query
+        }
+
+        return try {
+            val snapshot = paginatedQuery.get().await()
+            val rooms = snapshot.documents.mapNotNull { doc ->
+                doc.data?.let { VoiceRoom.fromMap(it) }
+            }
+            val lastDoc = if (snapshot.documents.isNotEmpty()) snapshot.documents.last() else null
+            Result.success(rooms to lastDoc)
         } catch (e: Exception) {
             Result.failure(e)
         }

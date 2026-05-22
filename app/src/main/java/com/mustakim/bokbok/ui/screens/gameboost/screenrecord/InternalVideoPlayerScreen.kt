@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import java.io.File
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -50,7 +51,7 @@ fun InternalVideoPlayerScreen(
             TopAppBar(
                 title = { Text("Playback", color = Color.White) },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    BokBokIconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },

@@ -79,6 +79,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -106,6 +109,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @Composable
 fun GroupChatScreen(
@@ -171,15 +175,41 @@ fun GroupChatScreen(
         map
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { padding ->
-        Column(
+        // M3E Mesh gradient background layer
+        val color1 = MaterialTheme.colorScheme.primary
+        val color2 = MaterialTheme.colorScheme.secondary
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.surfaceContainer) // Header color for the curved edges
+                .drawWithCache {
+                    onDrawBehind {
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
+                                center = Offset(size.width * 0.15f, size.height * 0.1f),
+                                radius = size.width * 0.8f
+                            )
+                        )
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
+                                center = Offset(size.width * 0.85f, size.height * 0.25f),
+                                radius = size.width * 0.7f
+                            )
+                        )
+                    }
+                }
         ) {
+            Scaffold(
+                containerColor = Color.Transparent,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0)
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                ) {
             // ========== SEPARATE HEADER COMPONENT ==========
             // This is completely outside the LazyColumn - NO LAG
             GroupChatHeader(
@@ -213,7 +243,7 @@ fun GroupChatScreen(
                     placeholder = { Text("Search in chat") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     trailingIcon = if (searchQuery.isNotEmpty()) {
-                        { IconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
+                        { BokBokIconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
                     } else null,
                     singleLine = true
                 )
@@ -225,7 +255,7 @@ fun GroupChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onTap = { 
@@ -296,7 +326,7 @@ fun GroupChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
                     .navigationBarsPadding()
                     .imePadding()
             ) {
@@ -333,6 +363,7 @@ fun GroupChatScreen(
             }
         }
     }
+    } // End outer Box
 
     if (selectedMessageForReactions != null) {
         val message = selectedMessageForReactions!!
@@ -392,8 +423,9 @@ fun GroupChatHeader(
         modifier = Modifier
             .fillMaxWidth()
             .height(headerHeight),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shadowElevation = 0.dp // Cleaner look like reference
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.85f),
+        tonalElevation = 6.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Box(
             modifier = Modifier
@@ -401,7 +433,7 @@ fun GroupChatHeader(
                 .statusBarsPadding()
         ) {
             // Back button - aligned with action buttons
-            IconButton(
+            BokBokIconButton(
                 onClick = onBackClick,
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -421,14 +453,14 @@ fun GroupChatHeader(
                     .padding(end = 4.dp, top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                IconButton(onClick = onSearchClick) {
+                BokBokIconButton(onClick = onSearchClick) {
                     Icon(
                         Icons.Default.Search,
                         "Search",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
-                IconButton(onClick = { }) {
+                BokBokIconButton(onClick = { }) {
                     Icon(
                         Icons.Default.Call, 
                         "Voice Call",
@@ -945,31 +977,41 @@ fun GroupMessageBubble(
             Row(verticalAlignment = Alignment.Bottom) {
                 if (!isMe) {
                     if (showAvatar) {
-                        if (!senderImageUrl.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = senderImageUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = (senderName?.take(1) ?: "?").uppercase(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                                .padding(2.dp)
+                        ) {
+                            if (!senderImageUrl.isNullOrEmpty()) {
+                                AsyncImage(
+                                    model = senderImageUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(10.dp)),
+                                    contentScale = ContentScale.Crop
                                 )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(getAvatarColor(senderName?.hashCode() ?: 0)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = (senderName?.take(1) ?: "?").uppercase(),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     } else {
-                        Spacer(modifier = Modifier.width(32.dp))
+                        Spacer(modifier = Modifier.width(36.dp))
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                 }
@@ -996,14 +1038,22 @@ fun GroupMessageBubble(
                         )
                     }
 
-                    val backgroundColor = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
-                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                    val backgroundColor = if (isMe) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f)
+                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
                     
+                    val brush = if (isMe) Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    ) else null
+
                     Surface(
                         color = backgroundColor,
                         shape = shape,
                         modifier = Modifier
                             .widthIn(max = 280.dp)
+                            .then(if (brush != null) Modifier.background(brush, shape) else Modifier)
                             .combinedClickable(
                                 onClick = { showTime = !showTime },
                                 onLongClick = {
@@ -1012,7 +1062,9 @@ fun GroupMessageBubble(
                                 },
                                 indication = null,
                                 interactionSource = remember { MutableInteractionSource() }
-                            )
+                            ),
+                        border = if (!isMe) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null,
+                        tonalElevation = if (isMe) 4.dp else 2.dp
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                             // Reply Context

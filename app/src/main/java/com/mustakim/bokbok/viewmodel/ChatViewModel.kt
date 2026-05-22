@@ -82,16 +82,25 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Call this when the screen becomes visible.
-     * Starts Firebase listeners lazily.
+     * Starts Firebase listeners and data fetching in parallel.
      */
     fun onScreenVisible() {
         if (isInitialized) return
         isInitialized = true
 
-        // Now start the heavier operations
-        loadMessages()
-        markMessagesAsRead()
-        observeFriendOnlineStatus()
+        viewModelScope.launch {
+            kotlinx.coroutines.supervisorScope {
+                // Launch independent async blocks or sequential jobs that run in parallel
+                launch { loadMessages() }
+                launch { observeFriendOnlineStatus() }
+                launch { markMessagesAsRead() }
+                
+                // If friend profile is missing, also fetch that
+                if (_friendUser.value == null) {
+                    launch { loadFriendDetails() }
+                }
+            }
+        }
     }
 
     private fun markMessagesAsRead() {

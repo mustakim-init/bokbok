@@ -44,7 +44,8 @@ data class VoiceRoomUiState(
     val isMuted: Boolean = false,
     val isSpeakerOn: Boolean = true,
     val isA2dpModeOn: Boolean = true,
-    val isHighQuality: Boolean = true,
+    val bitrate: Int = 24, // kbps
+    val isStereo: Boolean = false,
     val isMinimized: Boolean = false,
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -55,6 +56,8 @@ data class VoiceRoomUiState(
     val members: List<User> = emptyList(), // Permanent members (from VoiceRoom.participants)
     val uploadedCoverUrl: String? = null // Temporary holder for new uploads
 )
+
+private const val SETTINGS_SYNC_DEBOUNCE_MS = 1000L
 
 @HiltViewModel
 class VoiceRoomViewModel @Inject constructor(
@@ -96,6 +99,7 @@ class VoiceRoomViewModel @Inject constructor(
     private var hasConfirmedJoin = false
 
     private var currentActiveRoomId: String? = null
+    private var settingsSyncJob: kotlinx.coroutines.Job? = null
 
     private val _uiState = MutableStateFlow(VoiceRoomUiState())
     val uiState: StateFlow<VoiceRoomUiState> = _uiState.asStateFlow()
@@ -560,6 +564,14 @@ class VoiceRoomViewModel @Inject constructor(
         }
     }
 
+    private fun debouncedSyncAudioSettings() {
+        settingsSyncJob?.cancel()
+        settingsSyncJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(SETTINGS_SYNC_DEBOUNCE_MS)
+            syncAudioSettingsToService()
+        }
+    }
+
     private fun syncAudioSettingsToService() {
         val context = application.applicationContext
         val state = _uiState.value
@@ -567,7 +579,8 @@ class VoiceRoomViewModel @Inject constructor(
         // Apply all settings to the running service
         VoiceService.setSpeaker(context, state.isSpeakerOn)
         VoiceService.setA2dpMode(context, state.isA2dpModeOn)
-        VoiceService.setQualityMode(context, state.isHighQuality)
+        VoiceService.setBitrate(context, state.bitrate)
+        VoiceService.setStereo(context, state.isStereo)
         CallController.setMicVolume(state.micVolume.toDouble())
         CallController.setMuted(state.isMuted)
     }
@@ -656,16 +669,20 @@ class VoiceRoomViewModel @Inject constructor(
         saveAudioSettings()
     }
 
-    fun toggleQualityMode() {
-        val appContext = application.applicationContext
+    fun setBitrate(bitrate: Int) {
         _uiState.update { current ->
-            val newMode = !current.isHighQuality
-            // ✅ GUARD
-            if (currentActiveRoomId != null) {
-                VoiceService.setQualityMode(appContext, newMode)
-            }
-            current.copy(isHighQuality = newMode)
+            current.copy(bitrate = bitrate)
         }
+        debouncedSyncAudioSettings()
+        saveAudioSettings()
+    }
+
+    fun toggleStereo() {
+        _uiState.update { current ->
+            val newMode = !current.isStereo
+            current.copy(isStereo = newMode)
+        }
+        debouncedSyncAudioSettings()
         saveAudioSettings()
     }
 
@@ -675,17 +692,19 @@ class VoiceRoomViewModel @Inject constructor(
         // 1. Launch Audio Settings Collector in its own coroutine
         viewModelScope.launch {
             preferencesManager.audioSettings.collect { settings ->
-                val isSpeakerOn = settings["isSpeakerOn"] as Boolean
-                val isA2dpModeOn = settings["isA2dpModeOn"] as Boolean
-                val isHighQuality = settings["isHighQuality"] as Boolean
-                val micVolume = settings["micVolume"] as Float
-                val outputVolume = settings["outputVolume"] as Float
+                val isSpeakerOn = settings["isSpeakerOn"] as? Boolean ?: true
+                val isA2dpModeOn = settings["isA2dpModeOn"] as? Boolean ?: true
+                val bitrate = settings["bitrate"] as? Int ?: 24
+                val isStereo = settings["isStereo"] as? Boolean ?: false
+                val micVolume = settings["micVolume"] as? Float ?: 1f
+                val outputVolume = settings["outputVolume"] as? Float ?: 1f
 
                 _uiState.update {
                     it.copy(
                         isSpeakerOn = isSpeakerOn,
                         isA2dpModeOn = isA2dpModeOn,
-                        isHighQuality = isHighQuality,
+                        bitrate = bitrate,
+                        isStereo = isStereo,
                         micVolume = micVolume,
                         outputVolume = outputVolume
                     )
@@ -764,7 +783,9 @@ class VoiceRoomViewModel @Inject constructor(
             preferencesManager.saveAudioSettings(
                 isSpeakerOn = state.isSpeakerOn,
                 isA2dpModeOn = state.isA2dpModeOn,
-                isHighQuality = state.isHighQuality,
+                isHighQuality = false, // Deprecated
+                bitrate = state.bitrate,
+                isStereo = state.isStereo,
                 micVolume = state.micVolume,
                 outputVolume = state.outputVolume
             )

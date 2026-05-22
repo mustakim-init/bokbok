@@ -38,13 +38,16 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +61,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
+import com.mustakim.bokbok.ui.theme.GoogleSansFlex
+import com.mustakim.bokbok.ui.screens.common.MainScaffold
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.mustakim.bokbok.data.model.BatteryInfo
@@ -180,26 +185,26 @@ fun CircularMetric(
 ) {
     val animatedProgress by animateFloatAsState(targetValue = progress, label = "progress")
     
-    Box(contentAlignment = Alignment.Center, modifier = modifier.size(120.dp)) {
+    Box(contentAlignment = Alignment.Center, modifier = modifier.size(100.dp)) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawArc(
-                color = color.copy(alpha = 0.1f),
+                color = color.copy(alpha = 0.08f),
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
-                style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
             )
             drawArc(
                 color = color,
                 startAngle = -90f,
                 sweepAngle = 360f * animatedProgress,
                 useCenter = false,
-                style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
+                style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text = valueText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(text = label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+            Text(text = valueText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
@@ -213,24 +218,23 @@ fun MonitorCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        tonalElevation = 2.dp
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(24.dp)) {
             if (title != null && icon != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(12.dp))
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.ExtraBold)
                 }
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(20.dp))
             }
             content()
         }
@@ -431,34 +435,35 @@ fun CoreMonitoringItem(
     isOnline: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
-            .padding(8.dp)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
-        Column {
+        Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Core $index", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Core $index", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
                 if (!isOnline) {
                     Text("Offline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 } else {
-                    Text("${load.roundToInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("${load.roundToInt()}%", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold)
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
+            Spacer(Modifier.height(8.dp))
+            MetricProgressBar(
                 progress = if (isOnline) load / 100f else 0f,
-                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                 color = if (load > 80) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                height = 6.dp
             )
             if (isOnline) {
+                Spacer(Modifier.height(4.dp))
                 Text(
                     text = if (freq > 0) "${(freq / 1000f).roundToInt()} MHz" else "-- MHz",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.align(Alignment.End),
-                    fontSize = 10.sp
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

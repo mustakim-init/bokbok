@@ -32,8 +32,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.mustakim.bokbok.ui.theme.GoogleSansFlex
 import com.mustakim.bokbok.utils.AppIcon
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
 import kotlinx.coroutines.launch
@@ -74,6 +74,7 @@ fun AddGameDialog(
                 text = "Add Game Manually",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
+                fontFamily = GoogleSansFlex,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
@@ -101,7 +102,7 @@ fun AddGameDialog(
                         key = { it.packageName }
                     ) { app ->
                         ListItem(
-                            headlineContent = { Text(app.label, fontWeight = FontWeight.SemiBold) },
+                            headlineContent = { Text(app.label, fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansFlex) },
                             supportingContent = { Text(app.packageName, style = MaterialTheme.typography.labelSmall) },
                             leadingContent = {
                                 AsyncImage(

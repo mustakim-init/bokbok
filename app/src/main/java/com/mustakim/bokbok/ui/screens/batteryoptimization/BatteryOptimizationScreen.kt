@@ -55,8 +55,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.navigation.NavHostController
 import com.mustakim.bokbok.utils.BatteryOptimizationHelper
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import androidx.compose.ui.res.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,15 +86,25 @@ fun BatteryOptimizationScreen(
         isBatteryOptimized = !BatteryOptimizationHelper.isIgnoringBatteryOptimizations(context)
     }
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("Background Reliability") },
+            LargeTopAppBar(
+                title = { 
+                    Text(
+                        text = "Background Reliability",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    BokBokIconButton(onClick = { navController.navigateUp() }) {
+                        Icon(painterResource(com.mustakim.bokbok.R.drawable.arrow_back), contentDescription = "Back")
                     }
-                }
+                },
+                scrollBehavior = scrollBehavior
             )
         }
     ) { paddingValues ->
@@ -176,11 +192,13 @@ fun BatteryOptimizationScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            TextButton(
-                onClick = { navController.navigateUp() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Skip for Now")
+            if (isBatteryOptimized || needsAutoStartGuidance) {
+                TextButton(
+                    onClick = { navController.navigateUp() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Skip for Now")
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -314,7 +332,7 @@ fun AutoStartGuidanceCard(
                         )
                     }
                 }
-                IconButton(onClick = onToggleInstructions) {
+                BokBokIconButton(onClick = onToggleInstructions) {
                     Icon(
                         imageVector = if (showInstructions) 
                             Icons.Default.ExpandLess 

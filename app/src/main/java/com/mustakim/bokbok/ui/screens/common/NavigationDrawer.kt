@@ -21,6 +21,11 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,66 +67,71 @@ fun AppNavigationDrawer(
     val currentUser by userViewModel.currentUser.collectAsState()
 
     val menuItems = listOf(
-        DrawerMenuItem(Icons.Default.Home, "Home", "lounge"),
+        DrawerMenuItem(Icons.Default.Home, "Lounge", "lounge"),
         DrawerMenuItem(Icons.Default.Settings, "Settings", "settings"),
-        DrawerMenuItem(Icons.Default.Notifications, "Notifications", "notifications"),
         DrawerMenuItem(Icons.Default.Person, "Profile", "profile"),
-        DrawerMenuItem(Icons.Default.Info, "About", "about"),
-        DrawerMenuItem(Icons.AutoMirrored.Filled.Help, "Help & Support", "help"),
-        DrawerMenuItem(Icons.Default.PrivacyTip, "Privacy Policy", "privacy"),
-        DrawerMenuItem(Icons.AutoMirrored.Filled.Logout, "Logout", "logout")
+        DrawerMenuItem(Icons.Default.Notifications, "Notifications", "notifications"),
+        DrawerMenuItem(Icons.Default.Home, "Music Library", "music"), // Reusing Home icon for now or dedicated one
+        DrawerMenuItem(Icons.AutoMirrored.Filled.Logout, "Sign Out", "logout")
     )
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
-                modifier = Modifier.width(300.dp),
-                drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                drawerContentColor = MaterialTheme.colorScheme.onSurface
+                modifier = Modifier.width(320.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface,
+                drawerContentColor = MaterialTheme.colorScheme.onSurface,
+                windowInsets = WindowInsets.safeDrawing
             ) {
-                // Profile Header with real data
+                // Profile Header
                 DrawerProfileHeader(
                     profileImageUrl = currentUser?.profileImageUrl ?: "",
                     displayName = currentUser?.displayName?.ifEmpty { currentUser?.username } ?: "User",
-                    email = currentUser?.email ?: "",
+                    email = currentUser?.email ?: "Join the conversation",
                     onProfileClick = onProfileClick
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Menu Items
-                menuItems.forEach { item ->
-                    NavigationDrawerItem(
-                        icon = {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.label
+                Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+                    menuItems.forEach { item ->
+                        val isSelected = currentRoute == item.route
+                        NavigationDrawerItem(
+                            icon = {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            },
+                            label = { 
+                                Text(
+                                    text = item.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                ) 
+                            },
+                            selected = isSelected,
+                            onClick = { onMenuItemClick(item.route) },
+                            modifier = Modifier.height(56.dp),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                unselectedContainerColor = Color.Transparent,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        },
-                        label = { Text(text = item.label) },
-                        selected = currentRoute == item.route,
-                        onClick = {
-                            onMenuItemClick(item.route)
-                        },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        colors = NavigationDrawerItemDefaults.colors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            unselectedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Version Footer
                 DrawerFooter()
             }
         }
@@ -137,25 +147,31 @@ fun DrawerProfileHeader(
     email: String,
     onProfileClick: () -> Unit
 ) {
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.medium,
-        onClick = onProfileClick
+            .padding(24.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp))
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .clickable(onClick = onProfileClick)
+            .padding(20.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Profile Picture
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape),
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)),
                 contentAlignment = Alignment.Center
             ) {
                 if (profileImageUrl.isNotEmpty()) {
@@ -166,19 +182,12 @@ fun DrawerProfileHeader(
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = displayName.firstOrNull()?.uppercase() ?: "?",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
+                    Text(
+                        text = displayName.firstOrNull()?.uppercase() ?: "?",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
@@ -188,15 +197,18 @@ fun DrawerProfileHeader(
             Column {
                 Text(
                     text = displayName,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = email,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
         }

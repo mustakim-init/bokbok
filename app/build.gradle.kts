@@ -2,13 +2,12 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.google.services)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.baselineprofile)
+//    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -27,8 +26,9 @@ android {
             useSupportLibrary = true
         }
 
-        // Strip unused languages to reduce APK size
-        resConfigs("en")
+        androidResources {
+            localeFilters += "en"
+        }
 
         // Read keys from local.properties
         val properties = Properties()
@@ -59,6 +59,7 @@ android {
         val groqApiKey = properties.getProperty("GROQ_API_KEY") ?: ""
         buildConfigField("String", "GROQ_API_KEY", "\"$groqApiKey\"")
 
+        buildConfigField("String", "ARCHITECTURE", "\"universal\"")
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -69,9 +70,12 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"  // ← add this
                 )
-                abiFilters("arm64-v8a")
             }
         }
+    }
+
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
     }
 
     buildTypes {
@@ -96,13 +100,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     kotlin {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
             freeCompilerArgs.addAll(
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
@@ -122,7 +126,16 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/proguard/androidx-*.pro"
-            // Redundant packaging rules removed as duplicates are resolved by dependency cleanup
+            excludes += "/META-INF/CONTRIBUTORS.md"
+            excludes += "/META-INF/LICENSE.md"
+            excludes += "/META-INF/LICENSE"
+            excludes += "/META-INF/LICENSE.txt"
+            excludes += "/META-INF/NOTICE"
+            excludes += "/META-INF/NOTICE.txt"
+            excludes += "/META-INF/NOTICE.md"
+            excludes += "/META-INF/*.kotlin_module"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/INDEX.LIST"
         }
     }
 
@@ -134,14 +147,18 @@ android {
     }
 }
 
+
 dependencies {
     // Core Android
     implementation(libs.core.ktx)
     implementation(libs.appcompat)
     implementation(libs.activity.compose)
+    implementation(libs.core.splashscreen)
+    implementation(libs.androidx.preference)
 
     // Lifecycle
     implementation(libs.bundles.lifecycle)
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     // Compose
     implementation(platform(libs.compose.bom))
@@ -213,6 +230,9 @@ dependencies {
     // Room Database (for local messaging storage)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.room.paging)
+    implementation(libs.paging.runtime)
+    implementation(libs.paging.compose)
     implementation(libs.androidx.animation)
     ksp(libs.room.compiler)
 
@@ -274,5 +294,29 @@ dependencies {
 
     // Baseline Profile
     implementation(libs.androidx.profileinstaller)
-    "baselineProfile"(project(":baselineprofile"))
+//    "baselineProfile"(project(":baselineprofile"))
+
+    // ==========================================
+    // Project Modules
+    // ==========================================
+    implementation(project(":core"))
+    implementation(project(":feature:music"))
+    implementation(project(":innertube"))
+    implementation(project(":kugou"))
+    implementation(project(":lastfm"))
+
+    // Shimmer (used in app module's ShimmerHost and NavGraph)
+    implementation(libs.shimmer)
+
+    // Media3 Session (needed for MusicService binder in app module)
+    implementation(libs.media3.session)
+
+    // Ktor (needed for AboutScreen HTTP client)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+
+    // Ensure ProcessLifecycleOwner is available for the presence manager
+    implementation("com.github.therealbush:translator:1.1.1")
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    implementation("androidx.compose.material3.adaptive:adaptive:1.2.0")
 }

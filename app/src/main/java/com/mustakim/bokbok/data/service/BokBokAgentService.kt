@@ -40,6 +40,7 @@ class BokBokAgentService : AccessibilityService() {
     @Inject lateinit var repository: AIRepository
     @Inject lateinit var preferencesManager: com.mustakim.bokbok.data.local.PreferencesManager
     @Inject lateinit var gameRepository: com.mustakim.bokbok.data.repository.GameRepository
+    @Inject lateinit var daemonManager: com.mustakim.bokbok.data.shell.DaemonManager
     private lateinit var overlayManager: EdgeGlowOverlayManager
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
@@ -243,23 +244,10 @@ class BokBokAgentService : AccessibilityService() {
             val packageName = event.packageName?.toString() ?: return
             if (packageName == lastPackage) return
             lastPackage = packageName
-
-            serviceScope.launch {
-                // 1. Check if this is a registered game
-                val game = gameRepository.getGameEntity(packageName)
-                if (game != null) {
-                    android.util.Log.d("BokBokAgentService", "Game detected: $packageName. Applying boost...")
-                    // 2. Apply the custom optimizations
-                    gameRepository.applyOptimizations(packageName)
-                } else {
-                    // Not a game, or game closed (switching to regular app)
-                    // We only revert if we were previously in a game
-                    if (gameRepository.hasActiveSnapshots()) {
-                        android.util.Log.d("BokBokAgentService", "Non-game detected. Reverting optimizations.")
-                        gameRepository.revertAllOptimizations()
-                    }
-                }
-            }
+            
+            // Note: Game monitoring and overlay management is handled by the 
+            // background shell sentinel (heartbeat.sh) to keep this service 
+            // focused solely on AI companion features.
         }
     }
 

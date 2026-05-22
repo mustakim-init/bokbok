@@ -8,6 +8,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,116 +17,104 @@ import javax.inject.Singleton
 /**
  * 📦 DaemonManager
  *
- * Deploys and manages the background shell daemons (heartbeat.sh, monitor_daemon.sh).
+ * Deploys and manages the background sentinel (heartbeat.sh / bokbok_sentinel.sh).
+ * The sentinel is an event-driven logcat listener that detects game launches
+ * and triggers the overlay with 0% idle CPU overhead.
  *
  * KEY DESIGN:
- * - Scripts are injected into /data/local/tmp/ via the elevated Shizuku shell.
- * - This overcomes the limitations of the app user being unable to write to system dirs.
- * - Temporary files (stats, logs) are created with world-readable permissions (666)
- *   so the app can read them via Java File API.
+ * - The script is injected into /data/local/tmp/ via the elevated Shizuku shell.
+ * - A Mutex prevents race conditions from concurrent deployAndStart() calls.
+ * - stopDaemon() uses precise pkill signatures to avoid killing other apps' logcat listeners.
  */
 @Singleton
 class DaemonManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val keepShell: KeepShell
 ) {
-    // External storage path (protected from internal-only restrictive permissions)
-    // ADB Shell (UID 2000) can access this directory on most devices.
-    private val BASE_PATH = context.getExternalFilesDir(null)?.absolutePath ?: context.filesDir.absolutePath
+    // /data/local/tmp is accessible by both the ADB shell (UID 2000) running the sentinel
+    // and via Shizuku shell commands from the app. Sentinel v14 uses these paths.
+    private val BASE_PATH = "/data/local/tmp"
     
-    // Script paths (Staged in external storage)
+    // Sentinel script path
     private val SENTINEL_PATH = "$BASE_PATH/bokbok_sentinel.sh"
-    private val MONITOR_PATH  = "$BASE_PATH/monitor_daemon.sh"
     
-    // Stats path (read by Repository)
-    val STATS_FILE: String = "$BASE_PATH/bokbok_monitor.now"
+    // Window file: written by sentinel, read by Repository to know the active game
+    val WINDOW_FILE: String = "$BASE_PATH/bokbok_current_window"
 
     private val _isDaemonRunning = MutableStateFlow(false)
     val isDaemonRunning = _isDaemonRunning.asStateFlow()
 
-    suspend fun deployAndStart(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            // 1. Inject scripts via Shizuku Shell
-            deployScript("heartbeat.sh", SENTINEL_PATH)
-            deployScript("monitor_daemon.sh", MONITOR_PATH)
+    private val launchMutex = Mutex()
 
-            // 2. Stop any existing daemons (pkill -f)
-            stopDaemon()
-
-            // 3. Launch sentinel (heartbeat) as background process
-            // Revision: Copy from staging to an executable path (/tmp) and run in one atomic chain 
-            // to bypass both 'Permission denied' on internal data and the 'Security Scavenger' deletion.
-            val sentinelTmp = "/data/local/tmp/bokbok_sentinel.sh"
-            keepShell.doCmd("cp $SENTINEL_PATH $sentinelTmp && chmod 755 $sentinelTmp && nohup sh $sentinelTmp > /dev/null 2>&1 &")
-            
-            // 4. Launch monitor daemon as background process
-            val monitorTmp = "/data/local/tmp/monitor_daemon.sh"
-            keepShell.doCmd("cp $MONITOR_PATH $monitorTmp && chmod 755 $monitorTmp && nohup sh $monitorTmp > /dev/null 2>&1 &")
-
-            // 5. Aggressive Whitelisting (Scene Pattern)
-            // This prevents the system from killing the app or daemon in the background
-            val pkg = context.packageName
-            keepShell.doCmd("dumpsys deviceidle whitelist +$pkg; " +
-                    "cmd appops set $pkg RUN_IN_BACKGROUND allow; " +
-                    "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow; " +
-                    "am set-standby-bucket $pkg active; " +
-                    "am set-bg-restriction-level --user 0 $pkg unrestricted; " +
-                    "am set-inactive --user 0 $pkg false; " +
-                    "am unfreeze --sticky $pkg; " +
-                    "am set-foreground-service-delegate --user 0 $pkg start; " +
-                    "renice -n -20 -p $(pgrep -f bokbok_sentinel.sh); " +
-                    "renice -n -20 -p $(pgrep -f monitor_daemon.sh); " +
-                    "cmd package compile -m speed $pkg; " +
-                    "true")
-
-            Log.d("DaemonManager", "Daemons started in $BASE_PATH via Shizuku with Whitelisting.")
-            _isDaemonRunning.value = true
-            true
-        } catch (e: Exception) {
-            Log.e("DaemonManager", "Failed to start daemons: ${e.message}")
-            false
-        }
-    }
-
-    /**
-     * Injects an asset file to a remote path by writing it directly to internal storage.
-     * This bypasses /data/local/tmp/ and protects the script from aggressive cleanup.
-     */
-    private suspend fun deployScript(assetName: String, remotePath: String) {
+    suspend fun deployAndStart(): Boolean = launchMutex.withLock {
         withContext(Dispatchers.IO) {
-            val file = File(remotePath)
-            Log.d("DaemonManager", "Extracting $assetName to protected storage: $remotePath...")
-            
-            // 💡 REFINEMENT: Inject the actual external path into the script for SHARED FILES ONLY!
-            // This ensures scripts stay in /data/local/tmp/ for execution (noexec bypass)
-            // but log/stat files are in $BASE_PATH so the app can read them.
-            val content = context.assets.open(assetName).bufferedReader().use { it.readText() }
-            val modifiedContent = content
-                .replace("/data/local/tmp/bokbok_", "$BASE_PATH/bokbok_")
-                .replace("/data/local/tmp/heartbeat_", "$BASE_PATH/heartbeat_")
-            
-            file.writeText(modifiedContent)
-            
-            // Set executable bits for the owner (the app)
-            file.setExecutable(true, false)
-            file.setReadable(true, false)
+            try {
+                // 1. Inject binaries and scripts via Shizuku Base64
+                deployScript("busybox", "$BASE_PATH/busybox")
+                deployScript("heartbeat.sh", SENTINEL_PATH)
 
-            // Ensure shell user can execute (chmod 755)
-            keepShell.doCmd("chmod 755 $remotePath")
-            
-            // Verification
-            val check = keepShell.doCmd("[ -f $remotePath ] && echo 'exists'")
-            if (!check.contains("exists")) {
-                throw Exception("Failed to verify script at $remotePath")
+                // 2. Kill any existing sentinel + its logcat child
+                stopDaemon()
+
+                // 3. Launch sentinel as a background process
+                keepShell.doCmd("chmod 755 $SENTINEL_PATH && nohup sh $SENTINEL_PATH > /dev/null 2>&1 &")
+
+                // 4. Aggressive Whitelisting (Scene Pattern)
+                val pkg = context.packageName
+                keepShell.doCmd("dumpsys deviceidle whitelist +$pkg; " +
+                        "cmd appops set $pkg RUN_IN_BACKGROUND allow; " +
+                        "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow; " +
+                        "am set-standby-bucket $pkg active; " +
+                        "am set-bg-restriction-level --user 0 $pkg unrestricted; " +
+                        "am set-inactive --user 0 $pkg false; " +
+                        "am unfreeze --sticky $pkg; " +
+                        "am set-foreground-service-delegate --user 0 $pkg start; " +
+                        "renice -n -10 -p $(pgrep -f bokbok_sentinel.sh); " +
+                        "cmd package compile -m speed $pkg; " +
+                        "true")
+
+                Log.d("DaemonManager", "Sentinel started in $BASE_PATH via Shizuku.")
+                _isDaemonRunning.value = true
+                true
+            } catch (e: Exception) {
+                Log.e("DaemonManager", "Failed to start sentinel: ${e.message}")
+                false
             }
-            Log.d("DaemonManager", "Successfully verified $assetName at $remotePath")
         }
     }
+
+    private suspend fun deployScript(assetName: String, remotePath: String) =
+        withContext(Dispatchers.IO) {
+            try {
+                Log.d("DaemonManager", "Injecting $assetName via Shizuku Base64...")
+                
+                // 1. Read asset and convert to Base64
+                val bytes = context.assets.open(assetName).use { it.readBytes() }
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                
+                // 2. Inject via Shizuku shell pipe (this bypasses app-user permission blocks)
+                keepShell.doCmd("echo '$base64' | base64 -d > $remotePath && chmod 755 $remotePath")
+                
+                // 3. Verification
+                val check = keepShell.doCmd("[ -f $remotePath ] && echo 'exists'")
+                if (!check.contains("exists")) {
+                    throw Exception("Failed to verify script at $remotePath")
+                }
+                Log.d("DaemonManager", "Successfully injected $assetName to $remotePath")
+            } catch (e: Exception) {
+                Log.e("DaemonManager", "Script injection failed: ${e.message}")
+                throw e
+            }
+        }
 
     suspend fun stopDaemon() = withContext(Dispatchers.IO) {
-        Log.d("DaemonManager", "Stopping existing daemon processes...")
-        // Use pkill -f to find by script name. Multi-command for robustness.
-        keepShell.doCmd("pkill -9 -f bokbok_sentinel.sh; pkill -9 -f monitor_daemon.sh; true")
+        Log.d("DaemonManager", "Stopping sentinel processes...")
+        // 1. Kill the sentinel script AND its child logcat listener.
+        // 2. Clear the window file to prevent stale game detection.
+        keepShell.doCmd("pkill -9 -f bokbok_sentinel.sh; " +
+                "pkill -9 -f 'logcat -b events -v brief -s wm_set_resumed_activity am_resume_activity'; " +
+                "rm -f $WINDOW_FILE; " +
+                "true")
         _isDaemonRunning.value = false
         delay(500)
     }
@@ -137,21 +127,13 @@ class DaemonManager @Inject constructor(
         alive
     }
 
-    /**
-     * Reads monitoring stats written by the daemon.
-     * Note: File must be created with chmod 666 in the shell script.
-     */
-    suspend fun readStats(): Map<String, String> = withContext(Dispatchers.IO) {
-        val statsFile = File(STATS_FILE)
-        if (!statsFile.exists()) return@withContext emptyMap()
+    suspend fun reportCurrentWindow(packageName: String) = withContext(Dispatchers.IO) {
         try {
-            statsFile.readText().lines().associate { line ->
-                val parts = line.split("=", limit = 2)
-                if (parts.size == 2) parts[0].trim() to parts[1].trim() else "" to ""
-            }.filter { it.key.isNotBlank() }
+            // Use shell to write to the file since app UID might be restricted in /data/local/tmp
+            keepShell.doCmd("echo '$packageName' > $WINDOW_FILE && chmod 666 $WINDOW_FILE")
+            Log.d("DaemonManager", "Reported window $packageName via Shizuku")
         } catch (e: Exception) {
-            Log.e("DaemonManager", "Error reading stats: ${e.message}")
-            emptyMap()
+            Log.e("DaemonManager", "Error reporting window: ${e.message}")
         }
     }
 }

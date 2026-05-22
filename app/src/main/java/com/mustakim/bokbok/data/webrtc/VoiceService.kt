@@ -18,7 +18,15 @@ import com.mustakim.bokbok.R
 import android.net.wifi.WifiManager
 import com.google.firebase.database.ValueEventListener
 import com.mustakim.bokbok.data.repository.PresenceRepository
+import com.mustakim.bokbok.state.RoomStateManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -47,14 +55,25 @@ class VoiceService : Service() {
         const val ACTION_SET_A2DP_MODE = "bokbok.voice.SET_A2DP_MODE"
         const val EXTRA_A2DP_ON = "a2dpOn"
 
-        const val ACTION_SET_QUALITY_MODE = "bokbok.voice.SET_QUALITY_MODE"
-        const val EXTRA_HIGH_QUALITY = "highQuality"
+        const val ACTION_SET_BITRATE = "bokbok.voice.SET_BITRATE"
+        const val EXTRA_BITRATE = "bitrate"
+
+        const val ACTION_SET_STEREO = "bokbok.voice.SET_STEREO"
+        const val EXTRA_STEREO = "stereo"
 
 
-        fun setQualityMode(context: Context, highQuality: Boolean) {
+        fun setBitrate(context: Context, bitrate: Int) {
             val i = Intent(context, VoiceService::class.java).apply {
-                action = ACTION_SET_QUALITY_MODE
-                putExtra(EXTRA_HIGH_QUALITY, highQuality)
+                action = ACTION_SET_BITRATE
+                putExtra(EXTRA_BITRATE, bitrate)
+            }
+            ContextCompat.startForegroundService(context, i)
+        }
+
+        fun setStereo(context: Context, enabled: Boolean) {
+            val i = Intent(context, VoiceService::class.java).apply {
+                action = ACTION_SET_STEREO
+                putExtra(EXTRA_STEREO, enabled)
             }
             ContextCompat.startForegroundService(context, i)
         }
@@ -152,6 +171,8 @@ class VoiceService : Service() {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val pendingDisconnects = mutableMapOf<String, Runnable>()
 
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -159,6 +180,7 @@ class VoiceService : Service() {
         startAsForeground()
         acquireWakeLock()
     }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 🛑 FIX: Check if service was restarted with null intent (system restart)
@@ -211,9 +233,13 @@ class VoiceService : Service() {
                     client?.setRemoteVolume(userId, volume)
                 }
             }
-            ACTION_SET_QUALITY_MODE -> {
-                val highQuality = intent.getBooleanExtra(EXTRA_HIGH_QUALITY, true)
-                client?.setHighQuality(highQuality)
+            ACTION_SET_BITRATE -> {
+                val bitrate = intent.getIntExtra(EXTRA_BITRATE, 24)
+                client?.setBitrate(bitrate)
+            }
+            ACTION_SET_STEREO -> {
+                val enabled = intent.getBooleanExtra(EXTRA_STEREO, false)
+                client?.setStereo(enabled)
             }
         }
         // 🛑 FIX: Return START_NOT_STICKY to prevent auto-restart on crash/kill
@@ -358,7 +384,9 @@ class VoiceService : Service() {
     }
 
     private fun startAsForeground() {
-        val notifIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val notifIntent = Intent(this, com.mustakim.bokbok.ui.screens.room.VoiceRoomActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         val pi = PendingIntent.getActivity(
             this, 0, notifIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -436,6 +464,7 @@ class VoiceService : Service() {
     override fun onDestroy() {
         stopCall()
         releaseWakeLock()
+        serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

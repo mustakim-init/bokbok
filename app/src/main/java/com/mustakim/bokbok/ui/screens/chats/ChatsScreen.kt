@@ -1,5 +1,8 @@
 package com.mustakim.bokbok.ui.screens.chats
 
+import com.mustakim.bokbok.ui.screens.common.TopBar
+
+import com.mustakim.bokbok.R
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -67,10 +70,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
@@ -78,6 +83,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -105,22 +111,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ChatsScreen(
     navController: NavHostController,
     userViewModel: UserViewModel,
+    friendsViewModel: FriendsViewModel,
     onFriendClick: (String) -> Unit
 ) {
-    val viewModel: FriendsViewModel = hiltViewModel()
+    val viewModel = friendsViewModel
 
     val chatList by viewModel.chats.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
-    var showAddFriendDialog by remember { mutableStateOf(false) }
-    var showCreateGroupDialog by remember { mutableStateOf(false) }
-    var isFabMenuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -176,39 +187,83 @@ fun ChatsScreen(
         }
     }
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     MainScaffold(
         navController = navController,
         title = "Chats",
         showBottomBar = true,
+        useFlexibleTopBar = false,
+        isStatic = true,
         notificationCount = 0,
-        userViewModel = userViewModel
+        userViewModel = userViewModel,
+        customTopBar = { passedScrollBehavior ->
+            TopBar(
+                title = "Chats",
+                userViewModel = userViewModel,
+                scrollBehavior = passedScrollBehavior,
+                useFlexibleTopBar = false,
+                isStatic = true,
+                navigationIcon = {
+                    BokBokIconButton(onClick = { /* Menu */ }) {
+                        Icon(painterResource(id = R.drawable.more_horiz), contentDescription = "Menu")
+                    }
+                },
+                onNotificationsClick = { navController.navigate("notifications") },
+                onProfileClick = { navController.navigate("profile") },
+                actions = {
+                    BokBokIconButton(onClick = { /* Add Friend */ }) {
+                        Icon(painterResource(id = R.drawable.add_circle), contentDescription = "Add Friend")
+                    }
+                }
+            )
+        }
     ) { paddingValues ->
         // Track root container position so we can compute offsets relative to it
         var rootPosition by remember { mutableStateOf(IntOffset.Zero) }
+
+        // M3E Mesh gradient background layer
+        val color1 = MaterialTheme.colorScheme.primary
+        val color2 = MaterialTheme.colorScheme.secondary
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .drawWithCache {
+                    onDrawBehind {
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
+                                center = Offset(size.width * 0.15f, size.height * 0.1f),
+                                radius = size.width * 0.8f
+                            )
+                        )
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
+                                center = Offset(size.width * 0.85f, size.height * 0.25f),
+                                radius = size.width * 0.7f
+                            )
+                        )
+                    }
+                }
                 .onGloballyPositioned { coords ->
                     val pos = coords.positionInWindow()
                     rootPosition = IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
                 }
-                .nestedScroll(nestedScrollConnection)
         ) {
             if (chatList.isEmpty()) {
                 EmptyFriendsState()
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize()
+                        .nestedScroll(nestedScrollConnection),
                     contentPadding = PaddingValues(
                         top = searchBarHeight + 8.dp,
-                        bottom = 80.dp,
-                        start = 16.dp,
-                        end = 16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        bottom = 120.dp
+                    )
                 ) {
                     if (filteredChats.isEmpty() && searchQuery.isNotBlank()) {
                         item {
@@ -261,65 +316,6 @@ fun ChatsScreen(
                 )
             }
 
-            if (isFabMenuExpanded) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f)
-                        )
-                        .clickable { isFabMenuExpanded = false }
-                )
-            }
-
-            // FAB Menu using Material 3 Expressive Components
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 16.dp,
-                        bottom = if (isMinimized) 100.dp else 20.dp
-                    )
-            ) {
-                FloatingActionButtonMenu(
-                    expanded = isFabMenuExpanded,
-                    button = {
-                        ToggleFloatingActionButton(
-                            checked = isFabMenuExpanded,
-                            onCheckedChange = { isFabMenuExpanded = !isFabMenuExpanded }
-                        ) {
-                            val imageVector by remember {
-                                derivedStateOf {
-                                    if (checkedProgress > 0.5f) Icons.Default.Close else Icons.Default.Add
-                                }
-                            }
-                            Icon(
-                                imageVector = imageVector,
-                                contentDescription = if (isFabMenuExpanded) "Close Menu" else "Open Menu",
-                                modifier = Modifier.rotate(checkedProgress * 135f) // Optional: Add rotation effect
-                            )
-                        }
-                    }
-                ) {
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            isFabMenuExpanded = false
-                            showCreateGroupDialog = true
-                        },
-                        icon = { Icon(Icons.Default.GroupAdd, contentDescription = null) },
-                        text = { Text("New Group") }
-                    )
-
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            isFabMenuExpanded = false
-                            showAddFriendDialog = true
-                        },
-                        icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
-                        text = { Text("Add Friend") }
-                    )
-                }
-            }
 
             SnackbarHost(
                 hostState = snackbarHostState,
@@ -426,20 +422,6 @@ fun ChatsScreen(
             }
         }
     }
-
-    if (showAddFriendDialog) {
-        AddFriendDialog(
-            viewModel = viewModel,
-            onDismiss = { showAddFriendDialog = false }
-        )
-    }
-
-    if (showCreateGroupDialog) {
-        CreateGroupDialog(
-            viewModel = viewModel,
-            onDismiss = { showCreateGroupDialog = false }
-        )
-    }
 }
 
 @Composable
@@ -451,41 +433,42 @@ fun ExpressiveMenuItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1f, label = "scale")
+    val scale by animateFloatAsState(targetValue = if (isPressed) 0.96f else 1f, label = "scale")
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .scale(scale)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
             .clickable(
                 interactionSource = interactionSource,
                 indication = LocalIndication.current,
                 onClick = onClick
             )
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(16.dp),
+            .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(44.dp)
+                .clip(CircleShape)
                 .background(
                      if (color == MaterialTheme.colorScheme.error) 
-                         MaterialTheme.colorScheme.errorContainer 
+                         MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
                      else 
-                         MaterialTheme.colorScheme.secondaryContainer, 
-                     CircleShape
+                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
+                modifier = Modifier.size(20.dp),
                 tint = if (color == MaterialTheme.colorScheme.error)
                         MaterialTheme.colorScheme.onErrorContainer
                     else
-                        MaterialTheme.colorScheme.onSecondaryContainer
+                        MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
         
@@ -493,8 +476,8 @@ fun ExpressiveMenuItem(
         
         Text(
             text = label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
             color = color
         )
     }
@@ -510,11 +493,14 @@ fun PremiumSearchBar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 2.dp,
-        tonalElevation = 2.dp
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        ),
+        tonalElevation = 4.dp
     ) {
         Row(
             modifier = Modifier
@@ -525,7 +511,7 @@ fun PremiumSearchBar(
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(22.dp)
             )
             OutlinedTextField(
@@ -536,9 +522,9 @@ fun PremiumSearchBar(
                     .padding(horizontal = 8.dp),
                 placeholder = {
                     Text(
-                        "Search conversations...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        "Search chats...",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 },
                 singleLine = true,
@@ -550,18 +536,17 @@ fun PremiumSearchBar(
                     unfocusedBorderColor = Color.Transparent,
                     cursorColor = MaterialTheme.colorScheme.primary
                 ),
-                textStyle = MaterialTheme.typography.bodyMedium
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.ExtraBold)
             )
             if (query.isNotEmpty()) {
-                IconButton(
+                BokBokIconButton(
                     onClick = { onQueryChange("") },
-                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Clear",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -598,9 +583,10 @@ fun ChatListItem(
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(targetValue = if (isPressed) 0.95f else 1f, label = "scale")
 
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .scale(scale)
             .onGloballyPositioned { coords ->
                 val pos = coords.positionInWindow()
@@ -615,16 +601,19 @@ fun ChatListItem(
                     onLongClick(itemPosition)
                 }
             ),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (hasUnread)
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            else
-                MaterialTheme.colorScheme.surfaceContainerLow
+        shape = RoundedCornerShape(28.dp),
+        color = if (hasUnread)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+        else
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = if (hasUnread) androidx.compose.foundation.BorderStroke(
+            width = 1.5.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        ) else androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = if (hasUnread) 4.dp else 1.dp
-        )
+        tonalElevation = if (hasUnread) 4.dp else 2.dp
     ) {
         Row(
             modifier = Modifier
@@ -633,21 +622,27 @@ fun ChatListItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Avatar with online indicator
-            Box(modifier = Modifier.size(56.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                    .padding(2.dp)
+            ) {
                 if (profileImageUrl.isNotEmpty()) {
                     AsyncImage(
                         model = profileImageUrl,
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(CircleShape),
+                            .clip(RoundedCornerShape(18.dp)),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(CircleShape)
+                            .clip(RoundedCornerShape(18.dp))
                             .background(
                                 brush = Brush.linearGradient(
                                     colors = listOf(
@@ -661,7 +656,7 @@ fun ChatListItem(
                         Text(
                             text = avatarText,
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
@@ -671,18 +666,17 @@ fun ChatListItem(
                 if (isOnline || currentRoomId != null) {
                     Box(
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(18.dp)
                             .align(Alignment.BottomEnd)
-                            .offset(x = 2.dp, y = 2.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface)
+                            .offset(x = 4.dp, y = 4.dp)
+                            .background(MaterialTheme.colorScheme.surface, CircleShape)
                             .padding(2.dp)
-                            .clip(CircleShape)
                             .background(
                                 if (currentRoomId != null)
                                     MaterialTheme.colorScheme.tertiary
                                 else
-                                    MaterialTheme.colorScheme.primary
+                                    MaterialTheme.colorScheme.primary,
+                                CircleShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {

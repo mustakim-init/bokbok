@@ -23,6 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,11 +46,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -63,6 +65,10 @@ import com.mustakim.bokbok.viewmodel.UsageStatsViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import com.mustakim.bokbok.ui.theme.GoogleSansFlex
+import com.mustakim.bokbok.ui.screens.common.MainScaffold
+import androidx.compose.foundation.BorderStroke
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +92,8 @@ fun UsageStatsScreen(
 
     if (!uiState.hasPermission) {
         PermissionRequestContent(onRequestPermission = { viewModel.requestPermission() })
+    } else if (uiState.isLoading && uiState.usageList.isEmpty()) {
+        com.mustakim.bokbok.ui.components.UsageStatsSkeleton()
     } else {
         val listState = rememberLazyListState()
         
@@ -125,18 +133,7 @@ fun UsageStatsScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                if (uiState.isLoading) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                } else if (uiState.usageList.isEmpty()) {
+                if (uiState.usageList.isEmpty()) {
                     item {
                         Box(
                             modifier = Modifier
@@ -169,24 +166,19 @@ fun UsageStatsHeader(
     onNextDate: () -> Unit,
     onPrevDate: () -> Unit
 ) {
-    val gradient = Brush.horizontalGradient(
-        colors = listOf(
-            MaterialTheme.colorScheme.primary,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) // Slightly lighter/transparent
-        )
-    )
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent), // Transparent to show gradient
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(28.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
     ) {
+
         Box(
             modifier = Modifier
-                .background(gradient)
+                .fillMaxWidth()
                 .padding(20.dp)
         ) {
             Column(
@@ -199,11 +191,11 @@ fun UsageStatsHeader(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    IconButton(onClick = onPrevDate) {
+                    BokBokIconButton(onClick = onPrevDate) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Previous",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     
@@ -211,14 +203,15 @@ fun UsageStatsHeader(
                         text = formatDate(currentDate, intervalType),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        fontFamily = GoogleSansFlex,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     
-                    IconButton(onClick = onNextDate) {
+                    BokBokIconButton(onClick = onNextDate) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "Next",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -232,7 +225,7 @@ fun UsageStatsHeader(
                         modifier = Modifier
                             .size(140.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.1f))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
                     )
                     
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -240,12 +233,13 @@ fun UsageStatsHeader(
                             text = formatDurationHeader(totalScreenTime),
                             style = MaterialTheme.typography.displayMedium,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            fontFamily = GoogleSansFlex,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Screen Time",
                             style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -292,7 +286,7 @@ fun UsageControls(
         
         // Sort Button
         Box {
-            IconButton(onClick = { sortMenuExpanded = true }) {
+            BokBokIconButton(onClick = { sortMenuExpanded = true }) {
                 Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort")
             }
             DropdownMenu(

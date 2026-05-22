@@ -43,6 +43,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +66,41 @@ import com.mustakim.bokbok.viewmodel.LoungeViewModel
 import com.mustakim.bokbok.viewmodel.UserViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.datastore.preferences.core.edit
+import com.mustakim.bokbok.data.local.dataStore
+import com.mustakim.bokbok.music.constants.LaunchCountKey
+import com.mustakim.bokbok.music.constants.HasPressedStarKey
+import com.mustakim.bokbok.music.constants.RemindAfterKey
+import com.mustakim.bokbok.util.Updater
+import com.mustakim.bokbok.BuildConfig
+import com.mustakim.bokbok.music.ui.component.MarkdownText
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import com.mustakim.bokbok.music.ui.component.StarDialog
+import com.mustakim.bokbok.ui.screens.lounge.CreateRoomDialog
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.flow.first
+import androidx.compose.ui.graphics.Brush
 
 @Composable
 fun LoungeScreen(
@@ -75,7 +112,16 @@ fun LoungeScreen(
     val uiState by loungeViewModel.uiState.collectAsState()
     val currentUser by userViewModel.currentUser.collectAsState()
     val currentUserId = currentUser?.uid
-    var showCreateRoomDialog by remember { mutableStateOf(false) }
+    var showUpdateBanner by rememberSaveable { mutableStateOf(false) }
+    var latestVersionName by rememberSaveable { mutableStateOf("") }
+    var releaseNotes by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cachedReleases by produceState(initialValue = emptyList<Updater.ReleaseInfo>()) {
+        value = Updater.getCachedReleases(context)
+    }
+    var showStarDialog by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
+    val coroutineScope = rememberCoroutineScope()
 
     // [NEW STATE VARIABLES]
     var showAlreadyInRoomDialog by remember { mutableStateOf(false) }
@@ -109,34 +155,85 @@ fun LoungeScreen(
         
         // Load data (runs once in ViewModel)
         loungeViewModel.loadInitialData()
-        
+
+        // Recovery: Check for updates
+        Updater.getLatestReleaseInfo().onSuccess { info ->
+            val name = Updater.getLatestVersionName().getOrNull() ?: info.tagName
+            if (!Updater.isSameVersion(name, BuildConfig.VERSION_NAME)) {
+                latestVersionName = name
+                releaseNotes = info.body
+                showUpdateBanner = true
+            }
+        }
+
         // Watch for data to arrive and hide skeleton
         if (loungeViewModel.shouldShowSkeleton) {
             launch {
                 loungeViewModel.uiState.collect { state ->
-                    android.util.Log.d("LoungeScreen", "State update: publicRooms=${state.publicRooms.size}, myRooms=${state.myRooms.size}")
-                    
                     if (state.publicRooms.isNotEmpty() || state.myRooms.isNotEmpty()) {
-                        android.util.Log.d("LoungeScreen", "Data loaded! Hiding skeleton")
                         loungeViewModel.hideSkeleton()
-                        
-                        // ✅ OPTIMIZED: Trigger Stage 2 initialization
-                        // This starts deferred tasks (FCM, presence, etc.) after first frame
                         com.mustakim.bokbok.startup.StartupManager.markDataReady()
                     }
                 }
             }
         } else {
-            // Already loaded - still mark data ready in case it wasn't
             com.mustakim.bokbok.startup.StartupManager.markDataReady()
         }
+    }
+
+    // Star dialog recovery
+    LaunchedEffect(Unit) {
+        delay(4000)
+        withContext(Dispatchers.IO) {
+            val current = context.dataStore.data.first()[LaunchCountKey] ?: 0
+            context.dataStore.edit { it[LaunchCountKey] = current + 1 }
+        }
+        val shouldShow = withContext(Dispatchers.IO) {
+            val prefs = context.dataStore.data.first()
+            val hasPressed = prefs[HasPressedStarKey] ?: false
+            val remindAfter = prefs[RemindAfterKey] ?: 3
+            !hasPressed && (prefs[LaunchCountKey] ?: 0) >= remindAfter
+        }
+        if (shouldShow) showStarDialog = true
     }
 
     MainScaffold(
         navController = navController,
         title = "BokBok",
+        showBottomBar = true,
+        useFlexibleTopBar = false,
+        isStatic = true,
         notificationCount = notificationCount,
-        userViewModel = userViewModel
+        userViewModel = userViewModel,
+        containerColor = Color.Transparent,
+        background = {
+            // Programmatic M3E Mesh gradient background layer
+            val color1 = MaterialTheme.colorScheme.primary
+            val color2 = MaterialTheme.colorScheme.secondary
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithCache {
+                        onDrawBehind {
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
+                                    center = Offset(size.width * 0.15f, size.height * 0.1f),
+                                    radius = size.width * 0.8f
+                                )
+                            )
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
+                                    center = Offset(size.width * 0.85f, size.height * 0.25f),
+                                    radius = size.width * 0.7f
+                                )
+                            )
+                        }
+                    }
+            )
+        }
     ) { paddingValues ->
         // Show skeleton only on first load until data arrives and min time passes
         val showSkeleton = loungeViewModel.shouldShowSkeleton || !loungeViewModel.minSkeletonTimeElapsed
@@ -158,7 +255,7 @@ fun LoungeScreen(
                 paddingValues = paddingValues,
                 uiState = uiState,
                 currentUserId = currentUserId,
-                onCreateRoom = { showCreateRoomDialog = true },
+                onCreateRoom = { /* Handled by NavGraph FAB */ },
                 // My Rooms tap → join call session only
                 onRoomClick = remember {
                     { room: VoiceRoom ->
@@ -222,21 +319,97 @@ fun LoungeScreen(
             )
         }
 
-        if (showCreateRoomDialog) {
-            CreateRoomDialog(
-                onDismiss = { showCreateRoomDialog = false },
-                onConfirm = { roomName, description, maxParticipants, category, isPublic, imageUri ->
-                    loungeViewModel.createRoom(
-                        roomName,
-                        description,
-                        maxParticipants,
-                        category,
-                        isPublic,
-                        imageUri
-                    )
-                    showCreateRoomDialog = false
+        if (showStarDialog) {
+            StarDialog(
+                onDismissRequest = { showStarDialog = false },
+                onStar = {
+                    coroutineScope.launch {
+                        context.dataStore.edit { prefs ->
+                            prefs[HasPressedStarKey] = true
+                        }
+                    }
+                    showStarDialog = false
+                },
+                onLater = {
+                    coroutineScope.launch {
+                        val current = withContext(Dispatchers.IO) { 
+                            context.dataStore.data.first()[LaunchCountKey] ?: 0 
+                        }
+                        context.dataStore.edit { prefs ->
+                            prefs[RemindAfterKey] = current + 10
+                        }
+                        showStarDialog = false
+                    }
                 }
             )
+        }
+
+        if (showUpdateBanner && latestVersionName.isNotBlank()) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showUpdateBanner = false }) {
+                ElevatedCard(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NewReleases,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = "Update available",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.weight(1f))
+                            BokBokIconButton(onClick = { showUpdateBanner = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {},
+                            shape = ButtonDefaults.shape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            Text(latestVersionName, style = MaterialTheme.typography.labelMedium)
+                        }
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        val notes = releaseNotes
+                        if (notes != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .heightIn(max = 260.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                MarkdownText(
+                                    markdown = notes,
+                                    modifier = Modifier.fillMaxWidth().padding(end = 4.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                try { com.mustakim.bokbok.util.Updater.getLatestDownloadUrl(cachedReleases)?.let { uriHandler.openUri(it) } } catch (_: Exception) {}
+                                showUpdateBanner = false
+                            },
+                            shape = ButtonDefaults.shape,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Download update")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -304,6 +477,7 @@ private fun LoungeContent(
                 totalParticipants = uiState.totalOnlineUsers,
                 isRefreshing = uiState.isRefreshingPublicRooms,
                 onRefresh = onRefreshPublicRooms,
+                onLoadMore = { /* TODO */ },
                 onJoinCallOnly = onJoinCallOnly,
                 onJoinPermanently = onJoinPermanently
             )
@@ -317,19 +491,6 @@ private fun LoungeContent(
             contentColor = MaterialTheme.colorScheme.primary
         )
 
-        FloatingActionButton(
-            onClick = onCreateRoom,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(
-                    end = 32.dp,
-                    bottom = if (isMinimized) 120.dp else 36.dp
-                ),
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ) {
-            Icon(Icons.Default.Add, "Create Room")
-        }
     }
 }
 

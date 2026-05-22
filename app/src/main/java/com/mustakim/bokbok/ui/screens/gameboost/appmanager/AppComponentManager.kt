@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.data.model.AppComponent
 import com.mustakim.bokbok.data.repository.AppManagerRepository
 import com.mustakim.bokbok.viewmodel.AppDetailsViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,7 +39,7 @@ fun AppComponentManagerScreen(
             TopAppBar(
                 title = { Text("Component Manager") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    BokBokIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }

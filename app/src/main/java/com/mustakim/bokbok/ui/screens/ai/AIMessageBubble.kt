@@ -26,8 +26,13 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.data.model.AIMessage
+import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.MessageRole
 
 @Composable
@@ -41,14 +46,20 @@ fun AIMessageBubble(
     
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val primaryColor = MaterialTheme.colorScheme.primary
-    val containerColor = if (isUser) primaryColor else MaterialTheme.colorScheme.surfaceContainerHigh
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    
+    val userGradient = Brush.linearGradient(
+        colors = listOf(primaryColor, tertiaryColor)
+    )
+    
+    val aiContainerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f)
     val contentColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
     
-    val cornerRadius = 24.dp
+    val cornerRadius = 28.dp
     val shape = if (isUser) {
-        RoundedCornerShape(cornerRadius, cornerRadius, 4.dp, cornerRadius)
+        RoundedCornerShape(cornerRadius, cornerRadius, 8.dp, cornerRadius)
     } else {
-        RoundedCornerShape(4.dp, cornerRadius, cornerRadius, cornerRadius)
+        RoundedCornerShape(8.dp, cornerRadius, cornerRadius, cornerRadius)
     }
 
     Column(
@@ -94,9 +105,17 @@ fun AIMessageBubble(
             modifier = Modifier
                 .then(
                     if (isUser) Modifier.widthIn(max = 300.dp).align(Alignment.End).padding(end = 16.dp)
-                    else Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    else Modifier.fillMaxWidth().padding(horizontal = 12.dp)
                 )
-                .background(containerColor, shape)
+                .then(
+                    if (isUser) Modifier.background(userGradient, shape)
+                    else Modifier
+                        .background(aiContainerColor, shape)
+                        .border(
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            shape
+                        )
+                )
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onLongPress = {
@@ -107,7 +126,7 @@ fun AIMessageBubble(
                         }
                     )
                 }
-                .padding(14.dp)
+                .padding(16.dp)
                 .animateContentSize()
         ) {
                 SelectionContainer {

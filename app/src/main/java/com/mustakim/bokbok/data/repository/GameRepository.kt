@@ -7,7 +7,6 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import com.mustakim.bokbok.data.fps.FpsDaemonManager
 import com.mustakim.bokbok.data.local.dao.GameDao
 import com.mustakim.bokbok.data.local.entity.AppEntity
 import com.mustakim.bokbok.data.local.entity.GameEntity
@@ -421,48 +420,6 @@ class GameRepository @Inject constructor(
         }
     }
 
-
-    /**
-     * Parses PROFILEDATA from "dumpsys gfxinfo <pkg> framestats"
-     * Column index 13 = FRAME_COMPLETED nanosecond timestamp
-     * Counts frames completed within the last 1 second window
-     */
-    private fun parseFramestatsFps(raw: String): Float {
-        android.util.Log.d("FPS-DEBUG", "=== RAW OUTPUT ===")
-        android.util.Log.d("FPS-DEBUG", raw.take(2000)) // First 2000 chars
-
-        val lines = raw.lines()
-        val startIdx = lines.indexOfFirst { it.trimStart().startsWith("---PROFILEDATA---") }
-        val endIdx   = lines.indexOfLast  { it.trimStart().startsWith("---PROFILEDATA---") }
-
-        android.util.Log.d("FPS-DEBUG", "startIdx=$startIdx endIdx=$endIdx totalLines=${lines.size}")
-
-        if (startIdx < 0 || endIdx <= startIdx) {
-            android.util.Log.d("FPS-DEBUG", "PROFILEDATA block not found!")
-            return 0f
-        }
-
-        val frameLines = lines.subList(startIdx + 2, endIdx)
-        android.util.Log.d("FPS-DEBUG", "frameLines count=${frameLines.size}")
-        android.util.Log.d("FPS-DEBUG", "first frameline: ${frameLines.firstOrNull()}")
-        android.util.Log.d("FPS-DEBUG", "last frameline: ${frameLines.lastOrNull()}")
-
-        val timestamps = frameLines.mapNotNull { line ->
-            line.split(",").getOrNull(13)?.trim()?.toLongOrNull()
-        }.filter { it > 0 }
-
-        android.util.Log.d("FPS-DEBUG", "valid timestamps count=${timestamps.size}")
-        android.util.Log.d("FPS-DEBUG", "last timestamp=${timestamps.lastOrNull()}")
-
-        if (timestamps.size < 2) return 0f
-
-        val nowNs          = timestamps.last()
-        val oneSecAgoNs    = nowNs - 1_000_000_000L
-        val framesInWindow = timestamps.count { it >= oneSecAgoNs }
-
-        android.util.Log.d("FPS-DEBUG", "framesInWindow=$framesInWindow")
-        return if (framesInWindow > 0) framesInWindow.toFloat() else 0f
-    }
 
     /**
      * Parses "dumpsys SurfaceFlinger --latency" output.

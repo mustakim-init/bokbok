@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.viewmodel.GroupChatViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,7 +41,7 @@ fun ChatMembersScreen(
             TopAppBar(
                 title = { Text("Chat Members") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    BokBokIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -149,7 +150,7 @@ fun MemberItem(
 
         // Owner actions
         if (isOwner && !isMe) {
-            IconButton(onClick = onRemove) {
+            BokBokIconButton(onClick = onRemove) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Remove",

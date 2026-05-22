@@ -53,27 +53,26 @@ fun <T> RoundedParallaxCarousel(
             }
         }.value
 
-        // ✅ Cache all transformations together
+        // ✅ Cache all transformations together for "Expressive" depth
         val transformations = remember(pageOffset) {
             val offsetClamped = pageOffset.coerceIn(0f, 1f)
-            Triple(
-                lerp(0.85f, 1f, 1f - offsetClamped), // scale
-                lerp(0.5f, 1f, 1f - offsetClamped),  // alpha
-                pageOffset * 50f                      // translationX
-            )
+            val scale = lerp(0.82f, 1f, 1f - offsetClamped)
+            val alpha = lerp(0.4f, 1f, 1f - offsetClamped)
+            val rotation = lerp(12f, 0f, 1f - pageOffset.coerceIn(-1f, 1f).absoluteValue) * (if (pageOffset > 0) -1 else 1)
+            
+            Triple(scale, alpha, rotation)
         }
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
-                    // ✅ Apply all transformations at once
                     scaleX = transformations.first
                     scaleY = transformations.first
-                    translationX = transformations.third
                     alpha = transformations.second
-
-                }
+                    // rotationY = transformations.third // Rotation might be too much for some devices, keep it subtle
+                },
+            contentAlignment = Alignment.Center
         ) {
             content(items[page], page)
         }

@@ -65,6 +65,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.RoomCategory
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @Composable
 fun CreateRoomDialog(
@@ -165,7 +166,7 @@ fun CreateRoomDialog(
                         }
 
                         // Close Button
-                        IconButton(
+                        BokBokIconButton(
                             onClick = onDismiss,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
@@ -426,5 +427,4 @@ private fun CategoryChip(
 
 // Extension to use scale on modifier easily if needed
 fun Modifier.scale(scale: Float): Modifier = this.then(Modifier.graphicsLayer(scaleX = scale, scaleY = scale))
-
 

@@ -93,7 +93,8 @@ class WebRTCClient(
     private val statsHandler = Handler(Looper.getMainLooper())
     private var statsPolling = false
 
-    private var isHighQuality: Boolean = true
+    private var bitrate: Int = 24
+    private var isStereo: Boolean = false
 
     private val audioConstraints: MediaConstraints
         get() {
@@ -748,14 +749,25 @@ class WebRTCClient(
         pendingRemoteCandidates.remove(remoteId)
     }
 
-    fun setHighQuality(enabled: Boolean) {
-        if (isHighQuality == enabled) return
-        isHighQuality = enabled
-        Log.d(tag, "Setting Quality Mode: ${if (enabled) "HIGH (64kbps Stereo)" else "LOW (32kbps Mono)"}")
+    fun setBitrate(value: Int) {
+        if (bitrate == value) return
+        bitrate = value
+        Log.d(tag, "Setting Bitrate: ${value}kbps")
 
         // Trigger renegotiation to apply new SDP params
         peerConnections.keys.forEach { remoteId ->
-            restartIceConnection(remoteId) // Re-uses existing logic to send new Offer
+            restartIceConnection(remoteId)
+        }
+    }
+
+    fun setStereo(enabled: Boolean) {
+        if (isStereo == enabled) return
+        isStereo = enabled
+        Log.d(tag, "Setting Stereo: $enabled")
+
+        // Trigger renegotiation to apply new SDP params
+        peerConnections.keys.forEach { remoteId ->
+            restartIceConnection(remoteId)
         }
     }
     
@@ -816,20 +828,18 @@ class WebRTCClient(
         // 3. Inject Parameters
         // REMOVED: usedtx=1 (Causes breaking up if VAD is too aggressive)
         // REMOVED: cbr=0 (Variable bitrate can sometimes cause jitter on unstable nets)
-        val params = if (isHighQuality) {
-            // 🌟 HIGH QUALITY: 64kbps Stereo
-            ";maxaveragebitrate=64000;stereo=1;sprop-stereo=1"
-        } else {
-            // 📉 LOW QUALITY: 32kbps Mono, robust
-            ";maxaveragebitrate=32000;stereo=0"
-        }
+        val params = ";maxaveragebitrate=${bitrate * 1000};stereo=${if (isStereo) 1 else 0}${if (isStereo) ";sprop-stereo=1" else ""}"
 
         if (fmtpIndex != -1) {
-            // Append to existing line
-            val currentLine = lines[fmtpIndex]
-            if (!currentLine.contains("maxaveragebitrate")) {
-                lines[fmtpIndex] = currentLine + params
-            }
+            // 🛑 FIX: Properly replace existing parameters instead of just appending
+            var line = lines[fmtpIndex]
+            
+            // Remove any existing bitrate or stereo settings to avoid duplicates
+            line = line.replace(Regex(";maxaveragebitrate=\\d+"), "")
+            line = line.replace(Regex(";stereo=[01]"), "")
+            line = line.replace(Regex(";sprop-stereo=[01]"), "")
+            
+            lines[fmtpIndex] = line + params
         } else {
             // Insert new line after rtpmap
             // minptime=20 -> Standard 20ms packets

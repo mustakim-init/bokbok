@@ -35,6 +35,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import com.mustakim.bokbok.ui.navigation.NavRoutes
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +54,7 @@ fun RecordingsGalleryScreen(
             TopAppBar(
                 title = { Text("All Recordings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    BokBokIconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -194,13 +195,13 @@ fun RecordingCard(
                         fontSize = 10.sp
                     )
                     Row {
-                        IconButton(
+                        BokBokIconButton(
                             onClick = onShare,
                             modifier = Modifier.size(24.dp)
                         ) {
                             Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(16.dp))
                         }
-                        IconButton(
+                        BokBokIconButton(
                             onClick = onDelete,
                             modifier = Modifier.size(24.dp)
                         ) {

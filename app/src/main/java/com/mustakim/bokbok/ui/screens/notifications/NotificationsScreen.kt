@@ -77,6 +77,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.cos
 import kotlin.math.sin
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 // --- Custom "Expressive" Shape (Scalloped/Star) ---
 class ExpressiveStarShape(private val points: Int = 12) : Shape {
@@ -128,7 +129,7 @@ fun NotificationsScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(
+                        BokBokIconButton(
                             onClick = { navController.navigateUp() },
                             modifier = Modifier
                                 .padding(start = 8.dp)

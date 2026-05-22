@@ -38,13 +38,19 @@ class BootReceiver : BroadcastReceiver() {
                 }
             }
 
-            // 2. Trigger Resurrection flow (this is the ONLY place that enqueues resurrection on boot)
-            // GameWatchdogService intentionally delays 30s before its first check to avoid racing with this.
-            android.util.Log.d("BootReceiver", "Triggering AdbResurrectionWorker...")
-            com.mustakim.bokbok.data.worker.AdbResurrectionWorker.enqueue(context)
-            
-            // 3. Start Sentinel Service
-            com.mustakim.bokbok.data.service.GameWatchdogService.start(context)
+            // Check user consent for experimental background features
+            val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            if (prefs.getBoolean("pref_experimental_features", false)) {
+                // 2. Trigger Resurrection flow (this is the ONLY place that enqueues resurrection on boot)
+                // GameWatchdogService intentionally delays 30s before its first check to avoid racing with this.
+                android.util.Log.d("BootReceiver", "Triggering AdbResurrectionWorker...")
+                com.mustakim.bokbok.data.worker.AdbResurrectionWorker.enqueue(context)
+                
+                // 3. Start Sentinel Service
+                com.mustakim.bokbok.data.service.GameWatchdogService.start(context)
+            } else {
+                android.util.Log.d("BootReceiver", "Experimental background services disabled by user consent.")
+            }
         }
     }
 }

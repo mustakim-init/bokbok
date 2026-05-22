@@ -32,6 +32,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -49,11 +51,18 @@ import com.mustakim.bokbok.ui.screens.gameboost.appmanager.components.AppFilterB
 import com.mustakim.bokbok.ui.screens.gameboost.appmanager.components.AppSortBottomSheet
 import com.mustakim.bokbok.viewmodel.AppFilterType
 import com.mustakim.bokbok.viewmodel.AppManagerViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import com.mustakim.bokbok.ui.shared.TopSearch
+import androidx.compose.ui.text.input.TextFieldValue
+
+import com.mustakim.bokbok.ui.screens.common.MainScaffold
+import com.mustakim.bokbok.viewmodel.UserViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppManagerScreen(
     navController: androidx.navigation.NavController,
+    userViewModel: UserViewModel,
     viewModel: AppManagerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -64,6 +73,7 @@ fun AppManagerScreen(
     val sortOrder by viewModel.sortOrder.collectAsState()
     
     var isSearchActive by remember { mutableStateOf(searchQuery.isNotEmpty()) }
+    var searchTextFieldValue by remember { mutableStateOf(TextFieldValue(searchQuery)) }
     val listState = rememberLazyListState()
     
     // Bottom Sheets
@@ -91,138 +101,128 @@ fun AppManagerScreen(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
         if (uiState.selectedCount > 0) {
-            // Selection Toolbar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Selection Toolbar - Inline
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+                tonalElevation = 4.dp
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.clearSelection() }) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear Selection")
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
+                            Icon(Icons.Default.Close, "Clear", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Text(
+                            text = "${uiState.selectedCount} selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     }
-                    Text(
-                        text = "${uiState.selectedCount} selected",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                
-                Row {
-                    if (filterType == AppFilterType.UNINSTALLED) {
-                        IconButton(onClick = { viewModel.onRestoreSelected() }) {
-                            Icon(imageVector = Icons.Default.Refresh, contentDescription = "Restore")
-                        }
-                    } else {
-                        IconButton(onClick = { viewModel.onUninstallSelected() }) {
-                            Icon(imageVector = Icons.Default.Delete, contentDescription = "Uninstall")
-                        }
-                        IconButton(onClick = { viewModel.onForceStopSelected() }) {
-                            Icon(imageVector = Icons.Default.Stop, contentDescription = "Force Stop")
-                        }
-                        IconButton(onClick = { viewModel.onClearCacheSelected() }) {
-                            Icon(imageVector = Icons.Default.CleaningServices, contentDescription = "Clear Cache")
+                    
+                    Row {
+                        if (filterType == AppFilterType.UNINSTALLED) {
+                            IconButton(onClick = { viewModel.onRestoreSelected() }) {
+                                Icon(Icons.Default.Refresh, "Restore", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                        } else {
+                            IconButton(onClick = { viewModel.onUninstallSelected() }) {
+                                Icon(Icons.Default.Delete, "Uninstall", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            IconButton(onClick = { viewModel.onForceStopSelected() }) {
+                                Icon(Icons.Default.Stop, "Force Stop", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            IconButton(onClick = { viewModel.onClearCacheSelected() }) {
+                                Icon(Icons.Default.CleaningServices, "Clear Cache", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
                         }
                     }
                 }
             }
         } else {
-            // Search and Toolbar
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                androidx.compose.animation.AnimatedContent(
-                    targetState = isSearchActive,
-                    label = "SearchTransition"
-                ) { active ->
-                    if (active) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { viewModel.onSearchQueryChanged(it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Search apps...") },
-                            leadingIcon = {
-                                IconButton(onClick = { 
-                                    isSearchActive = false
-                                    viewModel.onSearchQueryChanged("")
-                                }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close Search")
-                                }
-                            },
-                            trailingIcon = {
-                                Row {
-                                    IconButton(onClick = { viewModel.showFilterSheet() }) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.FilterAlt,
-                                            contentDescription = "Filter"
-                                        )
-                                    }
-                                    IconButton(onClick = { viewModel.showSortSheet() }) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.Sort,
-                                            contentDescription = "Sort"
-                                        )
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            shape = CircleShape,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            )
+            // Inline Search Bar
+            androidx.compose.animation.AnimatedContent(
+                targetState = isSearchActive,
+                label = "SearchTransition"
+            ) { active ->
+                if (active) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChanged(it) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        placeholder = { Text("Search apps...") },
+                        leadingIcon = {
+                            IconButton(onClick = { 
+                                isSearchActive = false
+                                viewModel.onSearchQueryChanged("")
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close Search")
+                            }
+                        },
+                        trailingIcon = {
+                             Row {
+                                 IconButton(onClick = { viewModel.showFilterSheet() }) {
+                                     Icon(Icons.Outlined.FilterAlt, "Filter")
+                                 }
+                                 IconButton(onClick = { viewModel.showSortSheet() }) {
+                                     Icon(Icons.AutoMirrored.Filled.Sort, "Sort")
+                                 }
+                             }
+                        },
+                        singleLine = true,
+                        shape = CircleShape,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
                         )
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "App Manager",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            
-                                Row {
-                                    IconButton(onClick = { isSearchActive = true }) {
-                                        Icon(Icons.Default.Search, contentDescription = "Search")
-                                    }
-                                    IconButton(onClick = { viewModel.showFilterSheet() }) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.FilterAlt,
-                                            contentDescription = "Filter"
-                                        )
-                                    }
-                                    IconButton(onClick = { viewModel.showSortSheet() }) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.Sort,
-                                            contentDescription = "Sort"
-                                        )
-                                    }
-                                }
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .height(56.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, "Search")
+                        }
+                        IconButton(onClick = { viewModel.showFilterSheet() }) {
+                            Icon(Icons.Outlined.FilterAlt, "Filter")
+                        }
+                        IconButton(onClick = { viewModel.showSortSheet() }) {
+                            Icon(Icons.AutoMirrored.Filled.Sort, "Sort")
+                        }
+                        IconButton(onClick = { viewModel.onRefresh() }) {
+                            Icon(Icons.Default.Refresh, "Refresh")
                         }
                     }
                 }
             }
         }
 
-        // Content
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        Box(
+            modifier = Modifier.weight(1f)
+        ) {
+            if (uiState.isLoading && uiState.apps.isEmpty()) {
+                com.mustakim.bokbok.ui.shared.shimmer.ShimmerHost(modifier = Modifier.fillMaxSize()) {
+                    repeat(10) {
+                        com.mustakim.bokbok.ui.components.ListItemPlaceholder()
+                    }
+                }
             } else if (uiState.apps.isEmpty()) {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
@@ -264,4 +264,3 @@ fun AppManagerScreen(
         }
     }
 }
-

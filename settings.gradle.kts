@@ -23,4 +23,16 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "BokBok"
-include(":app", ":baselineprofile")
+include(":app")
+// include(":baselineprofile")
+include(":innertube")
+include(":simpmusic")
+include(":betterlyrics")
+include(":kizzy")
+include(":lrclib")
+include(":lastfm")
+include(":kugou")
+include(":shazamkit")
+include(":canvas")
+include(":core")
+include(":feature:music")

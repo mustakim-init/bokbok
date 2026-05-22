@@ -28,6 +28,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.zIndex
 import com.mustakim.bokbok.data.model.*
 import com.mustakim.bokbok.ui.theme.GoogleSansFlex
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
@@ -37,6 +41,12 @@ import org.json.JSONObject
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,28 +62,130 @@ fun GameDetailScreen(
     val tweaksByCategory = remember { TweakCatalog.getFilteredTweaks().groupBy { it.category } }
     val launchState by viewModel.launchState.collectAsState()
     val shizukuActive by viewModel.shizukuActive.collectAsState()
-    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color.Transparent,
         topBar = {
-            TopAppBar(
+            LargeFlexibleTopAppBar(
                 title = { Text(game.label, fontFamily = GoogleSansFlex, fontWeight = FontWeight.ExtraBold) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    BokBokIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-                )
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent
+                ),
+                windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
             )
         }
     ) { innerPadding ->
+        // Capture M3 Expressive colors from theme
+        val color1 = MaterialTheme.colorScheme.primary
+        val color2 = MaterialTheme.colorScheme.secondary
+        val color3 = MaterialTheme.colorScheme.tertiary
+        val color4 = MaterialTheme.colorScheme.primaryContainer
+        val color5 = MaterialTheme.colorScheme.secondaryContainer
+        val surfaceColor = MaterialTheme.colorScheme.surface
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            // M3E Mesh gradient background layer
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxSize(0.7f)
+                    .align(Alignment.TopCenter)
+                    .zIndex(-1f)
+                    .drawWithCache {
+                        val width = this.size.width
+                        val height = this.size.height
+
+                        val brush1 = Brush.radialGradient(
+                            colors = listOf(
+                                color1.copy(alpha = 0.38f),
+                                color1.copy(alpha = 0.24f),
+                                color1.copy(alpha = 0.14f),
+                                color1.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.15f, height * 0.1f),
+                            radius = width * 0.55f
+                        )
+
+                        val brush2 = Brush.radialGradient(
+                            colors = listOf(
+                                color2.copy(alpha = 0.34f),
+                                color2.copy(alpha = 0.2f),
+                                color2.copy(alpha = 0.11f),
+                                color2.copy(alpha = 0.05f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.85f, height * 0.2f),
+                            radius = width * 0.65f
+                        )
+
+                        val brush3 = Brush.radialGradient(
+                            colors = listOf(
+                                color3.copy(alpha = 0.3f),
+                                color3.copy(alpha = 0.17f),
+                                color3.copy(alpha = 0.09f),
+                                color3.copy(alpha = 0.04f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.3f, height * 0.45f),
+                            radius = width * 0.6f
+                        )
+
+                        val brush4 = Brush.radialGradient(
+                            colors = listOf(
+                                color4.copy(alpha = 0.26f),
+                                color4.copy(alpha = 0.14f),
+                                color4.copy(alpha = 0.08f),
+                                color4.copy(alpha = 0.03f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.7f, height * 0.5f),
+                            radius = width * 0.7f
+                        )
+
+                        val brush5 = Brush.radialGradient(
+                            colors = listOf(
+                                color5.copy(alpha = 0.22f),
+                                color5.copy(alpha = 0.12f),
+                                color5.copy(alpha = 0.06f),
+                                color5.copy(alpha = 0.02f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.5f, height * 0.75f),
+                            radius = width * 0.8f
+                        )
+
+                        val overlayBrush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Transparent,
+                                surfaceColor.copy(alpha = 0.22f),
+                                surfaceColor.copy(alpha = 0.55f),
+                                surfaceColor
+                            ),
+                            startY = height * 0.4f,
+                            endY = height
+                        )
+
+                        onDrawBehind {
+                            drawRect(brush = brush1)
+                            drawRect(brush = brush2)
+                            drawRect(brush = brush3)
+                            drawRect(brush = brush4)
+                            drawRect(brush = brush5)
+                            drawRect(brush = overlayBrush)
+                        }
+                    }
+            )
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -330,9 +442,9 @@ fun GameDetailScreen(
                     )
                 }
             }
+            }
         }
     }
-
 }
 
 @Composable
@@ -383,6 +495,7 @@ fun TweakControl(
                             tweak.title, 
                             fontWeight = FontWeight.Bold, 
                             style = MaterialTheme.typography.bodyLarge,
+                            fontFamily = GoogleSansFlex,
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         if (tweak.requiresAdb) {
@@ -474,6 +587,7 @@ fun TweakControl(
                                     option, 
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
+                                    fontFamily = GoogleSansFlex,
                                     color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1
                                 )

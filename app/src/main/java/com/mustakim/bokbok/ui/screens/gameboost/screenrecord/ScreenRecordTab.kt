@@ -146,6 +146,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -153,6 +154,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -173,6 +175,7 @@ import com.mustakim.bokbok.viewmodel.ScreenRecordViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -421,7 +424,7 @@ fun ScreenRecordTab(
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
                                                         Text(profile.name, style = MaterialTheme.typography.bodyLarge)
-                                                        IconButton(onClick = { viewModel.deleteCustomProfile(profile.name) }) {
+                                                        BokBokIconButton(onClick = { viewModel.deleteCustomProfile(profile.name) }) {
                                                             Icon(
                                                                 Icons.Default.Delete,
                                                                 contentDescription = "Delete ${profile.name}",
@@ -767,7 +770,7 @@ fun ScreenRecordTab(
                                         singleLine = true,
                                         placeholder = { Text("/sdcard/.../logo.png") },
                                         trailingIcon = {
-                                            IconButton(onClick = { /* TODO: File Picker */ }) {
+                                            BokBokIconButton(onClick = { /* TODO: File Picker */ }) {
                                                 Icon(Icons.Default.FolderOpen, null)
                                             }
                                         }
@@ -1526,7 +1529,7 @@ fun RecordingsHistorySection(
                             Text("PIN: $wifiPin", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                         }
                     }
-                    IconButton(onClick = onToggleWifiShare) {
+                    BokBokIconButton(onClick = onToggleWifiShare) {
                         Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
                     }
                 }
@@ -1656,7 +1659,7 @@ fun RecordingHistoryCard(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            IconButton(
+            BokBokIconButton(
                 onClick = onDelete,
                 modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f))
             ) {
@@ -1779,4 +1782,3 @@ fun OverlaySettingsGroup(config: RecordConfig, viewModel: ScreenRecordViewModel)
         }
     }
 }
-

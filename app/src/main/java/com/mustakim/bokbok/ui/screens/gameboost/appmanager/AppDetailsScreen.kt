@@ -20,8 +20,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -40,6 +43,8 @@ import com.mustakim.bokbok.utils.AppIcon
 import com.mustakim.bokbok.viewmodel.AppDetailsViewModel
 import com.mustakim.bokbok.data.repository.AppManagerRepository
 import java.text.DecimalFormat
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import com.mustakim.bokbok.ui.screens.common.MainScaffold
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -73,26 +78,57 @@ fun AppDetailsScreen(
         null -> {}
     }
 
-    Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+    Box(modifier = Modifier.fillMaxSize()) {
+        // M3E Mesh gradient background layer
+        val color1 = MaterialTheme.colorScheme.primary
+        val color2 = MaterialTheme.colorScheme.secondary
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithCache {
+                    onDrawBehind {
+                        drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                                colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
+                                center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.1f),
+                                radius = size.width * 0.8f
+                            )
+                        )
+                        drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                                colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
+                                center = androidx.compose.ui.geometry.Offset(size.width * 0.85f, size.height * 0.25f),
+                                radius = size.width * 0.7f
+                            )
+                        )
+                    }
+                }
+        )
+        
+        Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+            containerColor = Color.Transparent,
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { 
                     app?.let { 
                         Text(
                             text = it.label,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         ) 
                     } 
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    BokBokIconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    BokBokIconButton(onClick = {
                         app?.let {
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = Uri.fromParts("package", it.packageName, null)
@@ -105,9 +141,9 @@ fun AppDetailsScreen(
                     }
                 },
                 scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                 )
             )
         }
@@ -175,6 +211,7 @@ fun AppDetailsScreen(
         }
     }
 }
+}
 
 @Composable
 fun SectionHeader(title: String) {
@@ -198,16 +235,19 @@ private fun AppHeroHeader(
     ) {
         // Large Icon (120dp)
         Surface(
-            modifier = Modifier.size(120.dp),
+            modifier = Modifier.size(140.dp),
             shape = RoundedCornerShape(32.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            tonalElevation = 4.dp
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+            tonalElevation = 6.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         ) {
-            AsyncImage(
-                model = AppIcon(app.packageName),
-                contentDescription = null,
-                modifier = Modifier.padding(20.dp).fillMaxSize()
-            )
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                AsyncImage(
+                    model = AppIcon(app.packageName),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -399,36 +439,38 @@ private fun AppAnalysisElevatedCard(
     val permissionCount by viewModel.permissionCount.collectAsState()
     val componentCounts by viewModel.componentCounts.collectAsState()
 
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+        tonalElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
-        Column(modifier = Modifier.padding(4.dp)) {
+        Column(modifier = Modifier.padding(8.dp)) {
             ListItem(
-                headlineContent = { Text("Permissions") },
+                headlineContent = { Text("Permissions", fontWeight = FontWeight.Bold) },
                 supportingContent = { Text("$permissionCount requested by app") },
-                leadingContent = { Icon(Icons.Default.Security, null) },
+                leadingContent = { Icon(Icons.Default.Security, null, tint = MaterialTheme.colorScheme.primary) },
                 trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManagePermissions() },
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onManagePermissions() },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             )
-            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ListItem(
-                headlineContent = { Text("Components") },
+                headlineContent = { Text("Components", fontWeight = FontWeight.Bold) },
                 supportingContent = { Text("${componentCounts.first} services, ${componentCounts.second} receivers") },
-                leadingContent = { Icon(Icons.Default.Extension, null) },
+                leadingContent = { Icon(Icons.Default.Extension, null, tint = MaterialTheme.colorScheme.secondary) },
                 trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.SERVICE) },
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.SERVICE) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             )
-            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ListItem(
-                headlineContent = { Text("Activities") },
+                headlineContent = { Text("Activities", fontWeight = FontWeight.Bold) },
                 supportingContent = { Text("${componentCounts.third} activities found") },
-                leadingContent = { Icon(Icons.Default.PlayCircle, null) },
+                leadingContent = { Icon(Icons.Default.PlayCircle, null, tint = MaterialTheme.colorScheme.tertiary) },
                 trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.ACTIVITY) },
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable { onManageComponents(AppManagerRepository.ComponentType.ACTIVITY) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             )
         }
@@ -443,45 +485,48 @@ private fun StorageCard(
     onClearCache: () -> Unit,
     onClearData: () -> Unit
 ) {
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+        tonalElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("APK Size", style = MaterialTheme.typography.bodyMedium)
-                Text(formatFileSize(app.apkSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(formatFileSize(app.apkSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Data Size", style = MaterialTheme.typography.bodyMedium)
-                Text(formatFileSize(app.dataSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(formatFileSize(app.dataSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Cache Size", style = MaterialTheme.typography.bodyMedium)
-                Text(formatFileSize(app.cacheSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(formatFileSize(app.cacheSize), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold)
             }
             
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
             
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = onClearCache,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
-                    Text("Clear Cache")
+                    Text("Clear Cache", fontWeight = FontWeight.Bold)
                 }
                 
                 Button(
                     onClick = onClearData,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Clear Data")
+                    Text("Clear Data", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -490,12 +535,14 @@ private fun StorageCard(
 
 @Composable
 private fun TechnicalInfoCard(app: AppItem) {
-    ElevatedCard(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+        tonalElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TechRow("Package", app.packageName, true)
             TechRow("Category", getCategoryName(app.category))
             TechRow("Target SDK", "Android ${getTargetAndroidName(app.targetSdk)} (${app.targetSdk})")

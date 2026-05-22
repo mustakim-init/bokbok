@@ -46,7 +46,21 @@ import androidx.navigation.NavController
 import com.mustakim.bokbok.data.model.*
 import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.viewmodel.GameSpaceViewModel
-
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import com.mustakim.bokbok.ui.shared.TopSearch
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.mustakim.bokbok.ui.components.ListItemPlaceholder
+import com.mustakim.bokbok.ui.shared.shimmer.ShimmerHost
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameListScreen(
@@ -63,156 +77,152 @@ fun GameListScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    var searchTextFieldValue by remember { mutableStateOf(TextFieldValue(searchQuery)) }
     var isSearchActive by remember { mutableStateOf(searchQuery.isNotEmpty()) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // Contextual Header (Selection or Search)
-            AnimatedContent(
-                targetState = isSelectionMode,
-                label = "HeaderTransition"
-            ) { selectionActive ->
-                if (selectionActive) {
-                    // Selection Mode Toolbar
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (isSelectionMode) {
+                // Selection Toolbar - Inline
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+                    tonalElevation = 4.dp
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { viewModel.clearSelection() }) {
-                                Icon(Icons.Default.Close, null)
+                                Icon(Icons.Default.Close, "Clear", tint = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
-                            Spacer(Modifier.padding(horizontal = 4.dp))
                             Text(
                                 text = "${selectedGames.size} selected",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
+                        
                         IconButton(onClick = { showDeleteConfirm = true }) {
-                            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Delete, "Remove", tint = MaterialTheme.colorScheme.error)
                         }
                     }
-                } else {
-                    // Intelligent Search Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        AnimatedContent(
-                            targetState = isSearchActive,
-                            modifier = Modifier.weight(1f),
-                            label = "SearchFieldTransition"
-                        ) { searchActive ->
-                            if (searchActive) {
-                                OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = { viewModel.onSearchQueryChanged(it) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    placeholder = { Text("Search your games...") },
-                                    leadingIcon = {
-                                        IconButton(onClick = { 
-                                            isSearchActive = false
-                                            viewModel.onSearchQueryChanged("")
-                                        }) {
-                                            Icon(Icons.Default.Close, null)
-                                        }
-                                    },
-                                    singleLine = true,
-                                    shape = CircleShape,
-                                    colors = TextFieldDefaults.colors(
-                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                        focusedIndicatorColor = Color.Transparent,
-                                        unfocusedIndicatorColor = Color.Transparent
-                                    )
-                                )
-                            } else {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(56.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "My Games",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    IconButton(onClick = { isSearchActive = true }) {
-                                        Icon(Icons.Default.Search, null)
-                                    }
+                }
+            } else {
+                // Inline Search Bar
+                androidx.compose.animation.AnimatedContent(
+                    targetState = isSearchActive,
+                    label = "SearchTransition"
+                ) { active ->
+                    if (active) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.onSearchQueryChanged(it) },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                            placeholder = { Text("Search your games...") },
+                            leadingIcon = {
+                                IconButton(onClick = { 
+                                    isSearchActive = false
+                                    viewModel.onSearchQueryChanged("")
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close Search")
                                 }
+                            },
+                            singleLine = true,
+                            shape = CircleShape,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .height(56.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            IconButton(onClick = { isSearchActive = true }) {
+                                Icon(Icons.Default.Search, "Search")
                             }
                         }
                     }
                 }
             }
 
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (games.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "No games found",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Add your favorite games manually",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            Box(modifier = Modifier.weight(1f)) {
+                if (isLoading) {
+                    ShimmerHost(modifier = Modifier.fillMaxSize()) {
+                        repeat(6) {
+                            ListItemPlaceholder()
+                        }
                     }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 88.dp) // FAB room
-                ) {
-                    items(games, key = { it.packageName }) { game ->
-                        GameListItem(
-                            game = game,
-                            isSelected = selectedGames.contains(game.packageName),
-                            isSelectionMode = isSelectionMode,
-                             onClick = { 
-                                 if (isSelectionMode) {
-                                     viewModel.toggleGameSelection(game.packageName)
-                                 } else {
-                                     navController.navigate(NavRoutes.GameDetail.createRoute(game.packageName))
-                                 }
-                             },
-                             onLongClick = { viewModel.enterSelectionMode(game.packageName) },
-                             onLaunchClick = { viewModel.launchGame(game) }
-                         )
+                } else if (games.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "No games found",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Add your favorite games manually",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            bottom = 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                        )
+                    ) {
+                        items(games, key = { it.packageName }) { game ->
+                            GameListItem(
+                                game = game,
+                                isSelected = selectedGames.contains(game.packageName),
+                                isSelectionMode = isSelectionMode,
+                                 onClick = { 
+                                     if (isSelectionMode) {
+                                         viewModel.toggleGameSelection(game.packageName)
+                                     } else {
+                                         navController.navigate(NavRoutes.GameDetail.createRoute(game.packageName))
+                                     }
+                                 },
+                                 onLongClick = { viewModel.enterSelectionMode(game.packageName) },
+                                 onLaunchClick = { viewModel.launchGame(game) }
+                             )
+                        }
                     }
                 }
             }
         }
 
-        // FAB pinned to bottom end of the Box
-        if (!isSelectionMode) {
+        // FAB for adding games
+        if (!isSelectionMode && !isSearchActive) {
             ExtendedFloatingActionButton(
                 onClick = { showAddDialog = true },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .padding(bottom = 80.dp), // Avoid bottom nav
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("Add Game") }
+                text = { Text("Add Game") },
+                shape = RoundedCornerShape(20.dp)
             )
         }
     }

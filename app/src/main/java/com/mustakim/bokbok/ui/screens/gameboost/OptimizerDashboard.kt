@@ -1,6 +1,6 @@
 package com.mustakim.bokbok.ui.screens.gameboost
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -67,14 +68,14 @@ fun OptimizerDashboard(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Text(
             text = "Optimization Suite",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.ExtraBold,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(bottom = 16.dp, start = 4.dp)
+            modifier = Modifier.padding(bottom = 20.dp, start = 4.dp)
         )
 
         LazyVerticalGrid(
@@ -100,48 +101,69 @@ private fun DashboardCard(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f),
+        tonalElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
+        Box(
             modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.Center
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            item.color.copy(alpha = 0.08f),
+                            Color.Transparent,
+                        )
+                    )
+                )
         ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = item.color.copy(alpha = 0.1f),
-                modifier = Modifier.size(48.dp)
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                // Gradient icon container (frosted glass style)
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    item.color.copy(alpha = 0.20f),
+                                    item.color.copy(alpha = 0.10f),
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(
                         imageVector = item.icon,
                         contentDescription = null,
                         tint = item.color,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = item.tab.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 14.sp
+                )
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = item.tab.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontFamily = GoogleSansFlex
-            )
-
-            Text(
-                text = item.subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp,
-                lineHeight = 14.sp
-            )
         }
     }
 }

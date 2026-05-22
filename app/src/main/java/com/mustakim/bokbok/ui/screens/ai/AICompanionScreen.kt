@@ -1,5 +1,7 @@
 package com.mustakim.bokbok.ui.screens.ai
 
+import com.mustakim.bokbok.ui.screens.common.TopBar
+
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -21,6 +23,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,17 +62,29 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
+import androidx.compose.material3.MediumTopAppBar
+import androidx.compose.ui.res.painterResource
+import com.mustakim.bokbok.R
+import com.mustakim.bokbok.viewmodel.UserViewModel
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -81,11 +97,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -93,11 +107,13 @@ import coil.compose.AsyncImage
 import com.mustakim.bokbok.viewmodel.AICompanionViewModel
 import com.mustakim.bokbok.viewmodel.CompanionUiState
 import kotlinx.coroutines.launch
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AICompanionScreen(
     navController: NavHostController,
+    userViewModel: UserViewModel = hiltViewModel(),
     viewModel: AICompanionViewModel = hiltViewModel()
 ) {
     val sessions by viewModel.sessions.collectAsState()
@@ -208,7 +224,8 @@ fun AICompanionScreen(
                 CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr) {
                     ModalDrawerSheet(
                         modifier = Modifier.fillMaxHeight().width(300.dp),
-                        drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        windowInsets = WindowInsets.safeDrawing
                     ) {
                         AISessionSidebar(
                             sessions = sessions,
@@ -228,49 +245,93 @@ fun AICompanionScreen(
             }
         ) {
             CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr) {
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "BokBok AI",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { navController.navigateUp() }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.History, "History")
-                                }
-                            },
-                            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
+                com.mustakim.bokbok.ui.screens.common.MainScaffold(
+        navController = navController,
+        title = "BokBok AI",
+        userViewModel = userViewModel,
+        showBottomBar = false,
+        useFlexibleTopBar = false,
+        isStatic = true,
+        showProfile = false,
+        showNotifications = false,
+        customTopBar = { scrollBehavior ->
+            TopBar(
+                title = "BokBok AI",
+                userViewModel = userViewModel,
+                scrollBehavior = scrollBehavior,
+                useFlexibleTopBar = false,
+                isStatic = true,
+                showProfile = false,
+                showNotifications = false,
+                navigationIcon = {
+                    BokBokIconButton(onClick = { navController.navigateUp() }) {
+                        Icon(painterResource(R.drawable.arrow_back), "Back")
+                    }
+                },
+                customTitle = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            "BokBok AI",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
+                },
+                actions = {
+                    BokBokIconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        Icon(Icons.Default.History, "History")
+                    }
+                }
+            )
+        }
                 ) { padding ->
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(padding)
-                            .background(MaterialTheme.colorScheme.surface)
+                            .background(MaterialTheme.colorScheme.background)
                     ) {
-                        Column(modifier = Modifier.fillMaxSize()) {
+
+                        // Ambient mesh blobs in background
+                        Box(
+                            modifier = Modifier
+                                .size(400.dp)
+                                .offset(x = (-100).dp, y = (-50).dp)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0f)
+                                        )
+                                    )
+                                )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(300.dp)
+                                .align(Alignment.CenterEnd)
+                                .offset(x = 80.dp)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f),
+                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0f)
+                                        )
+                                    )
+                                )
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding)
+                        ) {
                             // Message List Area
                             Box(
                                 modifier = Modifier
@@ -480,15 +541,20 @@ fun GeminiVisualizer(
 
 @Composable
 fun MessageDateHeader(date: String) {
-    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = date,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+    Box(modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        ) {
+            Text(
+                text = date,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 
@@ -558,17 +624,18 @@ fun AIInputArea(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .background(Color.Transparent)
             .navigationBarsPadding()
             .imePadding()
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         if (selectedImage != null) {
             Box(
                 modifier = Modifier
-                    .padding(bottom = 8.dp)
+                    .padding(bottom = 12.dp)
                     .size(100.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
             ) {
                 AsyncImage(
                     model = selectedImage,
@@ -576,26 +643,33 @@ fun AIInputArea(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
-                IconButton(
+                BokBokIconButton(
                     onClick = onClearImage,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
+                        .padding(4.dp)
                         .size(24.dp)
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), CircleShape)
                 ) {
-                    Icon(Icons.Default.Close, "Remove", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Close, "Remove", modifier = Modifier.size(14.dp))
                 }
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(28.dp))
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.8f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+            tonalElevation = 2.dp
         ) {
-            IconButton(
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+            BokBokIconButton(
                 onClick = onSelectImage,
                 modifier = Modifier.size(48.dp)
             ) {
@@ -606,7 +680,7 @@ fun AIInputArea(
                 )
             }
 
-            IconButton(
+            BokBokIconButton(
                 onClick = { showSettings = true },
                 modifier = Modifier.size(40.dp)
             ) {
@@ -643,7 +717,7 @@ fun AIInputArea(
             }
 
             if (inputText.isNotEmpty() || selectedImage != null) {
-                IconButton(
+                BokBokIconButton(
                     onClick = onSendMessage,
                     modifier = Modifier.size(48.dp)
                 ) {
@@ -659,6 +733,7 @@ fun AIInputArea(
                     onClick = onStartVoice
                 )
             }
+            }
         }
     }
 }
@@ -671,10 +746,12 @@ fun AISessionSidebar(
     onNewChatClick: () -> Unit,
     onDeleteSession: (String) -> Unit
 ) {
+    val insets = WindowInsets.safeDrawing.asPaddingValues()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
+            .padding(insets)
+            .padding(horizontal = 16.dp)
     ) {
         Row(
             modifier = Modifier.padding(bottom = 24.dp),
@@ -758,7 +835,7 @@ fun AISessionSidebar(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                             )
                         }
-                        IconButton(
+                        BokBokIconButton(
                             onClick = { onDeleteSession(session.id) },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -801,7 +878,7 @@ fun VoiceInputButton(
                     .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
             )
         }
-        IconButton(
+        BokBokIconButton(
             onClick = onClick,
             modifier = Modifier.size(40.dp)
         ) {
@@ -952,7 +1029,7 @@ fun LanguageDownloadItem(
             }
             
             if (isDownloading) {
-                IconButton(onClick = { viewModel.cancelDownload(langCode) }) {
+                BokBokIconButton(onClick = { viewModel.cancelDownload(langCode) }) {
                     Icon(imageVector = Icons.Default.Close, contentDescription = "Cancel", tint = MaterialTheme.colorScheme.error)
                 }
             } else if (!isDownloaded) {

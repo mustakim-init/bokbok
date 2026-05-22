@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -30,7 +31,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.mustakim.bokbok.state.RoomStateManager
-import com.mustakim.bokbok.ui.components.MinimizedRoomBar
 import com.mustakim.bokbok.ui.navigation.NavRoutes
 import com.mustakim.bokbok.ui.screens.room.VoiceRoomScreen
 import com.mustakim.bokbok.viewmodel.AuthViewModel
@@ -38,6 +38,16 @@ import com.mustakim.bokbok.viewmodel.UserViewModel
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.LaunchedEffect
+import com.mustakim.bokbok.ui.shared.FloatingNavigationToolbar
+import com.mustakim.bokbok.ui.shared.NavigationItem
+import com.mustakim.bokbok.ui.shared.NavIcon
+import com.mustakim.bokbok.ui.screens.Screens
+import com.mustakim.bokbok.music.constants.FloatingToolbarBottomPadding
+import com.mustakim.bokbok.music.constants.FloatingToolbarHeight
+import com.mustakim.bokbok.music.constants.FloatingToolbarHorizontalPadding
+import com.mustakim.bokbok.music.constants.PureBlackKey
+import com.mustakim.bokbok.data.local.rememberPreference
+import androidx.compose.foundation.layout.height
 
 
 @Composable
@@ -45,11 +55,24 @@ fun MainScaffold(
     navController: NavHostController,
     title: String,
     showBottomBar: Boolean = true,
-    showTopBar: Boolean = true, // Added parameter
+    showTopBar: Boolean = true,
+    containerColor: androidx.compose.ui.graphics.Color = androidx.compose.material3.MaterialTheme.colorScheme.background,
     notificationCount: Int = 0,
     userViewModel: UserViewModel,
+    useFlexibleTopBar: Boolean = true,
+    isStatic: Boolean = false,
+    showProfile: Boolean = true,
+    showNotifications: Boolean = true,
+    background: @Composable () -> Unit = {},
+    customTopBar: (@Composable (androidx.compose.material3.TopAppBarScrollBehavior) -> Unit)? = null,
+    floatingActionButton: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit
 ) {
+    val scrollBehavior = if (isStatic) {
+        androidx.compose.material3.TopAppBarDefaults.pinnedScrollBehavior()
+    } else {
+        androidx.compose.material3.TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -57,35 +80,11 @@ fun MainScaffold(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val roomState by remember {
-        derivedStateOf {
-            Triple(
-                RoomStateManager.currentRoom.value,
-                RoomStateManager.isMinimized.value,
-                RoomStateManager.isMuted.value
-            )
-        }
-    }
-    val (currentRoom, isMinimized, isMuted) = roomState
-
-    // ✅ OPTIMIZED: Only instantiate VoiceRoomViewModel if we actually have a room
-    // This prevents heavy WebRTC/Presence observation during app startup
-    val voiceRoomViewModel: VoiceRoomViewModel? = if (currentRoom != null) {
-        hiltViewModel(key = "room_${currentRoom.id}")
-    } else {
-        null
-    }
-
-    LaunchedEffect(isMuted, voiceRoomViewModel) {
-        if (currentRoom != null && voiceRoomViewModel != null) {
-            voiceRoomViewModel.setMutedFromGlobal(isMuted)
-        }
-    }
-
     val authViewModel: AuthViewModel = hiltViewModel()
+    val pureBlack by rememberPreference(PureBlackKey, defaultValue = false)
 
     // Just compute it each recomposition, no remember
-    val showBars = currentRoom == null || isMinimized
+    val showBars = true
 
 
     fun handleLogout() {
@@ -168,22 +167,33 @@ fun MainScaffold(
     }
 
     // 🚀 PERFORMANCE: Don't include currentRoute in remember key - we check it inside
-    val onNavigate = remember(navController) {
+    val onNavigate = remember(navController, context) {
         { route: String ->
             val current = navController.currentBackStackEntry?.destination?.route
             if (current != route) {
-                navController.navigate(route) {
-                    popUpTo(NavRoutes.Lounge.route) {
-                        saveState = true
+                if (route == "music") {
+                    navController.navigate("home") {
+                        popUpTo(NavRoutes.Lounge.route) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
                     }
-                    launchSingleTop = true
-                    restoreState = true
+                } else {
+                    navController.navigate(route) {
+                        popUpTo(NavRoutes.Lounge.route) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        background()
         // Layer 1: Main app with Scaffold
         AppNavigationDrawer(
             drawerState = drawerState,
@@ -193,132 +203,36 @@ fun MainScaffold(
             userViewModel = userViewModel
         ) {
             Scaffold(
+                modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+                containerColor = containerColor,
+                floatingActionButton = floatingActionButton,
                 topBar = {
-                    if (showBars && showTopBar) { // Check showTopBar here
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn(tween(200)),
-                            exit = fadeOut(tween(200))
-                        ) {
-                            TopBar(
-                                title = title,
-                                notificationCount = notificationCount,
-                                onMenuClick = onMenuClick,
-                                onNotificationsClick = onNotificationsClick,
-                                onProfileClick = onProfileClick,
-                                userViewModel = userViewModel
-                            )
-                        }
-                    }
-                },
-                bottomBar = {
-                    if (showBottomBar && showBars) {
-                        AnimatedVisibility(
-                            visible = true,
-                            enter = fadeIn(tween(200)),
-                            exit = fadeOut(tween(200))
-                        ) {
-                            BottomNavigationBar(
-                                currentRoute = currentRoute,
-                                onNavigate = onNavigate
-                            )
-                        }
+                    if (customTopBar != null) {
+                        customTopBar(scrollBehavior)
+                    } else if (showBars && showTopBar) {
+                        TopBar(
+                            title = title,
+                            notificationCount = notificationCount,
+                            onMenuClick = { scope.launch { drawerState.open() } },
+                            onNotificationsClick = { navController.navigate("notifications") },
+                            onProfileClick = { navController.navigate("profile") },
+                            userViewModel = userViewModel,
+                            scrollBehavior = scrollBehavior,
+                            useFlexibleTopBar = useFlexibleTopBar,
+                            isStatic = isStatic,
+                            showProfile = showProfile,
+                            showNotifications = showNotifications
+                        )
                     }
                 }
-            ) { paddingValues ->
+            ) { innerPadding ->
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                 ) {
-                    content(paddingValues)
-
-
-                    // Layer 2: Minimized bar anchored using the real bottom inset
-                    if (currentRoom != null && isMinimized) {
-                        AnimatedVisibility(
-                            visible = true,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .padding(
-                                    start = 4.dp,
-                                    end = 4.dp,
-                                    bottom = paddingValues.calculateBottomPadding() + 8.dp
-                                ),
-                            enter = slideInVertically(
-                                initialOffsetY = { it },
-                                animationSpec = tween(300)
-                            ) + fadeIn(),
-                            exit = slideOutVertically(
-                                targetOffsetY = { it },
-                                animationSpec = tween(300)
-                            ) + fadeOut()
-                        ) {
-                            MinimizedRoomBar(
-                                roomName = currentRoom.name,
-                                roomImageUrl = currentRoom.imageUrl,
-                                isMuted = isMuted,
-                                onExpand = { RoomStateManager.expandRoom() },
-                                onToggleMute = { RoomStateManager.toggleMute() },
-                                onLeaveRoom = {
-                                    // 1) Stop WebRTC + RealTimeDB presence via ViewModel
-                                    voiceRoomViewModel?.leaveRoom()
-
-                                    // 2) Clear local room state only
-                                    RoomStateManager.leaveRoom()
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
+                    content(innerPadding)
                 }
             }
-        }
-
-        // ✅ FIX: Layer 3 - Full room screen OUTSIDE the Scaffold
-        // This prevents it from being affected by Scaffold padding
-        if (currentRoom != null && !isMinimized) {
-            AnimatedVisibility(
-                visible = true,
-                modifier = Modifier.fillMaxSize(),
-                enter = slideInVertically(
-                    initialOffsetY = { fullHeight -> fullHeight },
-                    animationSpec = tween(
-                        durationMillis = 260,
-                        easing = FastOutSlowInEasing
-                    )
-                ) + fadeIn(
-                    animationSpec = tween(
-                        durationMillis = 180
-                    )
-                ),
-                exit = slideOutVertically(
-                    targetOffsetY = { fullHeight -> fullHeight },
-                    animationSpec = tween(
-                        durationMillis = 260,
-                        easing = FastOutSlowInEasing
-                    )
-                ) + fadeOut(
-                    animationSpec = tween(
-                        durationMillis = 180
-                    )
-                )
-            ) {
-                if (voiceRoomViewModel != null) {
-                    VoiceRoomScreen(
-                        roomId = currentRoom.id,
-                        onMinimize = { isMuted ->
-                            RoomStateManager.minimizeRoom(isMuted)
-                        },
-                        onLeaveRoom = {
-                            // Just clear local room state
-                            RoomStateManager.leaveRoom()
-                        },
-                        viewModel = voiceRoomViewModel
-
-                    )
-                }
-            }
-        }
+        } // Closes AppNavigationDrawer
     }
 }

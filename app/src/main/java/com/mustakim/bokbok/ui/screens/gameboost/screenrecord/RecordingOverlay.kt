@@ -61,6 +61,7 @@ import androidx.compose.ui.res.painterResource
 import com.mustakim.bokbok.R
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.utils.AppIcon
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 /**
  * A floating HUD overlay for recording controls.
@@ -619,13 +620,13 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
             ) {
                 Box(Modifier.fillMaxWidth().height(0.7.dp).background(Color(0xFFE8E8E8)))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    IconButton(onClick = { undo() }, enabled = drawPaths.isNotEmpty()) {
+                    BokBokIconButton(onClick = { undo() }, enabled = drawPaths.isNotEmpty()) {
                         Icon(Icons.Default.Undo, null, tint = if (drawPaths.isNotEmpty()) iconColor else iconSecondaryColor.copy(0.5f))
                     }
-                    IconButton(onClick = { redo() }, enabled = undonePaths.isNotEmpty()) {
+                    BokBokIconButton(onClick = { redo() }, enabled = undonePaths.isNotEmpty()) {
                         Icon(Icons.Default.Redo, null, tint = if (undonePaths.isNotEmpty()) iconColor else iconSecondaryColor.copy(0.5f))
                     }
-                    IconButton(onClick = { captureDrawingLayer() }) {
+                    BokBokIconButton(onClick = { captureDrawingLayer() }) {
                         Icon(Icons.Default.CameraAlt, null, tint = Color(0xFFEB3B2E))
                     }
                 }
@@ -701,7 +702,7 @@ class RecordingOverlay(private val context: Context) : LifecycleOwner, ViewModel
         padding: Dp,
         onClick: () -> Unit
     ) {
-        IconButton(
+        BokBokIconButton(
             onClick = onClick, 
             modifier = Modifier.size(size)
         ) {

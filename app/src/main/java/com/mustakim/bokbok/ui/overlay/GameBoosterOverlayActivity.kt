@@ -66,7 +66,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.mustakim.bokbok.ui.theme.BokBokTheme
 import android.widget.Toast
-import com.mustakim.bokbok.data.fps.FpsDaemonManager
 
 @AndroidEntryPoint
 class GameBoosterOverlayActivity : ComponentActivity() {
@@ -106,6 +105,9 @@ class GameBoosterOverlayService : Service() {
     
     @Inject
     lateinit var deviceMonitorRepository: DeviceMonitorRepository
+    
+    @Inject
+    lateinit var atraceFpsManager: com.mustakim.bokbok.data.fps.AtraceFpsManager
 
     private var manager: GameBoosterOverlayManager? = null
 
@@ -113,7 +115,29 @@ class GameBoosterOverlayService : Service() {
         val action = intent?.getStringExtra("ACTION")
         val gamePackage = intent?.getStringExtra("GAME_PACKAGE") ?: "Unknown"
 
-        android.util.Log.d("BB-OVERLAY", "onStartCommand: action=$action, game=$gamePackage")
+        android.util.Log.i("BB-OVERLAY", "onStartCommand: action=$action, game=$gamePackage")
+
+        // 🚀 SYN-STYLE: Foreground Service Compliance
+        val channelId = "game_booster_overlay"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(channelId, "Game Booster Overlay", android.app.NotificationManager.IMPORTANCE_LOW)
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+
+        val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+            .setContentTitle("BokBok Game Booster")
+            .setContentText("Overlay active for $gamePackage")
+            .setSmallIcon(com.mustakim.bokbok.R.mipmap.ic_launcher)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            startForeground(2001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(2001, notification)
+        }
 
         if (action == "CLOSE") {
             android.util.Log.i("BB-OVERLAY", "Received CLOSE action. Dismissing overlay.")
@@ -122,14 +146,17 @@ class GameBoosterOverlayService : Service() {
             }
             manager?.hide()
             manager = null
+            stopForeground(true)
             stopSelf()
             return START_NOT_STICKY
         }
 
         if (manager == null) {
-            manager = GameBoosterOverlayManager(this, gameRepository, deviceMonitorRepository)
+            android.util.Log.i("BB-OVERLAY", "Creating new OverlayManager")
+            manager = GameBoosterOverlayManager(this, gameRepository, deviceMonitorRepository, atraceFpsManager)
             manager?.show(gamePackage)
         } else {
+            android.util.Log.i("BB-OVERLAY", "Updating existing OverlayManager")
             manager?.updateGame(gamePackage)
         }
 
@@ -147,7 +174,8 @@ class GameBoosterOverlayService : Service() {
 class GameBoosterOverlayManager(
     private val context: Context,
     private val gameRepository: GameRepository,
-    private val deviceMonitorRepository: DeviceMonitorRepository
+    private val deviceMonitorRepository: DeviceMonitorRepository,
+    private val atraceFpsManager: com.mustakim.bokbok.data.fps.AtraceFpsManager
 ) : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -159,7 +187,6 @@ class GameBoosterOverlayManager(
     private val gpuState = mutableStateOf(GpuInfo())
     private val ramState = mutableStateOf(RamInfo())
     private val gameFpsState = mutableFloatStateOf(0f)
-    private var fpsDaemon: com.mustakim.bokbok.data.fps.FpsDaemonManager? = null
 
     // UI States
     private val isExpanded = mutableStateOf(false)
@@ -283,32 +310,23 @@ class GameBoosterOverlayManager(
             view?.setViewTreeSavedStateRegistryOwner(this)
         }
 
+        atraceFpsManager.start(lifecycleScope)
         startSmartPolling()
-        fpsDaemon = FpsDaemonManager(context).also {
-            it.start(
-                lifecycleScope,
-                { cmd -> gameRepository.executeShizukuCommand(cmd) },
-                { cmd -> gameRepository.executeShizukuCommandAndGet(cmd) },
-                { cmd -> gameRepository.executeShizukuCommandRaw(cmd) }
-            )
-        }
     }
 
     fun show(gamePackage: String) {
         if (currentGamePackage.value != gamePackage) {
             currentGamePackage.value = gamePackage
             lifecycleScope.launch { gameRepository.applyOptimizations(gamePackage) }
-            lifecycleScope.launch(Dispatchers.IO) {
-                fpsDaemon?.setTargetPackage(gamePackage) { cmd ->
-                    gameRepository.executeShizukuCommandAndGet(cmd)
-                }
-            }
         }
         if (!isHandleVisible && !isExpanded.value) {
             try {
+                android.util.Log.i("BB-OVERLAY", "Adding handle view to WindowManager")
                 windowManager.addView(handleComposeView, handleParams)
                 isHandleVisible = true
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.e("BB-OVERLAY", "Failed to add handle view", e)
+            }
         }
     }
 
@@ -318,11 +336,6 @@ class GameBoosterOverlayManager(
         lifecycleScope.launch {
             gameRepository.restoreToMasterSnapshot()
             gameRepository.applyOptimizations(gamePackage)
-        }
-        lifecycleScope.launch(Dispatchers.IO) {
-            fpsDaemon?.setTargetPackage(gamePackage) { cmd ->
-                gameRepository.executeShizukuCommandAndGet(cmd)
-            }
         }
     }
 
@@ -350,8 +363,10 @@ class GameBoosterOverlayManager(
                         }
 
                         val shellFps = cpu.fps
-                        val nativeFps = fpsDaemon?.fps?.value ?: 0f
-                        val combinedFps = if (nativeFps > 0) nativeFps else shellFps
+                        val atraceFps = atraceFpsManager.fps.value
+                        
+                        // Priority: Atrace (Shizuku) > Shell (Dumpsys)
+                        val combinedFps = if (atraceFps > 0) atraceFps else shellFps
 
                         withContext(Dispatchers.Main) {
                             cpuState.value = cpu
@@ -596,8 +611,7 @@ class GameBoosterOverlayManager(
     }
 
     fun hide() {
-        fpsDaemon?.stop()
-        fpsDaemon = null
+        atraceFpsManager.stop()
         if (isHandleVisible) {
             try { windowManager.removeView(handleComposeView) } catch (_: Exception) {}
             isHandleVisible = false

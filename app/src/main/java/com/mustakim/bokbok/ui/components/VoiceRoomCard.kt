@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.mustakim.bokbok.data.model.VoiceRoom
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -35,8 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.mustakim.bokbok.data.model.VoiceRoom
-
+import androidx.compose.ui.unit.sp
 @Composable
 fun VoiceRoomCard(
     room: VoiceRoom,
@@ -57,66 +59,68 @@ fun VoiceRoomCard(
     }
 
     val titleColor = remember(hasImage) {
-        if (hasImage) Color.White else null
+        if (hasImage) Color.White else Color.Unspecified
     }
 
     val descriptionColor = remember(hasImage) {
-        if (hasImage) Color.White.copy(alpha = 0.9f) else null
+        if (hasImage) Color.White.copy(alpha = 0.85f) else Color.Unspecified
     }
 
-    val imageGradient = remember {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color.Black.copy(alpha = 0.6f),
-                Color.Black.copy(alpha = 0.3f),
-                Color.Black.copy(alpha = 0.7f)
-            )
-        )
-    }
-
-    val fallbackGradient = Brush.verticalGradient(
-        colors = listOf(primaryContainer, tertiaryContainer)
-    )
-
-    Card(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(400.dp)
+            .height(420.dp)
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             ),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        tonalElevation = 2.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (hasImage) {
                 AsyncImage(
                     model = room.imageUrl,
-                    contentDescription = "Room background",
+                    contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(imageGradient)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.4f),
+                                    Color.Black.copy(alpha = 0.2f),
+                                    Color.Black.copy(alpha = 0.85f)
+                                )
+                            )
+                        )
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(fallbackGradient)
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                                )
+                            )
+                        )
                 )
             }
 
             RoomCardContent(
                 room = room,
                 hasImage = hasImage,
-                categoryBgColor = categoryBgColor,
-                categoryTextColor = categoryTextColor,
                 titleColor = titleColor,
                 descriptionColor = descriptionColor
             )
@@ -128,15 +132,13 @@ fun VoiceRoomCard(
 private fun RoomCardContent(
     room: VoiceRoom,
     hasImage: Boolean,
-    categoryBgColor: Color?,
-    categoryTextColor: Color?,
-    titleColor: Color?,
-    descriptionColor: Color?
+    titleColor: Color,
+    descriptionColor: Color
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(28.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -144,54 +146,54 @@ private fun RoomCardContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                color = categoryBgColor ?: MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.small
+                color = if (hasImage) Color.White.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = if (hasImage) Color.White.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                )
             ) {
                 Text(
                     text = room.category.displayName,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = categoryTextColor ?: MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontWeight = FontWeight.SemiBold
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (hasImage) Color.White else MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.ExtraBold
                 )
             }
 
             if (!room.isPublic) {
-                Surface(
-                    color = Color.White.copy(alpha = 0.2f),
-                    shape = CircleShape
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Private room",
-                        modifier = Modifier
-                            .padding(8.dp)
-                            .size(16.dp),
-                        tint = Color.White
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Private",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (hasImage) Color.White else MaterialTheme.colorScheme.primary
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         Text(
             text = room.name,
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.displaySmall.copy(
+                lineHeight = 38.sp,
+                fontSize = 32.sp
+            ),
+            fontWeight = FontWeight.Black,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            color = titleColor ?: MaterialTheme.colorScheme.onSurface
+            color = titleColor
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (room.description.isNotEmpty()) {
             Text(
                 text = room.description,
                 style = MaterialTheme.typography.bodyLarge,
-                color = descriptionColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
+                color = descriptionColor,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -199,73 +201,61 @@ private fun RoomCardContent(
         Spacer(modifier = Modifier.weight(1f))
 
         HostInfoSection(room = room, hasImage = hasImage)
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         ParticipantsSection(room = room, hasImage = hasImage)
     }
 }
 
 @Composable
 private fun HostInfoSection(room: VoiceRoom, hasImage: Boolean) {
-    Surface(
-        color = if (hasImage)
-            Color.White.copy(alpha = 0.15f)
-        else
-            MaterialTheme.colorScheme.surfaceContainerHighest,
-        shape = MaterialTheme.shapes.medium
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (hasImage) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (room.hostImageUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = room.hostImageUrl,
-                    contentDescription = "Host avatar",
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            if (hasImage)
-                                Color.White.copy(alpha = 0.3f)
-                            else
-                                MaterialTheme.colorScheme.primary,
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = room.hostName.firstOrNull()?.uppercase() ?: "?",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column {
+        if (room.hostImageUrl.isNotEmpty()) {
+            AsyncImage(
+                model = room.hostImageUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (hasImage) Color.White.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
-                    text = room.hostName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (hasImage) Color.White else MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Host",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (hasImage)
-                        Color.White.copy(alpha = 0.7f)
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    text = room.hostName.firstOrNull()?.uppercase() ?: "?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (hasImage) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
+        }
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column {
+            Text(
+                text = room.hostName,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (hasImage) Color.White else MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Room Host",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (hasImage) Color.White.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -277,52 +267,39 @@ private fun ParticipantsSection(room: VoiceRoom, hasImage: Boolean) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            color = if (hasImage)
-                Color.White.copy(alpha = 0.2f)
-            else
-                MaterialTheme.colorScheme.primaryContainer,
-            shape = MaterialTheme.shapes.medium
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(if (hasImage) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = if (hasImage)
-                        Color.White
-                    else
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "${room.currentOnline}/${room.maxParticipants}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (hasImage)
-                        Color.White
-                    else
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
+            Icon(
+                Icons.Default.Person,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = if (hasImage) Color.White else MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = "${room.currentOnline} / ${room.maxParticipants} Members",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                color = if (hasImage) Color.White else MaterialTheme.colorScheme.primary
+            )
         }
 
         if (room.isFull) {
-            Surface(
-                color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f),
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(
-                    text = "Full",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            Text(
+                text = "FULL",
+                modifier = Modifier
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.error)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onError,
+                fontWeight = FontWeight.Black
+            )
         }
     }
 }

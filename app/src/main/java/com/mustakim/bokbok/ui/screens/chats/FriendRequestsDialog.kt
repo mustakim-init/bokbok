@@ -1,6 +1,8 @@
 package com.mustakim.bokbok.ui.screens.chats
+import com.mustakim.bokbok.ui.shared.*
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,6 +22,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.FriendRequest
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,9 +40,10 @@ fun FriendRequestsDialog(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.7f),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f),
+            tonalElevation = 6.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         ) {
             Column(
                 modifier = Modifier.fillMaxSize()
@@ -57,7 +61,7 @@ fun FriendRequestsDialog(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
-                    IconButton(onClick = onDismiss) {
+                    BokBokIconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close"
@@ -92,9 +96,11 @@ private fun FriendRequestItem(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f)
+        ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier
@@ -102,14 +108,22 @@ private fun FriendRequestItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = request.sender.profileImageUrl,
-                contentDescription = "${request.sender.displayName}'s avatar",
+            Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                    .padding(2.dp)
+            ) {
+                AsyncImage(
+                    model = request.sender.profileImageUrl,
+                    contentDescription = "${request.sender.displayName}'s avatar",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -138,7 +152,7 @@ private fun FriendRequestItem(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Decline Button
-                FilledTonalIconButton(
+                FilledTonalBokBokIconButton(
                     onClick = onDecline,
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -152,7 +166,7 @@ private fun FriendRequestItem(
                 }
 
                 // Accept Button
-                FilledIconButton(
+                FilledBokBokIconButton(
                     onClick = onAccept,
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,

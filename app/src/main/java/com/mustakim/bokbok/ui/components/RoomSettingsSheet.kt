@@ -62,6 +62,7 @@ import com.mustakim.bokbok.data.model.RoomCategory
 import com.mustakim.bokbok.data.model.User
 import com.mustakim.bokbok.data.model.VoiceRoom
 import com.mustakim.bokbok.data.model.VoiceRoomParticipant
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,7 +217,7 @@ fun SettingsTab(
                     )
                 }
                 if (isHost) {
-                    IconButton(
+                    BokBokIconButton(
                         onClick = onPickImage,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -477,7 +478,7 @@ fun MembersTab(
                     }
                     
                     if (isHost) {
-                        IconButton(onClick = { onRemove(user.uid) }) {
+                        BokBokIconButton(onClick = { onRemove(user.uid) }) {
                             Icon(
                                 Icons.Default.Close,
                                 "Remove Member",

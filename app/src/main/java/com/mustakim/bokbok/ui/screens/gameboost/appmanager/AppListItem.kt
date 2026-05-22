@@ -43,28 +43,27 @@ fun AppListItem(
         label = "borderColor"
     )
     
-    Card(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .then(
                 if (app.isSelected) {
-                    Modifier.border(2.dp, borderColor, RoundedCornerShape(12.dp))
+                    Modifier.border(2.dp, borderColor, RoundedCornerShape(24.dp))
                 } else Modifier
             )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        colors = CardDefaults.cardColors(
-            containerColor = if (app.isSelected) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            }
-        ),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        color = if (app.isSelected) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f)
+        },
+        shape = RoundedCornerShape(24.dp),
+        border = if (!app.isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null,
+        tonalElevation = 2.dp
     ) {
         Row(
             modifier = Modifier
@@ -74,22 +73,31 @@ fun AppListItem(
         ) {
             // App Icon with selection indicator - async loading for performance
             Box {
-                AsyncImage(
-                    model = AppIcon(app.packageName),
-                    contentDescription = null,
+                Box(
                     modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                )
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                        .padding(2.dp)
+                ) {
+                    AsyncImage(
+                        model = AppIcon(app.packageName),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                }
                 
                 // Selection checkmark
                 if (app.isSelected) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .size(20.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                            .offset(x = 4.dp, y = 4.dp)
+                            .size(22.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -219,16 +227,16 @@ private fun SafetyBadge(
     Text(
         text = text,
         style = MaterialTheme.typography.labelSmall.copy(
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold
         ),
         color = color,
         modifier = Modifier
             .background(
-                color.copy(alpha = 0.15f),
-                RoundedCornerShape(4.dp)
+                color.copy(alpha = 0.12f),
+                RoundedCornerShape(8.dp)
             )
-            .padding(horizontal = 5.dp, vertical = 2.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
     )
 }
 

@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -44,14 +45,17 @@ fun ParticipantCard(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(24.dp))
-            .background(
-                brush = Brush.linearGradient(
+            .drawWithCache {
+                val brush = Brush.linearGradient(
                     colors = listOf(
                         Color.White.copy(alpha = 0.15f),
                         Color.White.copy(alpha = 0.05f)
                     )
                 )
-            )
+                onDrawBehind {
+                    drawRect(brush)
+                }
+            }
             // Speaking indicator border - uses tertiary for semantic "active/speaking" state
             .border(
                 width = if (participant.isSpeaking && !participant.isMuted) 3.dp else 1.dp,
@@ -91,18 +95,23 @@ fun ParticipantCard(
                     )
                 } else {
                     // Fallback avatar
+                    val themePrimary = MaterialTheme.colorScheme.primary
+                    val themeSecondary = MaterialTheme.colorScheme.secondary
                     Box(
                         modifier = Modifier
                             .size(100.dp)
                             .clip(CircleShape)
-                            .background(
-                                brush = Brush.linearGradient(
+                            .drawWithCache {
+                                val brush = Brush.linearGradient(
                                     colors = listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary
+                                        themePrimary,
+                                        themeSecondary
                                     )
                                 )
-                            ),
+                                onDrawBehind {
+                                    drawCircle(brush)
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(

@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -38,8 +39,7 @@ import com.mustakim.bokbok.data.model.FriendStatus
 import com.mustakim.bokbok.data.model.UserStatus
 
 
-// Global scallop shape cached once - uses ScallopShape from CustomShapes.kt
-private val CachedScallopShape = ScallopShape(lobes = 9, innerRadiusRatio = 0.87f, smoothness = 1f, rotationDegrees = 30f)
+// No longer using CachedScallopShape for design parity with ArchiveTune
 
 @Composable
 fun FriendsStatusSection(
@@ -59,7 +59,8 @@ fun FriendsStatusSection(
         Text(
             text = "Friends",
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
         )
 
@@ -93,7 +94,7 @@ fun FriendStatusCard(
     val badgeText = remember(friend.status, friend.currentRoomCategory) {
         when {
             friend.status == UserStatus.IN_ROOM && friend.currentRoomCategory != null ->
-                "Join\n${friend.currentRoomCategory.displayName}"
+                friend.currentRoomCategory.displayName
             friend.status == UserStatus.IN_ROOM ->
                 "In room"
             friend.status == UserStatus.ONLINE ->
@@ -130,13 +131,16 @@ fun FriendStatusCard(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        Card(
+        Surface(
             modifier = Modifier
                 .size(80.dp),
-            shape = CachedScallopShape,
-            colors = CardDefaults.cardColors(
-                containerColor = backgroundColor
-            )
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+            ),
+            tonalElevation = 2.dp
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 if (friend.profileImageUrl.isNotEmpty()) {
@@ -150,14 +154,21 @@ fun FriendStatusCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(primaryContainerColor),
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                )
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = friend.displayName.firstOrNull()?.uppercase() ?: "?",
                             style = MaterialTheme.typography.headlineMedium,
-                            color = onPrimaryContainerColor,
-                            fontWeight = FontWeight.Bold
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
                 }
@@ -183,9 +194,9 @@ fun ThoughtBubbleBadge(
     modifier: Modifier = Modifier
 ) {
     val bubbleColor = if (isInRoom) {
-        MaterialTheme.colorScheme.primaryContainer
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
     } else {
-        MaterialTheme.colorScheme.surfaceVariant
+        MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.9f)
     }
 
     val textColor = if (isInRoom) {

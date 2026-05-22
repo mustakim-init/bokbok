@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.data.model.AppPermissionDetail
 import com.mustakim.bokbok.viewmodel.AppDetailsViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,7 +35,7 @@ fun AppPermissionManagerScreen(
             TopAppBar(
                 title = { Text("Permission Manager") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    BokBokIconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }

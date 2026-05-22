@@ -90,6 +90,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -113,6 +115,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -164,54 +167,67 @@ fun ChatScreen(
         }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    val user = friendUser
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable {
-                            navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.ChatDetails.createRoute(viewModel.friendId, false))
-                        }
-                    ) {
-                        if (user != null) {
-                            if (user.profileImageUrl.isNotEmpty()) {
-                                AsyncImage(
-                                    model = user.profileImageUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
+    Box(modifier = Modifier.fillMaxSize()) {
+        com.mustakim.bokbok.ui.shared.DynamicMeshGradientBackground(
+            imageUrl = friendUser?.profileImageUrl,
+            coverage = 1f
+        )
+        Scaffold(
+            containerColor = Color.Transparent,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        val user = friendUser
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.ChatDetails.createRoute(viewModel.friendId, false))
+                            }
+                        ) {
+                            if (user != null) {
                                 Box(
                                     modifier = Modifier
-                                        .size(50.dp)
-                                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                                    contentAlignment = Alignment.Center
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                                        .padding(2.dp)
                                 ) {
-                                    Text(
-                                        text = user.displayName.take(1).uppercase(),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
+                                    if (user.profileImageUrl.isNotEmpty()) {
+                                        AsyncImage(
+                                            model = user.profileImageUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(12.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = user.displayName.take(1).uppercase(),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                    }
                                 }
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                        }
-
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = user?.displayName ?: "Chat",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (user != null) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = user.displayName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
                                 Text(
-                                    text = if (isFriendOnline) "Active now" else "Offline",
+                                    text = if (isFriendOnline) "Online" else "Offline",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (isFriendOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -220,39 +236,26 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
+                    BokBokIconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        showSearchBar = !showSearchBar
-                        if (!showSearchBar) {
-                            searchQuery = ""
-                            viewModel.clearSearch()
-                        }
-                    }) {
-                        Icon(
-                            imageVector = if (showSearchBar) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = "Search"
-                        )
+                    BokBokIconButton(onClick = { showSearchBar = !showSearchBar }) {
+                        Icon(if (showSearchBar) Icons.Default.Close else Icons.Default.Search, "Search")
                     }
-                    IconButton(onClick = { }) { Icon(Icons.Default.Call, "Call") }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
                 )
             )
         }
-    ) { padding ->
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .background(MaterialTheme.colorScheme.surface)
+                .padding(paddingValues)
         ) {
             if (showSearchBar) {
                 androidx.compose.material3.OutlinedTextField(
@@ -267,7 +270,7 @@ fun ChatScreen(
                     placeholder = { Text("Search in chat") },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     trailingIcon = if (searchQuery.isNotEmpty()) {
-                        { IconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
+                        { BokBokIconButton(onClick = { searchQuery = ""; viewModel.clearSearch() }) { Icon(Icons.Default.Close, null) } }
                     } else null,
                     singleLine = true
                 )
@@ -370,7 +373,7 @@ fun ChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
                     .navigationBarsPadding() // Handle nav bar padding
                     .imePadding() // Handle keyboard padding
             ) {
@@ -408,6 +411,7 @@ fun ChatScreen(
             }
         }
     }
+    } // End Box wrapping Scaffold
 
     if (selectedMessageForReactions != null) {
         val message = selectedMessageForReactions!!
@@ -582,14 +586,22 @@ fun MessageBubble(
                         )
                     }
 
-                    val backgroundColor = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
-                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                    val backgroundColor = if (isMe) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.65f)
+                    val contentColor = if (isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                    
+                    val brush = if (isMe) Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    ) else null
 
                     Surface(
                         color = backgroundColor,
                         shape = shape,
                         modifier = Modifier
                             .widthIn(max = 280.dp)
+                            .then(if (brush != null) Modifier.background(brush, shape) else Modifier)
                             .combinedClickable(
                                 onClick = { showTime = !showTime },
                                 onLongClick = {
@@ -598,7 +610,9 @@ fun MessageBubble(
                                 },
                                 indication = null,
                                 interactionSource = remember { MutableInteractionSource() }
-                            )
+                            ),
+                        border = if (!isMe) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)) else null,
+                        tonalElevation = if (isMe) 4.dp else 2.dp
                     ) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                             // Reply Context
@@ -1016,7 +1030,7 @@ fun ChatInputBar(
                         maxLines = 1
                     )
                 }
-                IconButton(onClick = onCancelReply) {
+                BokBokIconButton(onClick = onCancelReply) {
                     Icon(Icons.Default.Close, "Cancel Reply")
                 }
             }
@@ -1026,14 +1040,15 @@ fun ChatInputBar(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(32.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.8f))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Action Icons - use derived state
@@ -1043,13 +1058,13 @@ fun ChatInputBar(
                     exit = fadeOut() + androidx.compose.animation.shrinkHorizontally()
                 ) {
                     Row {
-                        IconButton(onClick = { }) {
+                        BokBokIconButton(onClick = { }) {
                             Icon(Icons.Default.AddCircle, "Add", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
-                        IconButton(onClick = { }) {
+                        BokBokIconButton(onClick = { }) {
                             Icon(Icons.Default.CameraAlt, "Camera", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
-                        IconButton(onClick = { }) {
+                        BokBokIconButton(onClick = { }) {
                             Icon(Icons.Default.Mic, "Mic", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                         }
                     }
@@ -1061,10 +1076,10 @@ fun ChatInputBar(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 48.dp, max = 120.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                        .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                        .heightIn(min = 48.dp, max = 150.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f))
+                        .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -1092,7 +1107,7 @@ fun ChatInputBar(
                     }
 
                     // Emoji Button (Inside Text Field Container)
-                    IconButton(
+                    BokBokIconButton(
                         onClick = onEmojiClick,
                         modifier = Modifier.size(36.dp)
                     ) {
@@ -1111,7 +1126,7 @@ fun ChatInputBar(
                     enter = scaleIn(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn() + androidx.compose.animation.expandHorizontally(),
                     exit = scaleOut() + fadeOut() + androidx.compose.animation.shrinkHorizontally()
                 ) {
-                    IconButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) {
+                    BokBokIconButton(onClick = onSend, modifier = Modifier.padding(start = 4.dp)) {
                         Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
@@ -1149,17 +1164,22 @@ fun DateHeader(date: Date) {
     }
 
     Box(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = dateString,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        ) {
+            Text(
+                text = dateString,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 

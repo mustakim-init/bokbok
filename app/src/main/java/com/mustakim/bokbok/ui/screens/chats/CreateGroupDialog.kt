@@ -1,6 +1,7 @@
 package com.mustakim.bokbok.ui.screens.chats
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
@@ -50,6 +52,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.viewmodel.FriendsViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 @Composable
 fun CreateGroupDialog(
@@ -68,9 +71,10 @@ fun CreateGroupDialog(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.85f),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f),
+            tonalElevation = 6.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
         ) {
             Column(
                 modifier = Modifier.fillMaxSize()
@@ -95,7 +99,7 @@ fun CreateGroupDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(
+                    BokBokIconButton(
                         onClick = onDismiss,
                         modifier = Modifier
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape)
@@ -116,16 +120,18 @@ fun CreateGroupDialog(
                         label = { Text("Group Name") },
                         placeholder = { Text("e.g. Weekend Plans") },
                         leadingIcon = {
-                            Icon(Icons.Default.GroupAdd, null)
+                            Icon(Icons.Default.GroupAdd, null, tint = MaterialTheme.colorScheme.primary)
                         },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(24.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            disabledContainerColor = MaterialTheme.colorScheme.surface,
-                        )
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.5f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        ),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -142,8 +148,9 @@ fun CreateGroupDialog(
                     // Friends List
                     Surface(
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
                         tonalElevation = 1.dp
                     ) {
                         if (friends.isEmpty()) {
@@ -168,7 +175,8 @@ fun CreateGroupDialog(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .padding(vertical = 2.dp)
+                                            .clip(RoundedCornerShape(20.dp))
                                             .clickable {
                                                 if (isSelected) {
                                                     selectedFriends.remove(friend.user.uid)
@@ -182,16 +190,29 @@ fun CreateGroupDialog(
                                                 else 
                                                     Color.Transparent
                                             )
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else Color.Transparent,
+                                                shape = RoundedCornerShape(20.dp)
+                                            )
                                             .padding(8.dp)
                                     ) {
-                                        AsyncImage(
-                                            model = friend.user.profileImageUrl,
-                                            contentDescription = null,
+                                        Box(
                                             modifier = Modifier
-                                                .size(40.dp)
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
+                                                .size(44.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                                                .padding(2.dp)
+                                        ) {
+                                            AsyncImage(
+                                                model = friend.user.profileImageUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(12.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
                                         
                                         Spacer(modifier = Modifier.width(12.dp))
                                         
@@ -240,11 +261,15 @@ fun CreateGroupDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(56.dp),
-                        shape = RoundedCornerShape(16.dp)
+                        shape = RoundedCornerShape(28.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        )
                     ) {
                         Icon(Icons.Default.Check, null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create Group", style = MaterialTheme.typography.titleMedium)
+                        Text("Create Group", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold))
                     }
                 }
             }

@@ -7,11 +7,9 @@ import android.os.Build
 import android.util.Log
 import com.mustakim.bokbok.data.remote.VirusTotalApi
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -74,7 +72,6 @@ class SecurityRepository @Inject constructor(
                 pm.getInstalledPackages(0)
             }
             
-            // 1. Get all installed packages
             val appList = installedPackages.map { packageInfo ->
                 val appInfo = packageInfo.applicationInfo
                 val isSystem = appInfo?.let { (it.flags and ApplicationInfo.FLAG_SYSTEM) != 0 } ?: false
@@ -91,68 +88,67 @@ class SecurityRepository @Inject constructor(
             
             val total = appList.size.toFloat()
             
-            appList.forEachIndexed { index, (packageInfo, info) ->
-                val (isSystem, installer) = info
-                val appInfo = packageInfo.applicationInfo
-                val appName = appInfo?.loadLabel(pm)?.toString() ?: packageInfo.packageName
-                val packageName = packageInfo.packageName
-                
-                // Skip our own app
-                if (packageName == context.packageName) return@forEachIndexed
-                
-                _scanProgress.value = (index + 1) / total
-                
-                // 1. Local Pass: Check Bloatware Database (Robust OEM/Spyware detection)
-                val bloatInfo = com.mustakim.bokbok.data.bloatware.BloatwareDatabase.getBloatwareInfo(context, packageName)
-                
-                val result = when {
-                    bloatInfo != null -> {
-                        // Flagged in local robust database
-                        val type = bloatInfo.type?.uppercase() ?: "UNKNOWN"
-                        val removalRating = bloatInfo.removal ?: "caution"
-                        ScanResult(
-                            packageName, appName, 
-                            if (removalRating == "unsafe") SecurityStatus.WARNING else SecurityStatus.MALICIOUS,
-                            message = "$type Bloatware: ${bloatInfo.description ?: "Known issues"}",
-                            priority = 2 // WARNING/Bloatware level
-                        )
-                    }
-                    isSystem -> {
-                        // System app not in bloatware list - Considered Safe by robust local scanner
-                        ScanResult(packageName, appName, SecurityStatus.SECURE, message = "System Protected", priority = 0)
-                    }
-                    installer == "com.android.vending" -> {
-                        // Play Store apps are verified by Google Play Protect
-                        ScanResult(packageName, appName, SecurityStatus.SECURE, message = "Play Store Verified", priority = 0)
-                    }
-                    else -> {
-                        // 2. Cloud Pass: User-sideloaded app - Match against VirusTotal
-                        val sourceDir = packageInfo.applicationInfo?.sourceDir
-                        val hash = sourceDir?.let { getFileSha256(it) }
-                        if (hash != null) {
-                            if (apiKey.isNotBlank()) {
-                                val vtResult = checkHashWithVirusTotal(hash, apiKey, packageName, appName)
-                                // Add delay for VT rate limits to respect the 4 req/min free tier
-                                if (vtResult.status != SecurityStatus.UNKNOWN) {
-                                    kotlinx.coroutines.delay(15500L) 
-                                }
-                                vtResult
-                            } else {
-                                ScanResult(packageName, appName, SecurityStatus.UNKNOWN, message = "API key required for sideloaded app", priority = 3)
+            // 1. Parallel Local Scan Pass
+            val scanResultsList = supervisorScope {
+                appList.map { (packageInfo, info) ->
+                    async {
+                        val (isSystem, installer) = info
+                        val appInfo = packageInfo.applicationInfo
+                        val appName = appInfo?.loadLabel(pm)?.toString() ?: packageInfo.packageName
+                        val packageName = packageInfo.packageName
+                        
+                        if (packageName == context.packageName) return@async null
+
+                        // Local Pass: Check Bloatware Database
+                        val bloatInfo = com.mustakim.bokbok.data.bloatware.BloatwareDatabase.getBloatwareInfo(context, packageName)
+                        
+                        when {
+                            bloatInfo != null -> {
+                                val type = bloatInfo.type?.uppercase() ?: "UNKNOWN"
+                                val removalRating = bloatInfo.removal ?: "caution"
+                                ScanResult(
+                                    packageName, appName, 
+                                    if (removalRating == "unsafe") SecurityStatus.WARNING else SecurityStatus.MALICIOUS,
+                                    message = "$type Bloatware: ${bloatInfo.description ?: "Known issues"}",
+                                    priority = 2
+                                )
                             }
-                        } else {
-                            ScanResult(packageName, appName, SecurityStatus.UNKNOWN, message = "Hash failed", priority = 3)
+                            isSystem -> ScanResult(packageName, appName, SecurityStatus.SECURE, message = "System Protected", priority = 0)
+                            installer == "com.android.vending" -> ScanResult(packageName, appName, SecurityStatus.SECURE, message = "Play Store Verified", priority = 0)
+                            else -> null // Sideloaded - Needs cloud pass
                         }
                     }
-                }
+                }.awaitAll().filterNotNull()
+            }
+            
+            // Update initial results
+            results.addAll(scanResultsList)
+            updateResultsFlow(results)
+
+            // 2. Throttled Cloud Pass for sideloaded apps
+            appList.forEachIndexed { index, (packageInfo, info) ->
+                val packageName = packageInfo.packageName
+                val pmLocal = context.packageManager
+                val appName = packageInfo.applicationInfo?.loadLabel(pmLocal)?.toString() ?: packageInfo.packageName
+
+                _scanProgress.value = (index + 1) / total
                 
-                if (result != null) {
-                    results.add(result)
-                    // Custom Hierarchy Sort: MALICIOUS (4) -> UNKNOWN (3) -> WARNING (2) -> SECURE (0)
-                    _scanResults.value = results.sortedWith(
-                        compareByDescending<ScanResult> { it.priority }
-                        .thenBy { it.appName }
-                    ).toList()
+                // If not already in results (meaning it was sideloaded)
+                if (results.none { it.packageName == packageName } && packageName != context.packageName) {
+                    val sourceDir = packageInfo.applicationInfo?.sourceDir
+                    val hash = sourceDir?.let { getFileSha256(it) }
+                    if (hash != null) {
+                        if (apiKey.isNotBlank()) {
+                            val vtResult = checkHashWithVirusTotal(hash, apiKey, packageName, appName)
+                            results.add(vtResult)
+                            updateResultsFlow(results)
+                            
+                            // Respect VT rate limits
+                            if (vtResult.status != SecurityStatus.UNKNOWN) {
+                                delay(15500L) 
+                            }
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -160,6 +156,13 @@ class SecurityRepository @Inject constructor(
         } finally {
             _isScanning.value = false
         }
+    }
+
+    private fun updateResultsFlow(results: List<ScanResult>) {
+        _scanResults.value = results.sortedWith(
+            compareByDescending<ScanResult> { it.priority }
+            .thenBy { it.appName }
+        ).toList()
     }
 
     private suspend fun checkHashWithVirusTotal(

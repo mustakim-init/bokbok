@@ -50,6 +50,7 @@ import com.mustakim.bokbok.ui.theme.PuffyShape
 import com.mustakim.bokbok.ui.theme.getMorphingShape
 import com.mustakim.bokbok.data.repository.HybridGroupChatRepository
 import kotlinx.coroutines.launch
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 // Need a way to access repository. Ideally passed via param, but for now we'll assume injection or static access isn't available easily.
 // We will modify the NavGraph to pass a callback later. For now, this compiles but needs the callback.
@@ -128,10 +129,15 @@ fun ChatDetailsScreen(
     val collapsedTextAlpha = ((collapseFactor - 0.8f) * 5f).coerceIn(0f, 1f)
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
+            val bgImageUrl = if (isGroup) groupImageUrl else user?.profileImageUrl
+            com.mustakim.bokbok.ui.shared.DynamicMeshGradientBackground(
+                imageUrl = bgImageUrl,
+                coverage = 1f
+            )
 
             // 1. Content Body (Scrollable)
             Column(
@@ -178,7 +184,7 @@ fun ChatDetailsScreen(
                          modifier = Modifier.weight(1f),
                          icon = Icons.Default.Call,
                          label = "Audio",
-                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
                          contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                      ) { /* TODO */ }
 
@@ -187,7 +193,7 @@ fun ChatDetailsScreen(
                              modifier = Modifier.weight(1f),
                              icon = Icons.Default.PersonAdd,
                              label = "Add",
-                             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                             containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
                              contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                          ) { onAddMember() }
                      } else {
@@ -195,7 +201,7 @@ fun ChatDetailsScreen(
                              modifier = Modifier.weight(1f),
                              icon = Icons.Default.Search,
                              label = "Search",
-                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
                              contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                          ) { /* TODO */ }
                      }
@@ -204,7 +210,7 @@ fun ChatDetailsScreen(
                          modifier = Modifier.weight(1f),
                          icon = if (isMuted) Icons.Default.NotificationsOff else Icons.Default.Notifications,
                          label = if (isMuted) "Unmute" else "Mute",
-                         containerColor = if (isMuted) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.primaryContainer,
+                         containerColor = if (isMuted) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
                          contentColor = if (isMuted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimaryContainer
                      ) { onMuteClick() }
                 }
@@ -227,7 +233,7 @@ fun ChatDetailsScreen(
 
                     Surface(
                         shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column {
@@ -293,12 +299,12 @@ fun ChatDetailsScreen(
                     .fillMaxWidth()
                     .height(max(minHeaderHeight, maxHeaderHeight - with(density) { scrollY.toDp() }))
                     .zIndex(1f),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = if (collapseFactor > 0.9f) 0.98f else 0f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = if (collapseFactor > 0.9f) 0.8f else 0f),
                 shadowElevation = if (collapseFactor > 0.9f) 4.dp else 0.dp
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Back Button (Always visible)
-                     IconButton(
+                     BokBokIconButton(
                          onClick = onBackClick,
                          modifier = Modifier
                              .align(Alignment.TopStart)

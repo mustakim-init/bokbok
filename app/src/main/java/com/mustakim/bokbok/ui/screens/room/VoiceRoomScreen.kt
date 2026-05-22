@@ -69,20 +69,23 @@ import com.mustakim.bokbok.ui.components.ParticipantOptionsSheet
 import com.mustakim.bokbok.ui.components.RoomSettingsSheet
 import com.mustakim.bokbok.ui.components.VoiceControlsSheet
 import com.mustakim.bokbok.viewmodel.VoiceRoomViewModel
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceRoomScreen(
     roomId: String,
-    onMinimize: (Boolean) -> Unit,
+    onMinimize: () -> Unit,
     onLeaveRoom: () -> Unit,
-    viewModel: VoiceRoomViewModel = hiltViewModel()
+    viewModel: VoiceRoomViewModel = hiltViewModel(),
+    isPipMode: Boolean = false
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val friends by viewModel.friends.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     
+    // ... (rest of the effects remain the same)
     val pickMedia = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -95,13 +98,12 @@ fun VoiceRoomScreen(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.all { it.value }) {
-            // Permission granted, NOW load the room
             viewModel.loadRoom(roomId)
         } else {
             viewModel.onPermissionDenied()
         }
     }
-    // Check permission first, THEN initiate the room
+
     LaunchedEffect(roomId) {
         if (viewModel.hasRequiredCallPermissions()) {
             viewModel.loadRoom(roomId)
@@ -111,7 +113,6 @@ fun VoiceRoomScreen(
     }
     LaunchedEffect(uiState.room) {
         val room = uiState.room ?: return@LaunchedEffect
-        // We should have permissions by now, but safe to check
         if (viewModel.hasRequiredCallPermissions()) {
             viewModel.startCallEngine(room.id)
         }
@@ -124,9 +125,6 @@ fun VoiceRoomScreen(
                 error.contains("Failed to load") ||
                 error.contains("removed from the room")) {
                 onLeaveRoom()
-                // Clear error to prevent re-trigger
-                // Note: ViewModel should handle this, but as a safety measure
-                kotlinx.coroutines.delay(500)
             }
         }
     }
@@ -138,14 +136,7 @@ fun VoiceRoomScreen(
     var selectedParticipant by remember { mutableStateOf<VoiceRoomParticipant?>(null) }
     val colorScheme = MaterialTheme.colorScheme
     val isDarkTheme = isSystemInDarkTheme()
-    val gradientBrush = remember(isDarkTheme, colorScheme.primary) {
-        val colors = if (isDarkTheme) {
-            listOf(colorScheme.primaryContainer, colorScheme.secondaryContainer, colorScheme.tertiaryContainer)
-        } else {
-            listOf(colorScheme.primary, colorScheme.secondary, colorScheme.tertiary)
-        }
-        Brush.verticalGradient(colors = colors)
-    }
+
     DisposableEffect(colorScheme.primary, isDarkTheme) {
         val window = (view.context as? android.app.Activity)?.window ?: return@DisposableEffect onDispose {}
         val insetsController = WindowCompat.getInsetsController(window, view)
@@ -158,15 +149,22 @@ fun VoiceRoomScreen(
         }
     }
     val roomName = remember(uiState.room?.name) { uiState.room?.name ?: "Voice Room" }
-    val onMinimizeCallback: () -> Unit = remember(uiState.isMuted) { { onMinimize(uiState.isMuted) } }
+    
     val bottomSheetState = rememberStandardBottomSheetState(
         initialValue = SheetValue.PartiallyExpanded,
         skipHiddenState = true
     )
     val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = bottomSheetState)
     val density = LocalDensity.current
-    // We ensure peek height is enough for the "floating pill" + gap
-    val peekHeightDp = 130.dp
+    val peekHeightDp = if (isPipMode) 0.dp else 130.dp
+    
+    // ✅ Reset sheet state when exiting PiP to prevent it from "floating" in middle
+    LaunchedEffect(isPipMode) {
+        if (!isPipMode) {
+            kotlinx.coroutines.delay(100) // Give layout time to settle
+            bottomSheetState.partialExpand()
+        }
+    }
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val layoutHeight = maxHeight
         val layoutHeightPx = with(density) { maxHeight.toPx() }
@@ -189,80 +187,90 @@ fun VoiceRoomScreen(
                 fraction.coerceIn(0f, 1f)
             }
         }
+
         BottomSheetScaffold(
             scaffoldState = scaffoldState,
             sheetPeekHeight = peekHeightDp,
-            sheetShape = RoundedCornerShape(0.dp), // We handle shape inside VoiceControlsSheet
-            sheetContainerColor = Color.Transparent, // Essential for floating effect
-            sheetContentColor = MaterialTheme.colorScheme.onSurface,
-            // ADD THESE TWO LINES to remove the square shadow:
+            sheetShape = RoundedCornerShape(0.dp),
+            sheetContainerColor = Color.Transparent,
             sheetShadowElevation = 0.dp,
             sheetTonalElevation = 0.dp,
-            sheetDragHandle = null, // We added our own custom stick inside
+            sheetDragHandle = null,
             sheetContent = {
-                // Wrapper to give the sheet a max height constraint
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(layoutHeight)
-                ) {
-                    VoiceControlsSheet(
-                        isMuted = uiState.isMuted,
-                        isSpeakerOn = uiState.isSpeakerOn,
-                        isA2dpModeOn = uiState.isA2dpModeOn,
-                        isHighQuality = uiState.isHighQuality,
-                        micVolume = uiState.micVolume,
-                        outputVolume = uiState.outputVolume,
-                        onMicVolumeChange = viewModel::setMicVolume,
-                        onOutputVolumeChange = viewModel::setOutputVolume,
-                        expansionFraction = expansionFraction,
-                        screenHeight = layoutHeight,
-                        onToggleMic = viewModel::toggleMic,
-                        onToggleSpeaker = viewModel::toggleSpeaker,
-                        onOpenChat = { /* TODO */ },
-                        onOpenVoiceEffects = { /* TODO */ },
-                        onToggleAudioMode = viewModel::toggleA2dpMode,
-                        onToggleQuality = viewModel::toggleQualityMode,
-                        onMoreClick = { showSettingsSheet = true },
-                        onLeaveRoom = {
-                            viewModel.leaveRoom()
-                            onLeaveRoom()
-                        }
-                    )
+                if (!isPipMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(layoutHeight)
+                    ) {
+                        VoiceControlsSheet(
+                            isMuted = uiState.isMuted,
+                            isSpeakerOn = uiState.isSpeakerOn,
+                            isA2dpModeOn = uiState.isA2dpModeOn,
+                            bitrate = uiState.bitrate,
+                            isStereo = uiState.isStereo,
+                            micVolume = uiState.micVolume,
+                            outputVolume = uiState.outputVolume,
+                            onMicVolumeChange = viewModel::setMicVolume,
+                            onOutputVolumeChange = viewModel::setOutputVolume,
+                            expansionFraction = expansionFraction,
+                            screenHeight = layoutHeight,
+                            onToggleMic = viewModel::toggleMic,
+                            onToggleSpeaker = viewModel::toggleSpeaker,
+                            onOpenChat = { /* TODO */ },
+                            onOpenVoiceEffects = { /* TODO */ },
+                            onToggleAudioMode = viewModel::toggleA2dpMode,
+                            onBitrateChange = viewModel::setBitrate,
+                            onToggleStereo = viewModel::toggleStereo,
+                            onMoreClick = { showSettingsSheet = true },
+                            onLeaveRoom = {
+                                viewModel.leaveRoom()
+                                onLeaveRoom()
+                            }
+                        )
+                    }
                 }
             }
         ) { paddingValues ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(brush = gradientBrush)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) { }
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
             ) {
+                com.mustakim.bokbok.ui.shared.DynamicMeshGradientBackground(
+                    imageUrl = uiState.room?.imageUrl,
+                    coverage = 1f
+                )
+                
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
                 ) {
-                    VoiceRoomTopBar(
-                        roomName = roomName,
-                        isSpeakerOn = uiState.isSpeakerOn,
-                        onMinimize = onMinimizeCallback,
-                        onToggleSpeaker = viewModel::toggleSpeaker,
-                        onInviteFriends = { showAddUserDialog = true }
-                    )
-                    Spacer(modifier = Modifier.height(32.dp))
+                    if (!isPipMode) {
+                        VoiceRoomTopBar(
+                            roomName = roomName,
+                            isSpeakerOn = uiState.isSpeakerOn,
+                            onMinimize = onMinimize,
+                            onToggleSpeaker = viewModel::toggleSpeaker,
+                            onInviteFriends = { showAddUserDialog = true }
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(if (isPipMode) 8.dp else 32.dp))
+                    
                     DynamicParticipantGrid(
                         participants = uiState.participants,
-                        onParticipantLongClick = { selectedParticipant = it },
+                        onParticipantLongClick = { if (!isPipMode) selectedParticipant = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .padding(horizontal = 24.dp)
-                            .padding(bottom = 140.dp) // Ensure grid isn't hidden by floating dock
+                            .padding(horizontal = if (isPipMode) 8.dp else 24.dp)
+                            .padding(bottom = if (isPipMode) 0.dp else 140.dp)
                     )
                 }
             }
@@ -370,7 +378,7 @@ private fun VoiceRoomTopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(
+        BokBokIconButton(
             onClick = onMinimize,
             modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {
@@ -396,7 +404,7 @@ private fun VoiceRoomTopBar(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        IconButton(
+        BokBokIconButton(
             onClick = onToggleSpeaker,
             modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {
@@ -405,7 +413,7 @@ private fun VoiceRoomTopBar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        IconButton(
+        BokBokIconButton(
             onClick = onInviteFriends,
             modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.3f))
         ) {

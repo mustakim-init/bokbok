@@ -1,5 +1,8 @@
 package com.mustakim.bokbok.ui.screens.gameboost
 
+import com.mustakim.bokbok.ui.screens.common.TopBar
+import com.mustakim.bokbok.ui.shared.*
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,6 +11,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -33,6 +42,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,6 +68,15 @@ import com.mustakim.bokbok.ui.screens.gameboost.devicemonitor.DeviceMonitorScree
 import com.mustakim.bokbok.ui.screens.gameboost.screenrecord.ScreenRecordTab
 import com.mustakim.bokbok.ui.screens.gameboost.security.SecurityScreen
 import kotlinx.coroutines.launch
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import com.mustakim.bokbok.R
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -92,74 +111,160 @@ fun GameBoostScreen(
         }
     }
 
+
     MainScaffold(
         navController = navController,
-        title = "Optimizer", // Not used in UI because showTopBar is false
+        title = "Optimizer",
         showBottomBar = true,
-        showTopBar = false, // We use custom TopBar
-        userViewModel = userViewModel
-    ) { innerPadding ->
-        
-        // Use a standard scaffold (or just a Box) inside MainScaffold to handle the custom top bar structure
-        Scaffold(
-            modifier = Modifier
-                .padding(bottom = innerPadding.calculateBottomPadding()), // Respect BottomBar
-            containerColor = MaterialTheme.colorScheme.surface, // Solid Surface color
-            // TopAppBar with dynamic Back Button support
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            modifier = Modifier.padding(start = 8.dp),
-                            text = if (selectedTab == GameBoostTab.DASHBOARD) "Optimizer" else selectedTab.title,
-                            fontFamily = GoogleSansFlex,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 32.sp, // Adjusted for dynamic title
-                            letterSpacing = 1.sp
-                        )
-                    },
-                    navigationIcon = {
-                        if (selectedTab != GameBoostTab.DASHBOARD) {
-                            IconButton(onClick = { viewModel.onTabSelected(GameBoostTab.DASHBOARD) }) {
-                                Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back to Dashboard",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    },
-                    actions = {
-                        FilledIconButton(
-                            modifier = Modifier.padding(end = 14.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            onClick = {
-                                navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.AICompanion.route)
-                            }
-                        ) {
+        showTopBar = true,
+        useFlexibleTopBar = false,
+        isStatic = true,
+        showProfile = false,
+        showNotifications = false,
+        userViewModel = userViewModel,
+        customTopBar = { passedScrollBehavior ->
+            TopBar(
+                title = if (selectedTab == GameBoostTab.DASHBOARD) "Optimizer" else selectedTab.title,
+                userViewModel = userViewModel,
+                scrollBehavior = passedScrollBehavior,
+                useFlexibleTopBar = false,
+                isStatic = true,
+                showProfile = false,
+                showNotifications = false,
+                navigationIcon = {
+                    if (selectedTab != GameBoostTab.DASHBOARD) {
+                        BokBokIconButton(onClick = { viewModel.onTabSelected(GameBoostTab.DASHBOARD) }) {
                             Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "AI Companion",
-                                tint = MaterialTheme.colorScheme.primary
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
                             )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
-                        actionIconContentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                )
-            }
-        ) { scaffoldPadding ->
+                    } else {
+                        BokBokIconButton(onClick = { /* Menu */ }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    }
+                },
+                actions = {
+                    BokBokIconButton(onClick = {
+                        navController.navigate(com.mustakim.bokbok.ui.navigation.NavRoutes.AICompanion.route)
+                    }) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "AI Companion")
+                    }
+                }
+            )
+        },
+        containerColor = Color.Transparent
+    ) { innerPadding ->
+        // Capture M3 Expressive colors from theme
+        val color1 = MaterialTheme.colorScheme.primary
+        val color2 = MaterialTheme.colorScheme.secondary
+        val color3 = MaterialTheme.colorScheme.tertiary
+        val color4 = MaterialTheme.colorScheme.primaryContainer
+        val color5 = MaterialTheme.colorScheme.secondaryContainer
+        val surfaceColor = MaterialTheme.colorScheme.surface
+
+        Box(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // M3E Mesh gradient background layer at the top
             Box(
                 modifier = Modifier
-                    .padding(top = scaffoldPadding.calculateTopPadding())
+                    .fillMaxWidth()
+                    .fillMaxSize(0.7f) // Cover top 70% of screen
+                    .align(Alignment.TopCenter)
+                    .zIndex(-1f) // Place behind all content
+                    .drawWithCache {
+                        val width = this.size.width
+                        val height = this.size.height
+
+                        val brush1 = Brush.radialGradient(
+                            colors = listOf(
+                                color1.copy(alpha = 0.38f),
+                                color1.copy(alpha = 0.24f),
+                                color1.copy(alpha = 0.14f),
+                                color1.copy(alpha = 0.06f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.15f, height * 0.1f),
+                            radius = width * 0.55f
+                        )
+
+                        val brush2 = Brush.radialGradient(
+                            colors = listOf(
+                                color2.copy(alpha = 0.34f),
+                                color2.copy(alpha = 0.2f),
+                                color2.copy(alpha = 0.11f),
+                                color2.copy(alpha = 0.05f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.85f, height * 0.2f),
+                            radius = width * 0.65f
+                        )
+
+                        val brush3 = Brush.radialGradient(
+                            colors = listOf(
+                                color3.copy(alpha = 0.3f),
+                                color3.copy(alpha = 0.17f),
+                                color3.copy(alpha = 0.09f),
+                                color3.copy(alpha = 0.04f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.3f, height * 0.45f),
+                            radius = width * 0.6f
+                        )
+
+                        val brush4 = Brush.radialGradient(
+                            colors = listOf(
+                                color4.copy(alpha = 0.26f),
+                                color4.copy(alpha = 0.14f),
+                                color4.copy(alpha = 0.08f),
+                                color4.copy(alpha = 0.03f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.7f, height * 0.5f),
+                            radius = width * 0.7f
+                        )
+
+                        val brush5 = Brush.radialGradient(
+                            colors = listOf(
+                                color5.copy(alpha = 0.22f),
+                                color5.copy(alpha = 0.12f),
+                                color5.copy(alpha = 0.06f),
+                                color5.copy(alpha = 0.02f),
+                                Color.Transparent
+                            ),
+                            center = Offset(width * 0.5f, height * 0.75f),
+                            radius = width * 0.8f
+                        )
+
+                        val overlayBrush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Transparent,
+                                surfaceColor.copy(alpha = 0.22f),
+                                surfaceColor.copy(alpha = 0.55f),
+                                surfaceColor
+                            ),
+                            startY = height * 0.4f,
+                            endY = height
+                        )
+
+                        onDrawBehind {
+                            drawRect(brush = brush1)
+                            drawRect(brush = brush2)
+                            drawRect(brush = brush3)
+                            drawRect(brush = brush4)
+                            drawRect(brush = brush5)
+                            drawRect(brush = overlayBrush)
+                        }
+                    }
+            )
+
+            Box(
+                modifier = Modifier
                     .fillMaxSize()
+                    .padding(innerPadding)
             ) {
                 // Feature Content Switcher (Lazy initialization of screens)
                 when (selectedTab) {
@@ -181,6 +286,7 @@ fun GameBoostScreen(
                         val appManagerViewModel: com.mustakim.bokbok.viewmodel.AppManagerViewModel = hiltViewModel(viewModelStoreOwner)
                         AppManagerScreen(
                             navController = navController,
+                            userViewModel = userViewModel,
                             viewModel = appManagerViewModel
                         )
                     }

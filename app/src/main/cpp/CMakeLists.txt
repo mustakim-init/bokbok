@@ -114,25 +114,3 @@ target_link_libraries(
     oboe::oboe
     onnxruntime
 )
-
-# ── FPS Daemon ────────────────────────────────────────────────────────────────
-add_executable(fps_daemon fps_daemon.c)
-
-target_compile_options(fps_daemon PRIVATE
-    -O2
-    -Wall
-    -fPIE
-)
-
-target_link_options(fps_daemon PRIVATE
-    -pie
-    -static-libgcc
-    -Wl,-z,max-page-size=16384
-    -Wl,-z,common-page-size=16384 #new added remove if not working. just build the proj with Build>assemble project and copy the binary from G:\Doccuments\bokbok-v2\app\build\intermediates\cxx\Debug\3e4q6x43\obj\arm64-v8a to app/src/main/assets
-)
-
-target_link_libraries(fps_daemon
-    dl
-    ${log-lib}
-)
-# ─────────────────────────────────────────────────────────────────────────────

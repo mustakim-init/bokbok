@@ -190,12 +190,7 @@ class DeviceMonitorRepository @Inject constructor(
         ensurePersistentDataLoaded()
         val coreCount = Runtime.getRuntime().availableProcessors()
         
-        // 🚀 SYN-STYLE: Check if background daemon stats are available
-        val daemonStats = daemonManager.readStats()
-        if (daemonStats.isNotEmpty()) {
-            return@coroutineScope parseCpuInfoFromDaemon(daemonStats, coreCount)
-        }
-
+        // We immediately fall back to the native batch queries.
         // --- FALLBACK: Batch all frequent shell queries into ONE Shizuku process ---
         val batchResults = readShellCommands(listOf(
             "cat /proc/stat",
@@ -537,8 +532,9 @@ class DeviceMonitorRepository @Inject constructor(
         if (!checkShizukuPermission()) return@withContext List(commands.size) { null }
         
         val sep = "--BATCH-SEP--"
+        val bb = "/data/local/tmp/busybox"
         // Combine commands: cmd1 2>&1; echo --SEP--; cmd2 2>&1; echo --SEP--; ...
-        val bigCommand = commands.joinToString(separator = "; echo \"$sep\"; ") { "$it 2>&1" }
+        val bigCommand = commands.joinToString(separator = "; $bb echo \"$sep\"; ") { "$it 2>&1" }
         
         try {
             // 🚀 Use the persistent shell bridge
@@ -1318,44 +1314,60 @@ class DeviceMonitorRepository @Inject constructor(
 
     suspend fun getRunningProcesses(): List<ProcessInfo> = withContext(Dispatchers.IO) {
         val processes = mutableListOf<ProcessInfo>()
-        // Use top because it gives %CPU easily. -n 1 for single iteration. -b for batch mode.
-        val output = readShellCommand("top -b -n 1 -m 20") 
-        // Note: removed -s 9 as it's not supported on some toybox versions and causes failure
+        // 1. Try BusyBox top (standard format) first
+        var output = readShellCommand("/data/local/tmp/busybox top -n 1")
+        var isBusyBox = !output.isNullOrEmpty() && !output.contains("not found")
         
+        // 2. Fallback to toybox if BusyBox failed
+        if (!isBusyBox) {
+            output = readShellCommand("top -b -n 1 -o PID,USER,RES,CPU,NAME")
+        }
+
         if (!output.isNullOrEmpty()) {
             val lines = output.split("\n")
             var headerFound = false
             for (line in lines) {
-                if (line.contains("PID") && line.contains("USER") && (line.contains("RES") || line.contains("RSS"))) {
-                    headerFound = true
-                    continue
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) continue
+                
+                // Identify header based on tool type
+                if (isBusyBox) {
+                    if (trimmed.contains("PID") && trimmed.contains("COMMAND")) {
+                        headerFound = true
+                        continue
+                    }
+                } else {
+                    if (trimmed.contains("PID") && trimmed.contains("NAME")) {
+                        headerFound = true
+                        continue
+                    }
                 }
-                if (headerFound && line.trim().isNotEmpty()) {
+
+                if (headerFound) {
                     try {
-                        val parts = line.trim().split(" +".toRegex())
-                        if (parts.size >= 9) {
-                            // Toybox top output varies, let's try common positions
-                            // PID USER PR NI VIRT RES SHR S %CPU %MEM TIME+ ARGS
+                        val parts = trimmed.split(" +".toRegex())
+                        if (isBusyBox && parts.size >= 8) {
+                            // BusyBox: PID PPID USER STAT VSZ %VSZ %CPU COMMAND
+                            val pid = parts[0].toIntOrNull() ?: continue
+                            val user = parts[2]
+                            val cpu = parts[6].replace(",", ".").replace("%", "").toFloatOrNull() ?: 0f
+                            val name = parts.last()
+                            processes.add(ProcessInfo(pid, name, cpu, 0f, user, name))
+                        } else if (!isBusyBox && parts.size >= 5) {
+                            // Toybox: PID,USER,RES,CPU,NAME
                             val pid = parts[0].toIntOrNull() ?: continue
                             val user = parts[1]
-                            val resStr = parts[5] // Usually RES
-                            val cpu = parts[8].replace(",", ".").toFloatOrNull() ?: 0f
-                            val name = parts.last()
+                            val resStr = parts[2]
+                            val cpu = parts[3].replace(",", ".").toFloatOrNull() ?: 0f
+                            val name = parts[4]
                             
                             val resKb = when {
                                 resStr.endsWith("G") -> (resStr.dropLast(1).toDouble() * 1024 * 1024).toLong()
                                 resStr.endsWith("M") -> (resStr.dropLast(1).toDouble() * 1024).toLong()
+                                resStr.endsWith("K") -> (resStr.dropLast(1).toDouble()).toLong()
                                 else -> resStr.toLongOrNull() ?: 0L
                             }
-
-                            processes.add(ProcessInfo(
-                                pid = pid,
-                                name = name,
-                                cpuUsage = cpu,
-                                ramUsageMb = resKb / 1024f,
-                                user = user,
-                                command = name
-                            ))
+                            processes.add(ProcessInfo(pid, name, cpu, resKb / 1024f, user, name))
                         }
                     } catch (_: Exception) {}
                 }
@@ -1581,44 +1593,6 @@ class DeviceMonitorRepository @Inject constructor(
             }
         }
         props
-    }
-
-    /**
-     * Parses the flat key-value stats from the Daemon background file.
-     * This is the fastest monitoring path.
-     */
-    private suspend fun parseCpuInfoFromDaemon(stats: Map<String, String>, coreCount: Int): CpuInfo {
-        val freqsStr = stats["cpu_freqs"] ?: ""
-        val freqList = if (freqsStr.isNotEmpty()) freqsStr.split(",").map { it.toLongOrNull() ?: 0L } else List(coreCount) { 0L }
-        
-        val cpuUsageStr = stats["cpu_usage"] ?: "0"
-        val cpuUsagePercent = cpuUsageStr.toFloatOrNull() ?: 0f
-        
-        val fpsStr = stats["fps"] ?: "0"
-        
-        val tempsRaw = stats["temps"] ?: ""
-        val temp = tempsRaw.split("|").firstNotNullOfOrNull { line ->
-            val pts = line.split(":")
-            if (pts.size == 2 && (pts[0].contains("cpu") || pts[0].contains("soc"))) {
-                val t = pts[1].toFloatOrNull() ?: return@firstNotNullOfOrNull null
-                if (t > 1000) t / 1000f else t
-            } else null
-        } ?: 0f
-
-        val soc = cachedSoCModel ?: stats["soc"] ?: getSoCModel().also { cachedSoCModel = it }
-        val ram = getRamInfo()
-
-        return CpuInfo(
-            loadPercent = cpuUsagePercent.coerceIn(0f, 100f),
-            coreCount = coreCount,
-            coreLoads = List(coreCount) { cpuUsagePercent },
-            frequencies = freqList,
-            onlineStatus = List(coreCount) { true },
-            socName = soc,
-            temperatureCelsius = temp,
-            fps = fpsStr.toFloatOrNull() ?: 0f,
-            architecture = "ARMv8-A" // Standardize
-        )
     }
 
     suspend fun startDaemon() = daemonManager.deployAndStart()

@@ -13,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -41,29 +42,37 @@ class ProfileViewModel @Inject constructor(
 
     fun loadUserProfile() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            _uiState.update { it.copy(isLoading = true, error = null) }
 
-            val userId = userRepository.getCurrentUserId()
-            if (userId != null) {
-                userRepository.getUserProfile(userId).fold(
-                    onSuccess = { user ->
-                        _uiState.value = _uiState.value.copy(
-                            user = user,
-                            isLoading = false
-                        )
-                    },
-                    onFailure = { error ->
-                        _uiState.value = _uiState.value.copy(
+            kotlinx.coroutines.supervisorScope {
+                val userId = userRepository.getCurrentUserId()
+                if (userId != null) {
+                    userRepository.getUserProfile(userId).fold(
+                        onSuccess = { user ->
+                            _uiState.update {
+                                it.copy(
+                                    user = user,
+                                    isLoading = false
+                                )
+                            }
+                        },
+                        onFailure = { error ->
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    error = error.message ?: "Failed to load profile"
+                                )
+                            }
+                        }
+                    )
+                } else {
+                    _uiState.update {
+                        it.copy(
                             isLoading = false,
-                            error = error.message ?: "Failed to load profile"
+                            error = "User not logged in"
                         )
                     }
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = "User not logged in"
-                )
+                }
             }
         }
     }

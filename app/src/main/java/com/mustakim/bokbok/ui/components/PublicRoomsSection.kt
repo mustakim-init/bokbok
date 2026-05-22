@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.mustakim.bokbok.data.model.VoiceRoom
+import com.mustakim.bokbok.ui.shared.BokBokIconButton
 
 /**
  * 🚀 PERFORMANCE OPTIMIZED: Flattened version of PublicRoomsSection.
@@ -61,7 +63,9 @@ fun LazyListScope.publicRoomsItems(
     totalRooms: Int,
     totalParticipants: Int,
     isRefreshing: Boolean,
+    isLoadingMore: Boolean = false,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
     onJoinCallOnly: (VoiceRoom) -> Unit,
     onJoinPermanently: (VoiceRoom) -> Unit
 ) {
@@ -95,7 +99,7 @@ fun LazyListScope.publicRoomsItems(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             StatCard(
                 title = "Active Rooms",
@@ -120,7 +124,12 @@ fun LazyListScope.publicRoomsItems(
         items = rows,
         key = { index, row -> "public_room_row_${row.firstOrNull()?.id ?: index}" },
         contentType = { _, _ -> "room_row" }
-    ) { _, rowRooms ->
+    ) { index, rowRooms ->
+        // Trigger load more when reaching near the end
+        if (index >= rows.size - 2 && !isLoadingMore) {
+            onLoadMore()
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -158,6 +167,24 @@ fun LazyListScope.publicRoomsItems(
             }
         }
     }
+
+    // 4. Loading More Indicator
+    if (isLoadingMore) {
+        item(key = "public_rooms_loading_more", contentType = "loader") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 3.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -167,21 +194,47 @@ private fun RoomJoinDialog(
     onJoinPermanently: () -> Unit,
     onJoinCallOnly: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Join room") },
-        text = { Text("How do you want to join ${room.name}?") },
-        confirmButton = {
-            TextButton(onClick = onJoinPermanently) {
-                Text("Join permanently")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onJoinCallOnly) {
-                Text("Join call only")
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.95f),
+            tonalElevation = 6.dp,
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Join room",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "How do you want to join ${room.name}?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                androidx.compose.material3.Button(
+                    onClick = onJoinPermanently,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Join permanently", fontWeight = FontWeight.Bold)
+                }
+                androidx.compose.material3.FilledTonalButton(
+                    onClick = onJoinCallOnly,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text("Join call only", fontWeight = FontWeight.Bold)
+                }
             }
         }
-    )
+    }
 }
 
 @Composable
@@ -311,7 +364,7 @@ private fun RefreshButton(
         label = "refresh_rotation"
     )
 
-    IconButton(
+    BokBokIconButton(
         onClick = onClick,
         enabled = !isRefreshing
     ) {
@@ -334,11 +387,15 @@ private fun StatCard(
     value: String,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    Surface(
         modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        ),
+        tonalElevation = 2.dp
     ) {
         Column(
             modifier = Modifier
@@ -349,14 +406,15 @@ private fun StatCard(
             Text(
                 text = value,
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -404,7 +462,7 @@ fun CompactRoomCard(
         )
     }
 
-    Card(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
             .height(180.dp)
@@ -412,9 +470,13 @@ fun CompactRoomCard(
                 onClick = onClick,
                 onLongClick = { onLongClick?.invoke() }
             ),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        )
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+        ),
+        tonalElevation = 2.dp
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (hasImage) {
@@ -466,15 +528,19 @@ private fun CompactRoomCardContent(
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Surface(
-            color = colors.categoryBg ?: MaterialTheme.colorScheme.primaryContainer,
-            shape = MaterialTheme.shapes.small
+            color = colors.categoryBg ?: MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+            shape = RoundedCornerShape(10.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = if (colors.hasImage) Color.White.copy(alpha = 0.3f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+            )
         ) {
             Text(
                 text = room.category.displayName,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.categoryText ?: MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.ExtraBold
             )
         }
 

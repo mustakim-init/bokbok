@@ -114,9 +114,16 @@ class KeepShell @Inject constructor() {
                         return@withContext "error: shell not available"
                     }
                 }
+                
+                // 1. Drain any "ghost" output from previous timed-out commands
+                // This prevents marker desync if a command like 'top' hung earlier.
+                while (reader?.ready() == true) {
+                    reader?.read()
+                }
+
                 val output = StringBuilder()
                 
-                // Wrap in markers
+                // 2. Wrap in markers
                 writer?.write("\necho '$START_TAG'\n$command\necho '$END_TAG'\n")
                 writer?.flush()
 

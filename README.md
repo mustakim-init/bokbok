@@ -41,11 +41,17 @@ Unlike traditional social apps, BokBok focuses on **effortless voice communicati
 
 ## ✨ Key Features
 
-- **Voice Rooms**: Create and join public or private voice rooms.
-- **Hybrid Chat**: Seamlessly switch between voice and text chat.
-- **Friend System**: See online statuses and join friends' rooms.
-- **Beautiful UI/UX**: Built with Material Design 3 and Jetpack Compose.
-- **Advanced Controls**: Manage participants, audio quality, and more.
+*   **🎙️ Social Voice Rooms**: Low-latency, high-fidelity voice channels powered by WebRTC with customizable privacy, real-time presence indicators, and seamless participant moderation.
+*   **🎵 Integrated ArchiveTune Music Engine**: A custom, premium music streaming visualizer and player built directly into the social ecosystem:
+    *   **YouTube Music Integration**: Search the vast YouTube catalog, create playlists, continue queues seamlessly, and fetch related recommendation tracks utilizing the modular `:innertube` client.
+    *   **Dynamic Audio Quality Control**: Toggle low-latency audio stream profiles dynamically, switching between high-fidelity music mode (A2DP) and low-latency call mode (SCO) for real-time room sharing.
+    *   **Synced Lyrics Engine**: Enjoy beautifully synchronized scrolling lyrics aggregated in real-time from multiple providers: LrcLib (`:lrclib`), KuGou (`:kugou`), SimpMusic (`:simpmusic`), and YouTube subtitle captions. Styled with dynamic glassmorphism aesthetics.
+    *   **Discord Rich Presence (RPC)**: Dynamically broadcast what you are playing/listening to on Discord using our standalone, high-performance native WebSocket client (`:kizzy`).
+    *   **Last.fm scrobbling**: Log played tracks automatically to your profile using the native scrobbling integrations (`:lastfm`).
+    *   **Local Device Scanner**: Automatically scan, parse, and synchronize offline device storage music files using MediaStore observers (`LocalMusicSyncManager.kt`) and directory synchronization services.
+*   **💬 Real-Time Messenger**: Fully integrated hybrid text chats, group messaging, and private threads with offline local persistence supported by Room.
+*   **🤖 Groq AI Companion**: Integrated AI companionship powered by Groq API (`GROQ_API_KEY`) to chat, keep company, and help out directly inside your voice lounges.
+*   **🎨 Premium UI/UX Aesthetics**: Beautiful visuals using Jetpack Compose and Material Design 3, dynamic visualizers (`:canvas`), premium layout elements (e.g. dynamic mesh gradient backgrounds), and shimmer loading skeletons.
 
 ---
 
@@ -55,22 +61,66 @@ For detailed instructions on how to set up and run the project, please see the [
 
 ---
 
-## 🏗️ Technical Architecture
+## 🏗️ Technical Architecture & Modular Design
 
-### Built With Modern Android Stack
+BokBok is built using a modern, scalable, and highly decoupled multi-module architecture. This makes features reusable, testable, and compile times incredibly fast.
 
+### Module Topology Map
+```mermaid
+graph TD
+    subgraph App Layer
+        app[":app (Main Android Application)"]
+    end
+
+    subgraph Feature Layer
+        feature_music[":feature:music (Player, Scrobble & Lyrics Core)"]
+    end
+
+    subgraph Integration Layer
+        innertube[":innertube (YouTube Music Scraper/API)"]
+        kizzy[":kizzy (Discord WebSocket RPC Gateway)"]
+        lrclib[":lrclib (LrcLib Timed Lyrics Client)"]
+        kugou[":kugou (KuGou API Client)"]
+        lastfm[":lastfm (Last.fm Scrobbler Client)"]
+        simpmusic[":simpmusic (SimpMusic Lyrics API)"]
+        shazamkit[":shazamkit (Shazam Music Recognition)"]
+        betterlyrics[":betterlyrics (Lyrics Parser)"]
+        canvas[":canvas (Custom Artwork Visualizer)"]
+    end
+
+    subgraph Core Shared Layer
+        core[":core (Shared UI, Tokens, DataStore, Prefs)"]
+    end
+
+    app --> feature_music
+    app --> core
+    feature_music --> core
+    feature_music --> innertube
+    feature_music --> kizzy
+    feature_music --> lrclib
+    feature_music --> kugou
+    feature_music --> lastfm
+    feature_music --> simpmusic
+    feature_music --> shazamkit
+    feature_music --> betterlyrics
+    feature_music --> canvas
+    canvas --> core
 ```
-Jetpack Compose          → Declarative UI framework
-Kotlin Coroutines        → Asynchronous programming
-Firebase Firestore       → Real-time database
-Firebase Realtime DB     → Presence and signaling
-Firebase Auth            → User authentication
-Room Database            → Local data persistence
-WebRTC                   → Peer-to-peer voice communication
-Coil                     → Image loading and caching
-Material Design 3        → Design system
-Navigation Compose       → Screen navigation
-ViewModel + StateFlow    → State management
+
+### Stack & Architecture
+```
+Jetpack Compose          → Premium declarative UI framework
+Kotlin Coroutines        → High-concurrency background operations
+Firebase Firestore       → Real-time document persistence
+Firebase Realtime DB     → User presence tracking & signaling
+Firebase Auth            → Secure User Authentication
+Room Database            → Local sqlite persistence & message queue
+WebRTC                   → Low-latency P2P room communication
+Coil                     → Premium image loading and caching
+Material Design 3        → Expressive layout themes & tokens
+Navigation Compose       → Highly responsive screen routing
+ViewModel + StateFlow    → Unidirectional Data Flow state management
+Oboe                     → Low-latency native audio engine
 ```
 
 ---

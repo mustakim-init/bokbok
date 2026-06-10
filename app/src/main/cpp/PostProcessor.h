@@ -5,7 +5,9 @@
 #include <functional>
 #include <vector>
 #include <atomic>
+#ifdef BOKBOK_ENABLE_AI
 #include "DeepFilterNet.h"
+#endif
 #include "Aec3Processor.h"
 
 namespace bokbok {
@@ -51,7 +53,9 @@ public:
 
 private:
     std::atomic<bool> shouldCancel_{false};
+#ifdef BOKBOK_ENABLE_AI
     std::unique_ptr<DeepFilterNet> deepFilter_;
+#endif
     std::unique_ptr<Aec3Processor> aec3_;  // AEC3 for bleed reduction
     ProgressCallback onProgress_;
 

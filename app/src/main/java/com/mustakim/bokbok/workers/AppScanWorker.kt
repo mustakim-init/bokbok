@@ -36,6 +36,21 @@ class AppScanWorker @AssistedInject constructor(
             val flags = PackageManager.MATCH_UNINSTALLED_PACKAGES
             val packages = pm.getInstalledPackages(flags)
             
+            // Optimization: Check for usage stats permission once
+            val hasUsageStatsPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val appOps = applicationContext.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                val mode = appOps.checkOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, 
+                    android.os.Process.myUid(), 
+                    applicationContext.packageName
+                )
+                mode == android.app.AppOpsManager.MODE_ALLOWED
+            } else false
+
+            val storageStatsManager = if (hasUsageStatsPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                applicationContext.getSystemService(Context.STORAGE_STATS_SERVICE) as android.app.usage.StorageStatsManager
+            } else null
+            
             // Optimization: Load existing apps to check for changes and skip redundant IPC calls
             val existingAppsMap = appDao.getAppsOneShot().associateBy { it.packageName }
             
@@ -52,20 +67,34 @@ class AppScanWorker @AssistedInject constructor(
                             val existing = existingAppsMap[packageName]
                             val bloatwareInfo = BloatwareDatabase.getBloatwareInfo(applicationContext, packageName)
                             
-                            val shouldRefreshSize = existing == null || 
-                                                  existing.lastUpdateTime != packageInfo.lastUpdateTime ||
-                                                  existing.dataSize == 0L
+                            val isUpdated = existing == null || existing.lastUpdateTime != packageInfo.lastUpdateTime
                             
                             val (apkSize, dataSize, cacheSize) = if (isInstalled) {
-                                if (shouldRefreshSize) {
-                                    getAppSize(applicationContext, packageName) ?: Triple(0L, 0L, 0L)
+                                if (isUpdated || (existing?.dataSize ?: 0L) == 0L) {
+                                    if (storageStatsManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        try {
+                                            val stats = storageStatsManager.queryStatsForPackage(
+                                                android.os.storage.StorageManager.UUID_DEFAULT,
+                                                packageName,
+                                                android.os.Process.myUserHandle()
+                                            )
+                                            Triple(stats.appBytes, stats.dataBytes, stats.cacheBytes)
+                                        } catch (_: Exception) {
+                                            Triple(0L, 0L, 0L)
+                                        }
+                                    } else {
+                                        // Basic fallback: just use the APK size if we can't get full stats
+                                        val apkFile = File(appInfo.sourceDir ?: "")
+                                        val size = if (apkFile.exists()) apkFile.length() else 0L
+                                        Triple(size, 0L, 0L)
+                                    }
                                 } else {
                                     Triple(existing!!.apkSize, existing.dataSize, existing.cacheSize)
                                 }
                             } else Triple(0L, 0L, 0L)
 
                             val hasLauncher = if (isInstalled) {
-                                if (existing != null && existing.lastUpdateTime == packageInfo.lastUpdateTime) {
+                                if (!isUpdated && existing != null) {
                                     existing.hasActivities
                                 } else {
                                     pm.queryIntentActivities(
@@ -108,7 +137,7 @@ class AppScanWorker @AssistedInject constructor(
                 }
             }
             
-            appDao.refreshApps(entities)
+            appDao.syncApps(entities)
             BloatwareDatabase.clear() // Free huge in-memory map after processing
             
             // Sync game list to shell after scan to ensure newly discovered games are monitored
@@ -119,30 +148,6 @@ class AppScanWorker @AssistedInject constructor(
             e.printStackTrace()
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
-    }
-
-    private fun getAppSize(context: Context, packageName: String): Triple<Long, Long, Long>? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-                val mode = appOps.checkOpNoThrow(
-                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, 
-                    android.os.Process.myUid(), 
-                    context.packageName
-                )
-                
-                if (mode == android.app.AppOpsManager.MODE_ALLOWED) {
-                    val storageStatsManager = context.getSystemService(Context.STORAGE_STATS_SERVICE) as android.app.usage.StorageStatsManager
-                    val storageStats = storageStatsManager.queryStatsForPackage(
-                        android.os.storage.StorageManager.UUID_DEFAULT,
-                        packageName,
-                        android.os.Process.myUserHandle()
-                    )
-                    return Triple(storageStats.appBytes, storageStats.dataBytes, storageStats.cacheBytes)
-                }
-            } catch (_: Exception) {}
-        }
-        return null
     }
 
     companion object {

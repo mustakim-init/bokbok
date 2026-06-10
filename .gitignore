@@ -16,3 +16,4 @@ local.properties
 .apk
 /app/release
 google-services.json
+.aider*

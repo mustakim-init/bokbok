@@ -105,12 +105,9 @@ fun GameBoostScreen(
         viewModel.onTabSelected(pagerState.currentPage)
     }
 
-    LaunchedEffect(selectedTab) {
-        if (pagerState.currentPage != selectedTab.ordinal) {
-            pagerState.animateScrollToPage(selectedTab.ordinal)
-        }
+    androidx.activity.compose.BackHandler(enabled = selectedTab != GameBoostTab.DASHBOARD) {
+        viewModel.onTabSelected(GameBoostTab.DASHBOARD)
     }
-
 
     MainScaffold(
         navController = navController,

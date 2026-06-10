@@ -26,10 +26,23 @@ interface AppDao {
     suspend fun deleteAll()
 
     @Transaction
-    suspend fun refreshApps(apps: List<AppEntity>) {
-        deleteAll()
+    suspend fun syncApps(apps: List<AppEntity>) {
+        // 1. Get all current packages in DB
+        val existingPackages = getAppsOneShot().map { it.packageName }.toSet()
+        val newPackages = apps.map { it.packageName }.toSet()
+
+        // 2. Insert/Update new list (REPLACE strategy handles updates)
         insertAll(apps)
+
+        // 3. Remove packages that no longer exist on device
+        val toDelete = existingPackages - newPackages
+        if (toDelete.isNotEmpty()) {
+            deleteByPackages(toDelete.toList())
+        }
     }
+
+    @Query("DELETE FROM apps WHERE packageName IN (:packageNames)")
+    suspend fun deleteByPackages(packageNames: List<String>)
 
     @Query("SELECT COUNT(*) FROM apps")
     suspend fun getAppCount(): Int

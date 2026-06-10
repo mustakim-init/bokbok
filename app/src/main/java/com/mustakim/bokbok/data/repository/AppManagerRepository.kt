@@ -59,6 +59,18 @@ class AppManagerRepository @Inject constructor(
         )
     }
 
+    suspend fun getAppCount(): Int = withContext(Dispatchers.IO) {
+        appDao.getAppCount()
+    }
+
+    suspend fun getLastBloatwareSyncTime(): Long = withContext(Dispatchers.IO) {
+        configDao.getString("last_bloatware_sync")?.toLongOrNull() ?: 0L
+    }
+
+    suspend fun updateLastBloatwareSyncTime(time: Long) = withContext(Dispatchers.IO) {
+        configDao.putString("last_bloatware_sync", time.toString())
+    }
+
     private fun AppEntity.toModel() = AppItem(
         packageName = packageName,
         label = label,

@@ -181,12 +181,16 @@ fun NavGraph(
     val pureBlack = pureBlackPref && isSystemInDarkTheme
     
     val homeViewModel: HomeViewModel = hiltViewModel()
+    val loungeViewModel: LoungeViewModel = hiltViewModel()
+    val friendsViewModel: FriendsViewModel = hiltViewModel()
+    val userViewModel: UserViewModel = hiltViewModel()
+    val notificationViewModel: NotificationViewModel = hiltViewModel()
+    val voiceRoomViewModel: VoiceRoomViewModel = hiltViewModel()
+    val themeViewModelInternal: ThemeViewModel = themeViewModel // Use passed or hoisted
+
     val allLocalItems by homeViewModel.allLocalItems.collectAsState(initial = emptyList<LocalItem>())
     val allYtItems by homeViewModel.allYtItems.collectAsState(initial = emptyList<YTItem>())
     val coroutineScope = rememberCoroutineScope()
-    
-    val loungeViewModel: LoungeViewModel = hiltViewModel()
-    val friendsViewModel: FriendsViewModel = hiltViewModel()
 
     var showCreateRoomDialog by remember { mutableStateOf(false) }
     var showAddFriendDialog by remember { mutableStateOf(false) }
@@ -270,20 +274,19 @@ fun NavGraph(
                     composable(NavRoutes.Signup.route) {
                         SignupScreen(
                             navController = navController,
-                            userViewModel = hiltViewModel()
+                            userViewModel = userViewModel
                         )
                     }
                     composable(NavRoutes.GoogleSignup.route) {
                         GoogleSignupScreen(
                             navController = navController,
-                            userViewModel = hiltViewModel()
+                            userViewModel = userViewModel
                         )
                     }
                     composable(NavRoutes.Permissions.route) { PermissionsScreen(navController) }
 
                     // ============= MAIN APP FLOW =============
                     composable(NavRoutes.Lounge.route) {
-                        val userViewModel: UserViewModel = hiltViewModel()
                         LoungeScreen(
                             navController = navController,
                             userViewModel = userViewModel,
@@ -292,7 +295,6 @@ fun NavGraph(
                     }
 
                     composable(NavRoutes.Chats.route) {
-                        val userViewModel: UserViewModel = hiltViewModel()
                         ChatsScreen(
                             navController = navController,
                             userViewModel = userViewModel,
@@ -302,15 +304,19 @@ fun NavGraph(
                     }
 
                     composable(NavRoutes.Notifications.route) {
-                        val viewModel: NotificationViewModel = hiltViewModel()
                         NotificationsScreen(
                             navController = navController,
-                            viewModel = viewModel
+                            viewModel = notificationViewModel
                         )
                     }
 
                     composable(NavRoutes.Profile.route) {
-                        ProfileScreen(navController)
+                        val profileViewModel: com.mustakim.bokbok.viewmodel.ProfileViewModel = hiltViewModel()
+                        ProfileScreen(
+                            navController = navController,
+                            profileViewModel = profileViewModel,
+                            userViewModel = userViewModel
+                        )
                     }
 
                     // ============= MUSIC & SETTINGS FLOW =============
@@ -344,7 +350,6 @@ fun NavGraph(
                     }
 
                     composable(NavRoutes.AICompanion.route) {
-                        val userViewModel: UserViewModel = hiltViewModel()
                         com.mustakim.bokbok.ui.screens.ai.AICompanionScreen(
                             navController = navController,
                             userViewModel = userViewModel
@@ -352,7 +357,6 @@ fun NavGraph(
                     }
 
                     composable(NavRoutes.GameBoost.route) {
-                        val userViewModel: UserViewModel = hiltViewModel()
                         GameBoostScreen(navController, userViewModel)
                     }
 
@@ -399,8 +403,8 @@ fun NavGraph(
                                 nullable = false
                             }
                         )
-                    ) {
-                        val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel()
+                    ) { backStackEntry ->
+                        val chatViewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel(backStackEntry)
 
                         com.mustakim.bokbok.ui.screens.chat.ChatScreen(
                             navController = navController,
@@ -416,8 +420,8 @@ fun NavGraph(
                                 nullable = false
                             }
                         )
-                    ) {
-                        val groupChatViewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
+                    ) { backStackEntry ->
+                        val groupChatViewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel(backStackEntry)
 
                         com.mustakim.bokbok.ui.screens.chat.GroupChatScreen(
                             navController = navController,
@@ -433,9 +437,18 @@ fun NavGraph(
                         )
                     ) { backStackEntry ->
                         val isGroup = backStackEntry.arguments?.getBoolean("isGroup") ?: false
+                        val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
 
                         if (isGroup) {
-                            val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
+                            // 🚀 SCOPE PERSISTENCE: Attempt to share ViewModel with GroupChatScreen
+                            val groupChatEntry = remember(backStackEntry) {
+                                try {
+                                    navController.getBackStackEntry(NavRoutes.GroupChat.createRoute(chatId))
+                                } catch (e: Exception) {
+                                    backStackEntry
+                                }
+                            }
+                            val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel(groupChatEntry)
                             val groupName by viewModel.groupName.collectAsState()
                             val groupMembers by viewModel.groupMembers.collectAsState()
                             val groupInfo by viewModel.groupInfo.collectAsState()
@@ -501,7 +514,16 @@ fun NavGraph(
                                 )
                             }
                         } else {
-                            val viewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel()
+                            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                            // 🚀 SCOPE PERSISTENCE: Attempt to share ViewModel with individual ChatScreen
+                            val chatEntry = remember(backStackEntry) {
+                                try {
+                                    navController.getBackStackEntry(NavRoutes.Chat.createRoute(chatId))
+                                } catch (e: Exception) {
+                                    backStackEntry
+                                }
+                            }
+                            val viewModel: com.mustakim.bokbok.viewmodel.ChatViewModel = hiltViewModel(chatEntry)
                             val friendUser by viewModel.friendUser.collectAsState()
 
                             com.mustakim.bokbok.ui.screens.chat.ChatDetailsScreen(
@@ -534,9 +556,15 @@ fun NavGraph(
                     ) { backStackEntry ->
                         val groupId = backStackEntry.arguments?.getString("groupId") ?: return@composable
 
-                        // Reuse GroupChatViewModel or create new one with same groupId
-                        // Since we need to manage members (remove), reusing is good.
-                        val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel()
+                        // 🚀 SCOPE PERSISTENCE: Share GroupChatViewModel from the main chat screen
+                        val groupChatEntry = remember(backStackEntry) {
+                            try {
+                                navController.getBackStackEntry(NavRoutes.GroupChat.createRoute(groupId))
+                            } catch (e: Exception) {
+                                backStackEntry
+                            }
+                        }
+                        val viewModel: com.mustakim.bokbok.viewmodel.GroupChatViewModel = hiltViewModel(groupChatEntry)
 
                         com.mustakim.bokbok.ui.screens.chat.ChatMembersScreen(
                             viewModel = viewModel,

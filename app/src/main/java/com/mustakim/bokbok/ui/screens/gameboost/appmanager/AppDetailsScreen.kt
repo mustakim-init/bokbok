@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +60,12 @@ fun AppDetailsScreen(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     var currentManager by remember { mutableStateOf<ManagerType?>(null) }
+
+    // Intercept system back when a sub-screen (Permission/Component manager) is open.
+    // This prevents the entire AppDetailsScreen from being popped off the back stack.
+    BackHandler(enabled = currentManager != null) {
+        currentManager = null
+    }
 
     when (currentManager) {
         ManagerType.COMPONENT -> {

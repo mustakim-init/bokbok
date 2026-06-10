@@ -38,10 +38,7 @@ fun AppListItem(
     val (badgeColor, badgeText, badgeIcon) = getRemovalSafetyBadge(app.removalSafety)
     
     // Selection border color
-    val borderColor by animateColorAsState(
-        targetValue = if (app.isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-        label = "borderColor"
-    )
+    val borderColor = if (app.isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
     
     Surface(
         modifier = Modifier

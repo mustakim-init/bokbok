@@ -23,21 +23,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.properties.ReadOnlyProperty
+import kotlin.time.Duration.Companion.milliseconds
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
-
-/** Application-level context holder, initialized by BokBokApp.onCreate(). */
-object AppContext {
-    @Volatile
-    private var _context: Context? = null
-
-    val context: Context?
-        get() = _context
-
-    fun init(context: Context) {
-        _context = context.applicationContext
-    }
-}
 
 object PreferenceStore {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -48,6 +36,11 @@ object PreferenceStore {
         if (started) return
         synchronized(this) {
             if (started) return
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(1500.milliseconds) {
+                    _prefs.value = context.dataStore.data.first()
+                }
+            }
             started = true
             scope.launch {
                 context.dataStore.data.collect { preferences ->
@@ -69,17 +62,6 @@ object PreferenceStore {
             }
         }
     }
-    
-    operator fun <T> set(key: Preferences.Key<T>, value: T?) {
-        val ctx = AppContext.context ?: return
-        launchEdit(ctx.dataStore) {
-            if (value == null) {
-                remove(key)
-            } else {
-                this[key] = value
-            }
-        }
-    }
 }
 
 // Extension to safely convert string to Enum
@@ -98,7 +80,7 @@ operator fun <T> DataStore<Preferences>.get(key: Preferences.Key<T>): T? =
             null
         } else {
             runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(1500) {
+                withTimeoutOrNull(1500.milliseconds) {
                     data.first()[key]
                 }
             }
@@ -113,7 +95,7 @@ fun <T> DataStore<Preferences>.get(
             defaultValue
         } else {
             runBlocking(Dispatchers.IO) {
-                withTimeoutOrNull(1500) {
+                withTimeoutOrNull(1500.milliseconds) {
                     data.first()[key]
                 } ?: defaultValue
             }

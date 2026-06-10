@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "last_updated": "2026-06-10",
+  "skills": [
+    {
+      "name": "knowledge-mgmt",
+      "description": "How the .agents/ system works — rules, handoffs, mistakes, design, knowledge, and skills",
+      "keywords": ["system", "rules", "meta", "knowledge", "skill", "handoff", "howto"],
+      "path": ".agents/skills/meta/skill.md",
+      "difficulty": "easy",
+      "created_by": "system"
+    }
+  ]
+}

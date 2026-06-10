@@ -35,12 +35,16 @@ class VoiceManager @Inject constructor(
 
     companion object {
         init {
-            try {
-                // Explicitly load onnxruntime first to ensure symbols are available
-                System.loadLibrary("onnxruntime")
-                System.loadLibrary("sherpa-onnx-jni")
-            } catch (t: Throwable) {
-                android.util.Log.e("VoiceManager", "Failed to load native libraries", t)
+            if (com.mustakim.bokbok.util.ArchitectureUtils.is64Bit()) {
+                try {
+                    // Explicitly load onnxruntime first to ensure symbols are available
+                    System.loadLibrary("onnxruntime")
+                    System.loadLibrary("sherpa-onnx-jni")
+                } catch (t: Throwable) {
+                    android.util.Log.e("VoiceManager", "Failed to load native libraries", t)
+                }
+            } else {
+                android.util.Log.w("VoiceManager", "Sherpa-ONNX is not supported on this 32-bit architecture.")
             }
         }
     }

@@ -1,5 +1,7 @@
 #include "PostProcessor.h"
+#ifdef BOKBOK_ENABLE_AI
 #include "DeepFilterNet.h"
+#endif
 
 #include <fstream>
 #include <algorithm>
@@ -18,6 +20,7 @@
 
 #define LOG_TAG "PostProcessor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 namespace bokbok {
@@ -79,6 +82,7 @@ bool PostProcessor::process(const Config& config) {
     }
 
     // Prepare model - only if noise reduction is enabled
+#ifdef BOKBOK_ENABLE_AI
     if (config.enableNoiseReduction) {
         deepFilter_ = std::make_unique<DeepFilterNet>();
         if (!deepFilter_->init(modelPath, config.sampleRate)) {
@@ -90,7 +94,12 @@ bool PostProcessor::process(const Config& config) {
              LOGI("DeepFilterNet models loaded.");
         }
     }
-    
+#else
+    if (config.enableNoiseReduction) {
+        LOGW("Noise reduction is requested but not supported on this 32-bit architecture.");
+    }
+#endif
+
     // Initialize AEC3 for bleed reduction (if enabled)
     if (config.enableBleedReduction) {
         aec3_ = std::make_unique<Aec3Processor>(config.sampleRate, config.numChannels);
@@ -202,6 +211,7 @@ bool PostProcessor::process(const Config& config) {
 
 
         // --- STAGE 5: AI Polishing (DeepFilterNet Layer 2) ---
+#ifdef BOKBOK_ENABLE_AI
         if (deepFilter_) {
             deepFilter_->process(
                 micProcessingBuf.data(), 
@@ -215,6 +225,10 @@ bool PostProcessor::process(const Config& config) {
              // Fallback: Just copy input to output if DFN is not loaded but loop expects outChunk to be filled
              std::copy(micProcessingBuf.begin(), micProcessingBuf.begin() + samplesThisChunk, outChunk.begin());
         }
+#else
+        // Passthrough for 32-bit
+        std::copy(micProcessingBuf.begin(), micProcessingBuf.begin() + samplesThisChunk, outChunk.begin());
+#endif
 
         // --- STAGE 6: Broadcast Dynamics (Comp + Limit) + Mix ---
         std::vector<int16_t> mixBuf(samplesThisChunk * 2); // Final Mix is ALWAYS Stereo
@@ -310,7 +324,9 @@ bool PostProcessor::process(const Config& config) {
     LOGI("Processing complete. %zu samples.", processedSamples);
 
     // Explicitly release memory-heavy resources before expensive muxing
+#ifdef BOKBOK_ENABLE_AI
     deepFilter_.reset();
+#endif
     aec3_.reset();
 
     if (shouldCancel_.load()) return false;

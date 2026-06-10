@@ -45,35 +45,75 @@ class UsageStatsWorker @AssistedInject constructor(
             val events = usageStatsManager.queryEvents(startTime, endTime)
             val usageMap = HashMap<String, AppUsageTempData>()
             val event = UsageEvents.Event()
+            var currentlyActivePackage: String? = null
+
+            // Helper to pause a package
+            fun pausePackage(pkgName: String, timestamp: Long) {
+                val data = usageMap[pkgName] ?: return
+                if (data.lastStartTime > 0) {
+                    data.screenTime += (timestamp - data.lastStartTime)
+                    data.lastStartTime = 0
+                }
+                data.activeActivities.clear()
+            }
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                val packageName = event.packageName
+                val packageName = event.packageName ?: continue
+                val eventType = event.eventType
+
+                // Handle global screen events
+                if (eventType == UsageEvents.Event.SCREEN_NON_INTERACTIVE || 
+                    eventType == UsageEvents.Event.KEYGUARD_SHOWN) {
+                    currentlyActivePackage?.let { activePkg ->
+                        pausePackage(activePkg, event.timeStamp)
+                    }
+                    currentlyActivePackage = null
+                    continue
+                }
+
                 val data = usageMap.getOrPut(packageName) { AppUsageTempData(packageName) }
 
-                when (event.eventType) {
-                    UsageEvents.Event.ACTIVITY_RESUMED -> {
-                        data.lastStartTime = event.timeStamp
+                when (eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED,
+                    UsageEvents.Event.MOVE_TO_FOREGROUND -> {
+                        // Heuristic: If another package was active, force-pause it
+                        if (currentlyActivePackage != null && currentlyActivePackage != packageName) {
+                            pausePackage(currentlyActivePackage, event.timeStamp)
+                        }
+                        currentlyActivePackage = packageName
+
+                        val activityKey = event.className ?: "default_activity"
+                        if (data.activeActivities.isEmpty()) {
+                            data.lastStartTime = event.timeStamp
+                            data.timesOpened++
+                        }
+                        data.activeActivities.add(activityKey)
                         if (data.lastUsedTime < event.timeStamp) {
                             data.lastUsedTime = event.timeStamp
                         }
-                        data.timesOpened++
                     }
-                    UsageEvents.Event.ACTIVITY_PAUSED, 
-                    UsageEvents.Event.ACTIVITY_STOPPED -> {
-                        if (data.lastStartTime > 0) {
-                            data.screenTime += (event.timeStamp - data.lastStartTime)
-                            data.lastStartTime = 0
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED,
+                    UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                        val activityKey = event.className ?: "default_activity"
+                        data.activeActivities.remove(activityKey)
+                        if (data.activeActivities.isEmpty()) {
+                            if (data.lastStartTime > 0) {
+                                data.screenTime += (event.timeStamp - data.lastStartTime)
+                                data.lastStartTime = 0
+                            }
+                            if (currentlyActivePackage == packageName) {
+                                currentlyActivePackage = null
+                            }
                         }
                     }
                 }
             }
 
             // Handle still running
-            usageMap.values.forEach { data ->
-                if (data.lastStartTime > 0) {
-                    data.screenTime += (endTime - data.lastStartTime)
-                }
+            currentlyActivePackage?.let { activePkg ->
+                pausePackage(activePkg, endTime)
             }
 
             // FETCH NETWORK USAGE IN BATCH (Massive performance gain)
@@ -96,7 +136,7 @@ class UsageStatsWorker @AssistedInject constructor(
                                     
                                     val wifiData = wifiUsageMap[uid] ?: 0L
                                     val mobileData = mobileUsageMap[uid] ?: 0L
-                                    val batteryEst = (data.screenTime.toDouble() / 3600000.0) * 10.0
+                                    val batteryEst = minOf(100.0, (data.screenTime.toDouble() / 3600000.0) * 10.0)
 
                                     UsageStatsEntity(
                                         packageName = data.packageName,
@@ -155,7 +195,8 @@ class UsageStatsWorker @AssistedInject constructor(
         var screenTime: Long = 0,
         var timesOpened: Int = 0,
         var lastUsedTime: Long = 0,
-        var lastStartTime: Long = 0
+        var lastStartTime: Long = 0,
+        val activeActivities: MutableSet<String> = HashSet()
     )
 
     companion object {

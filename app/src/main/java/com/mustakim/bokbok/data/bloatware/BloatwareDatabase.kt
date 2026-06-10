@@ -13,7 +13,8 @@ import java.net.URL
  * Based on the App Manager reference implementation.
  */
 data class DebloatObject(
-    val packageName: String,
+    @SerializedName("id")
+    val packageName: String = "",
     
     @SerializedName("label")
     val label: String? = null,
@@ -62,11 +63,15 @@ data class DebloatObject(
      * Get removal safety level as enum
      */
     fun getRemovalSafety(): RemovalSafety {
-        return when (removal.replaceFirstChar { it.uppercase() }) {
-            REMOVAL_RECOMMENDED -> RemovalSafety.SAFE
-            REMOVAL_ADVANCED -> RemovalSafety.CAUTION
-            REMOVAL_EXPERT -> RemovalSafety.UNSAFE
-            REMOVAL_UNSAFE -> RemovalSafety.UNSAFE
+        return when (removal.trim().lowercase()) {
+            REMOVAL_RECOMMENDED.lowercase(),
+            "delete" -> RemovalSafety.SAFE
+            "replace" -> RemovalSafety.REPLACEABLE
+            REMOVAL_ADVANCED.lowercase(),
+            "caution" -> RemovalSafety.CAUTION
+            REMOVAL_EXPERT.lowercase(),
+            REMOVAL_UNSAFE.lowercase(),
+            "unsafe" -> RemovalSafety.UNSAFE
             else -> RemovalSafety.UNKNOWN
         }
     }
@@ -75,8 +80,7 @@ data class DebloatObject(
      * Check if this app is safe to remove
      */
     fun isSafeToRemove(): Boolean {
-        // Only Recommended and Advanced are considered somewhat safe for general users
-        return removal.replaceFirstChar { it.uppercase() } in listOf(REMOVAL_RECOMMENDED, REMOVAL_ADVANCED)
+        return getRemovalSafety() in setOf(RemovalSafety.SAFE, RemovalSafety.REPLACEABLE, RemovalSafety.CAUTION)
     }
 }
 
@@ -100,6 +104,22 @@ object BloatwareDatabase {
     private const val CACHE_FILE_NAME = "uad_cache.json"
 
     private var debloatMap: Map<String, DebloatObject>? = null
+
+    private fun parseDebloatJson(json: String): Map<String, DebloatObject> {
+        val gson = Gson()
+        val trimmed = json.trim()
+
+        return if (trimmed.startsWith("[")) {
+            val list = gson.fromJson(trimmed, Array<DebloatObject>::class.java).toList()
+            list
+                .filter { it.packageName.isNotBlank() }
+                .associateBy { it.packageName }
+        } else {
+            val type = object : TypeToken<Map<String, DebloatObject>>() {}.type
+            val map = gson.fromJson<Map<String, DebloatObject>>(trimmed, type)
+            map.mapValues { (pkg, obj) -> obj.copy(packageName = pkg) }
+        }
+    }
     
     /**
      * Load the bloatware database.
@@ -109,30 +129,17 @@ object BloatwareDatabase {
         if (debloatMap != null) return
         
         try {
-            val gson = Gson()
-            val type = object : TypeToken<Map<String, DebloatObject>>() {}.type
-
             // 1. Try Cache
             val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
             if (cacheFile.exists()) {
                 val json = cacheFile.readText()
-                debloatMap = gson.fromJson(json, type)
+                debloatMap = parseDebloatJson(json)
             }
 
             // 2. Fallback to Asset (if cache failed or empty)
             if (debloatMap == null || debloatMap!!.isEmpty()) {
                 val json = context.assets.open("debloat.json").bufferedReader().use { it.readText() }
-                
-                if (json.trim().startsWith("[")) {
-                     // Old list format
-                     val list = gson.fromJson(json, Array<DebloatObject>::class.java).toList()
-                     debloatMap = list.associateBy { it.packageName }
-                } else {
-                     // New map format: { "pkg.name": { ... }, ... }
-                     val map = gson.fromJson<Map<String, DebloatObject>>(json, type)
-                     // Re-create the map giving each object its package name from the key
-                     debloatMap = map.mapValues { (pkg, obj) -> obj.copy(packageName = pkg) }
-                }
+                debloatMap = parseDebloatJson(json)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -156,20 +163,15 @@ object BloatwareDatabase {
                 val json = connection.inputStream.bufferedReader().use { it.readText() }
                 
                 // Validate JSON before saving
-                val gson = Gson()
-                val type = object : TypeToken<Map<String, DebloatObject>>() {}.type
-                val newMap: Map<String, DebloatObject> = gson.fromJson(json, type)
+                val newMap = parseDebloatJson(json)
                 
                 if (newMap.isNotEmpty()) {
-                    // Re-create with package names from keys to validate and store in-memory
-                    val processedMap = newMap.mapValues { (pkg, obj) -> obj.copy(packageName = pkg) }
-                    
                     // Save to cache
                     val cacheFile = File(context.filesDir, CACHE_FILE_NAME)
                     cacheFile.writeText(json)
                     
                     // Update in-memory
-                    debloatMap = processedMap
+                    debloatMap = newMap
                     true
                 } else {
                     false

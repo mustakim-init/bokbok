@@ -127,9 +127,10 @@ class AppManagerViewModel @Inject constructor(
             // Attempt to grant Usage Stats permission via Shizuku
             repository.grantSelfPermissions()
             
-            // 🚀 LAZY LOADING: Trigger initial scan only when entering this feature
-            // and only if the database hasn't been populated yet.
-            if (uiState.value.apps.isEmpty()) {
+            // 🚀 SMART INITIALIZATION: Only refresh if the database is empty.
+            // Using getAppCount() is much more efficient than checking uiState.value.apps.isEmpty()
+            // because the Flow might not have emitted the database content yet.
+            if (repository.getAppCount() == 0) {
                 repository.refreshApps()
             }
             
@@ -252,11 +253,21 @@ class AppManagerViewModel @Inject constructor(
     }
 
     fun checkForDatabaseUpdates() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Check if we uninstalled recently to avoid spamming GitHub
+            val lastSync = repository.getLastBloatwareSyncTime()
+            val twentyFourHours = 24 * 60 * 60 * 1000L
+            
+            if (System.currentTimeMillis() - lastSync < twentyFourHours) {
+                return@launch
+            }
+
             _isLoading.value = true
             val updated = repository.syncBloatwareDatabase()
             _isLoading.value = false
+            
             if (updated) {
+                 repository.updateLastBloatwareSyncTime(System.currentTimeMillis())
                  // Reload to apply new definitions
                  loadApps()
             }

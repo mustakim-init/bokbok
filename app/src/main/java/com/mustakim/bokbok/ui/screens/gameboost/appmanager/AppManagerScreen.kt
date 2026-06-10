@@ -34,6 +34,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -225,14 +231,54 @@ fun AppManagerScreen(
                 }
             } else if (uiState.apps.isEmpty()) {
                 Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "No apps found",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    val icon = if (searchQuery.isNotEmpty()) Icons.Default.SearchOff else Icons.Default.Inbox
+                    val title = if (searchQuery.isNotEmpty()) "No results found" else "List is empty"
+                    val description = if (searchQuery.isNotEmpty()) 
+                        "We couldn't find any app matching \"$searchQuery\". Try a different name."
+                        else "No apps found for the selected filter: ${filterType.name.lowercase().replaceFirstChar { it.uppercase() }}"
+                    
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(80.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                     )
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                    
+                    if (searchQuery.isNotEmpty() || filterType != AppFilterType.ALL) {
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Button(
+                            onClick = {
+                                viewModel.onSearchQueryChanged("")
+                                viewModel.onFilterChanged(AppFilterType.ALL)
+                            },
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("Clear Filters & Search")
+                        }
+                    }
                 }
             } else {
                 PullToRefreshBox(

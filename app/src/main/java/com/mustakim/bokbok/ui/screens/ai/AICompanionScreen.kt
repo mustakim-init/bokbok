@@ -104,6 +104,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
+import com.mustakim.bokbok.util.ArchitectureUtils
 import com.mustakim.bokbok.viewmodel.AICompanionViewModel
 import com.mustakim.bokbok.viewmodel.CompanionUiState
 import kotlinx.coroutines.launch
@@ -130,10 +131,13 @@ fun AICompanionScreen(
     val showPermissionDialog by viewModel.showPermissionDialog.collectAsState()
     val showOverlayPermissionDialog by viewModel.showOverlayPermissionDialog.collectAsState()
     
+    val is64Bit = remember { ArchitectureUtils.is64Bit() }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     if (showPermissionDialog) {
-        AlertDialog(
+        val is64Bit = remember { ArchitectureUtils.is64Bit() }
+    
+    AlertDialog(
             onDismissRequest = { viewModel.dismissPermissionDialog() },
             title = { Text("Accessibility Required") },
             text = { Text("To use Voice Mode in the background, BokBok AI needs Accessibility permission. If Shizuku is not running, please enable it manually in Settings.") },
@@ -158,7 +162,9 @@ fun AICompanionScreen(
     }
 
     if (showOverlayPermissionDialog) {
-        AlertDialog(
+        val is64Bit = remember { ArchitectureUtils.is64Bit() }
+    
+    AlertDialog(
             onDismissRequest = { viewModel.dismissPermissionDialog() },
             title = { Text("Overlay Permission Required") },
             text = { Text("BokBok AI needs permission to show the edge glow and mic button over other apps. Please enable 'Display over other apps'.") },
@@ -896,6 +902,8 @@ fun VoiceSettingsDialog(
     onTtsModeChange: (AICompanionViewModel.TtsMode) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val is64Bit = remember { ArchitectureUtils.is64Bit() }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -935,27 +943,42 @@ fun VoiceSettingsDialog(
                     }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
-                        .padding(vertical = 12.dp)
-                ) {
-                    RadioButton(
-                        selected = ttsMode == AICompanionViewModel.TtsMode.QUALITY,
-                        onClick = { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            text = "Sherpa-ONNX (Neural)",
-                            style = MaterialTheme.typography.bodyLarge
+                if (is64Bit) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
+                            .padding(vertical = 12.dp)
+                    ) {
+                        RadioButton(
+                            selected = ttsMode == AICompanionViewModel.TtsMode.QUALITY,
+                            onClick = { onTtsModeChange(AICompanionViewModel.TtsMode.QUALITY) }
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Sherpa-ONNX (Neural)",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "High quality, offline AI model",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
                         Text(
-                            text = "High quality, offline AI model",
+                            text = "Neural TTS is disabled on this 32-bit device.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(12.dp)
                         )
                     }
                 }

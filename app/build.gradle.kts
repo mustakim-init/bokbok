@@ -32,7 +32,7 @@ android {
 
         // Read keys from local.properties
         val properties = Properties()
-        properties.load(project.rootProject.file("local.properties").inputStream())
+        properties.load(rootProject.file("local.properties").inputStream())
 
         // ImgBB
         val imgbbKey = properties.getProperty("imgbb.api.key") ?: ""
@@ -61,7 +61,7 @@ android {
 
         buildConfigField("String", "ARCHITECTURE", "\"universal\"")
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
 
         externalNativeBuild {
@@ -111,7 +111,7 @@ android {
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
                 "-opt-in=androidx.compose.material3.ExperimentalMaterial3ExpressiveApi",
                 "-P",
-                "plugin:androidx.compose.compiler.plugins.kotlin:stabilityConfigurationPath=${project.rootDir.absolutePath}/app/compose_stability.conf"
+                "plugin:androidx.compose.compiler.plugins.kotlin:stabilityConfigurationPath=${rootDir.absolutePath}/app/compose_stability.conf"
             )
         }
     }

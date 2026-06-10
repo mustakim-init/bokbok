@@ -160,21 +160,9 @@ fun UsageStatsItem(
 
             Spacer(modifier = Modifier.height(12.dp))
             
-            // Progress Bar
-            var progress by remember { mutableFloatStateOf(0f) }
-            val animatedProgress by animateFloatAsState(
-                targetValue = progress,
-                animationSpec = tween(durationMillis = 1000),
-                label = "progress"
-            )
-            
-            LaunchedEffect(usageInfo.usagePercentage) {
-                 progress = usageInfo.usagePercentage / 100f
-            }
-
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LinearProgressIndicator(
-                    progress = animatedProgress,
+                    progress = { usageInfo.usagePercentage / 100f },
                     modifier = Modifier
                         .weight(1f)
                         .height(6.dp)

@@ -63,7 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.runtime.Composable
-import androidx.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -113,6 +113,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import com.mustakim.bokbok.ui.shared.BokBokIconButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
@@ -203,9 +204,18 @@ fun ChatsScreen(
                 scrollBehavior = passedScrollBehavior,
                 useFlexibleTopBar = false,
                 isStatic = true,
-                navigationIcon = null,
+                navigationIcon = {
+                    BokBokIconButton(onClick = { /* Menu */ }) {
+                        Icon(painterResource(id = R.drawable.more_horiz), contentDescription = "Menu")
+                    }
+                },
                 onNotificationsClick = { navController.navigate("notifications") },
-                onProfileClick = { navController.navigate("profile") }
+                onProfileClick = { navController.navigate("profile") },
+                actions = {
+                    BokBokIconButton(onClick = { /* Add Friend */ }) {
+                        Icon(painterResource(id = R.drawable.add_circle), contentDescription = "Add Friend")
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -876,4 +886,4 @@ fun isYesterday(date: Date): Boolean {
     val cal = java.util.Calendar.getInstance()
     cal.add(java.util.Calendar.DATE, -1)
     return isSameDay(date, cal.time)
-}```
+}

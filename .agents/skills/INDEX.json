@@ -1,12 +1,20 @@
 {
   "version": 1,
-  "last_updated": "2026-06-10",
+  "last_updated": "2026-06-11",
   "skills": [
     {
       "name": "knowledge-mgmt",
-      "description": "How the .agents/ system works — rules, handoffs, mistakes, design, knowledge, and skills",
+      "description": "How the .agents/ system works — rules, handoffs, mistakes, design, knowledge, inspirations, and skills",
       "keywords": ["system", "rules", "meta", "knowledge", "skill", "handoff", "howto"],
       "path": ".agents/skills/meta/skill.md",
+      "difficulty": "easy",
+      "created_by": "system"
+    },
+    {
+      "name": "inspirations",
+      "description": "How to use .inspirations/ reference projects — reference mode vs creative mode, searching, self-discovery of new repos",
+      "keywords": ["inspirations", "reference", "copy", "ui-inspiration", "production-code", "open-source"],
+      "path": ".agents/inspirations/HOWTO.md",
       "difficulty": "easy",
       "created_by": "system"
     }

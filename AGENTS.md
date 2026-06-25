@@ -11,7 +11,8 @@ BEFORE starting any task:
  3. Check .agents/mistakes/ — what broke before?
  4. Check .agents/design/ — how should UI look?
  5. Search .agents/knowledge/ — has this been solved?
- 6. Search .agents/skills/INDEX.json — is there a skill for this?
+  6. Search .agents/skills/INDEX.json — is there a skill for this?
+  7. Search .agents/inspirations/INDEX.json — is there a matching reference project?
 
 DURING the task:
   - Follow the rules in .agents/RULES.md
@@ -41,6 +42,8 @@ AFTER finishing (or stopping):
 6. **Share what you learn.** Non-obvious patterns, architecture decisions, and clever fixes belong in `.agents/knowledge/`.
 
 7. **Everything is editable.** If you see something wrong or outdated in ANY file in `.agents/`, fix it. The system grows with use.
+
+8. **Learn from real code.** Before writing complex features, check `.inspirations/` for reference projects. Copy closely where they match your task. If the user rejects the result, stop referencing and create something original.
 
 ## Project Quick Reference
 

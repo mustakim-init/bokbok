@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,7 +22,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumTopAppBar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -34,11 +34,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.mustakim.bokbok.ui.theme.GoogleSansFlexSlanted
 import com.mustakim.bokbok.viewmodel.UserViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,9 +70,10 @@ fun TopBar(
     val finalTitleContent = customTitle ?: @Composable {
         Text(
             text = title,
-            style = if (isStatic) MaterialTheme.typography.titleLarge else if (useFlexibleTopBar) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onSurface
+            style = if (isStatic) MaterialTheme.typography.headlineLarge else if (useFlexibleTopBar) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            fontFamily = GoogleSansFlexSlanted,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 
@@ -88,14 +95,12 @@ fun TopBar(
 
     val finalActions = @Composable {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Additional actions first
             actions?.invoke(this@Row)
-            
+
             if (actions != null && (showNotifications || showProfile)) {
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            // Notifications
             if (showNotifications) {
                 IconButton(
                     onClick = onNotificationsClick,
@@ -131,7 +136,6 @@ fun TopBar(
                 Spacer(modifier = Modifier.width(12.dp))
             }
 
-            // Profile Avatar
             if (showProfile) {
                 Box(
                     modifier = Modifier
@@ -172,38 +176,130 @@ fun TopBar(
         }
     }
 
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant
+
+    val glassBrush = remember(surfaceColor) {
+        Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to surfaceColor.copy(alpha = 0.96f),       // 100% transparent at very top
+                0.35f to surfaceColor.copy(alpha = 0.90f),     // mostly transparent
+                0.7f to surfaceColor.copy(alpha = 0.80f),      // drastic jump to 75% near the middle
+                0.8f to surfaceColor.copy(alpha = 0.45f),      // getting more opaque
+                1.0f to surfaceColor.copy(alpha = 0.0f)       // almost fully opaque at the bottom
+            )
+        )
+    }
+
     if (isStatic) {
-        TopAppBar(
-            scrollBehavior = null,
-            title = finalTitleContent,
-            navigationIcon = navigationIcon ?: defaultNavigationIcon,
-            actions = { finalActions() },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                titleContentColor = MaterialTheme.colorScheme.onSurface,
-                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                actionIconContentColor = MaterialTheme.colorScheme.onSurface
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // 1. Frosted glass background layer (matching parent size, dynamically measured)
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        if (android.os.Build.VERSION.SDK_INT >= 31) {
+                            renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                                12f, 12f, android.graphics.Shader.TileMode.CLAMP
+                            ).asComposeRenderEffect()
+                        }
+                    }
+                    .background(glassBrush)
             )
-        )
+
+            // 2. Clear border/highlight layer (crisp lines, not blurred)
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .drawBehind {
+                        // Top highlight (white edge)
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.15f),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        // Bottom divider
+                        drawLine(
+                            color = outlineVariant.copy(alpha = 0.18f),
+                            start = Offset(0f, size.height),
+                            end = Offset(size.width, size.height),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+            )
+
+            // 3. TopAppBar (completely transparent background)
+            TopAppBar(
+                scrollBehavior = null,
+                title = finalTitleContent,
+                navigationIcon = navigationIcon ?: defaultNavigationIcon,
+                actions = { finalActions() },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
     } else {
-        // Unified flexible TopBar using LargeTopAppBar for the "ArchiveTune" look
-        androidx.compose.material3.LargeTopAppBar(
-            scrollBehavior = scrollBehavior,
-            title = {
-                Box(modifier = Modifier.padding(start = if (scrollBehavior?.state?.collapsedFraction ?: 0f > 0.5f) 0.dp else 8.dp)) {
-                    finalTitleContent()
-                }
-            },
-            navigationIcon = navigationIcon ?: defaultNavigationIcon,
-            actions = { finalActions() },
-            colors = TopAppBarDefaults.largeTopAppBarColors(
-                containerColor = MaterialTheme.colorScheme.background,
-                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                titleContentColor = MaterialTheme.colorScheme.onSurface,
-                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // 1. Frosted glass background layer (matching parent size, dynamically measured)
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        if (android.os.Build.VERSION.SDK_INT >= 31) {
+                            renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                                12f, 12f, android.graphics.Shader.TileMode.CLAMP
+                            ).asComposeRenderEffect()
+                        }
+                    }
+                    .background(glassBrush)
             )
-        )
+
+            // 2. Clear border/highlight layer (crisp lines, not blurred)
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .drawBehind {
+                        // Top highlight (white edge)
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.15f),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        // Bottom divider
+                        drawLine(
+                            color = outlineVariant.copy(alpha = 0.18f),
+                            start = Offset(0f, size.height),
+                            end = Offset(size.width, size.height),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+            )
+
+            // 3. LargeTopAppBar (completely transparent background)
+            androidx.compose.material3.LargeTopAppBar(
+                scrollBehavior = scrollBehavior,
+                title = {
+                    Box(modifier = Modifier.padding(start = if (scrollBehavior?.state?.collapsedFraction ?: 0f > 0.5f) 0.dp else 8.dp)) {
+                        finalTitleContent()
+                    }
+                },
+                navigationIcon = navigationIcon ?: defaultNavigationIcon,
+                actions = { finalActions() },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+        }
     }
 }

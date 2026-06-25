@@ -17,13 +17,16 @@ This system fixes that.
 ├── mistakes/          ← Mistake log (one file per screw-up)
 ├── design/            ← UI design conventions
 ├── knowledge/         ← Non-obvious learnings and patterns
+├── inspirations/      ← Reference projects (cloned open-source Android apps)
+│   ├── INDEX.json     ← Searchable project catalog with UI + feature keywords
+│   └── HOWTO.md       ← Reference mode vs creative mode decision tree
 └── skills/            ← Power-ups for hard problems
     ├── INDEX.json     ← Searchable skill registry
     ├── HOWTO.md       ← How to create/update skills
     └── meta/          ← This skill
 ```
 
-## The 7-Step Workflow
+## The 8-Step Workflow
 
 ### Before ANY task:
 
@@ -33,6 +36,7 @@ This system fixes that.
 4. **Check .agents/design/** — how should UI look? Match existing patterns
 5. **Search .agents/knowledge/** — has this problem been solved before?
 6. **Search .agents/skills/INDEX.json** — is there a skill for this?
+7. **Search .agents/inspirations/INDEX.json** — is there a matching reference project?
 
 ### During the task:
 
@@ -49,6 +53,7 @@ This system fixes that.
 | Learned something non-obvious | Write to `.agents/knowledge/` |
 | Stopped mid-task | Write to `.agents/handoff/` |
 | Created/changed UI | Write to `.agents/design/` |
+| Referenced a project from `.inspirations/` | Add/update its entry in `.agents/inspirations/INDEX.json` |
 | Found outdated info | Update it immediately |
 
 ## How Skills Grow
@@ -76,6 +81,14 @@ This system fixes that.
 - AI creates UI → writes the choices to `.agents/design/`
 - AI changes UI → updates `.agents/design/`
 - User wants new style → tell one AI, it updates `.agents/design/`, ALL AIs follow
+
+## How Inspirations Work
+
+- AI has a task → searches `.agents/inspirations/INDEX.json` by keyword
+- If a matching project exists → **Reference Mode**: study + copy closely, adapt to bokbok
+- If no match → check if new repos were added by scanning `.inspirations/` directories
+- If user says "change" or "I don't like this" → **Creative Mode**: stop referencing, write original
+- AI discovers a new repo → reads its README → adds it to INDEX.json so future AIs don't re-scan
 
 ## Key Principle
 

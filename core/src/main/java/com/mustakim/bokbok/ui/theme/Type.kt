@@ -2,18 +2,58 @@
 package com.mustakim.bokbok.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.mustakim.bokbok.core.R as CoreR
 
+@OptIn(ExperimentalTextApi::class)
 val GoogleSansFlex = FontFamily(
-    Font(CoreR.font.google_sans_flex_400, FontWeight.Normal),
-    Font(CoreR.font.google_sans_flex_600, FontWeight.Medium),
-    Font(CoreR.font.google_sans_flex_600, FontWeight.SemiBold),
-    Font(CoreR.font.google_sans_flex_600, FontWeight.Bold)
+    Font(
+        CoreR.font.google_sans_flex_variable,
+        weight = FontWeight.Normal,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(400)
+        )
+    ),
+    Font(
+        CoreR.font.google_sans_flex_variable,
+        weight = FontWeight.Medium,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(500)
+        )
+    ),
+    Font(
+        CoreR.font.google_sans_flex_variable,
+        weight = FontWeight.SemiBold,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(600)
+        )
+    ),
+    Font(
+        CoreR.font.google_sans_flex_variable,
+        weight = FontWeight.Bold,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(700)
+        )
+    )
+)
+
+@OptIn(ExperimentalTextApi::class)
+val GoogleSansFlexSlanted = FontFamily(
+    Font(
+        CoreR.font.google_sans_flex_variable,
+        weight = FontWeight.Bold,
+        variationSettings = FontVariation.Settings(
+            FontVariation.weight(700),
+            FontVariation.slant(-10f),
+            FontVariation.Setting("ROND", 0f)
+        )
+    )
 )
 
 val RobotoFlex = FontFamily(

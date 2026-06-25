@@ -234,6 +234,12 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- WorkManager foreground service (required for API 36+) -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
         <!-- Screen Record Quick Settings Tile -->
         <service
             android:name=".data.service.quicktile.ScreenRecordTileService"

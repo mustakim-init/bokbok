@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "last_updated": "2026-06-11",
+  "projects": [
+    {
+      "name": "adns",
+      "path": ".inspirations/adns",
+      "description": "Lightweight DNS-based ad blocker with NextDNS integration, no VPN needed, Quick Settings tile",
+      "ui_keywords": ["material3", "expressive", "dynamic colors"],
+      "feature_keywords": ["dns", "adblocker", "networking", "nextdns", "privacy", "shizuku"],
+      "why_useful": "M3 Expressive UI components (ExpressiveListItem, ExpressiveIcon), clean MVVM"
+    },
+    {
+      "name": "ArchiveTune",
+      "path": ".inspirations/ArchiveTune",
+      "description": "Fully custom YouTube Music player with live lyrics, shazam, scrobbling, Discord RPC, canvas visualizer",
+      "ui_keywords": ["material3", "dynamic colors", "clean", "customizable", "expressive"],
+      "feature_keywords": ["music", "youtube-music", "lyrics", "audio", "scrobbling", "discord-rpc", "playlist", "equalizer"],
+      "why_useful": "Your music module was forked from here. Reference for innertube, lrclib, shazamkit, betterlyrics, canvas, kugou, lastfm, simpmusic modules"
+    },
+    {
+      "name": "blockads-android",
+      "path": ".inspirations/blockads-android",
+      "description": "System-wide ad blocker using VPN-based DNS filtering with HTTPS filtering and WireGuard",
+      "ui_keywords": ["material3", "dynamic colors", "dark mode", "premium"],
+      "feature_keywords": ["adblocker", "vpn", "dns", "firewall", "privacy", "security", "wireguard", "https-filtering"],
+      "why_useful": "Sophisticated VPN + DNS filtering architecture, per-app rules, real-time query logs"
+    },
+    {
+      "name": "CaffeineHealth",
+      "path": ".inspirations/CaffeineHealth",
+      "description": "Caffeine intake tracker with real-time caffeine curve, sleep forecast, pharmacokinetic modeling",
+      "ui_keywords": ["material3", "expressive", "dynamic colors", "dark mode", "montserrat", "haptic"],
+      "feature_keywords": ["health", "caffeine", "tracking", "analytics", "charts", "pharmacokinetic"],
+      "why_useful": "Beautiful M3 Expressive UI with charts (Vico), single-activity MVVM, manual DI pattern"
+    },
+    {
+      "name": "Cashiro",
+      "path": ".inspirations/Cashiro",
+      "description": "Privacy-first expense tracker with on-device AI bank SMS/PDF parsing, 80+ banks, 14 countries",
+      "ui_keywords": ["material3", "material-you", "dynamic colors", "blur", "haze"],
+      "feature_keywords": ["finance", "expense-tracking", "budgeting", "sms-parsing", "ai", "offline", "multi-currency"],
+      "why_useful": "Multi-module Clean Architecture, on-device AI (MediaPipe), Hilt DI, blur effects, Compose Charts"
+    },
+    {
+      "name": "Compose-Material-3-Expressive-Catalog",
+      "path": ".inspirations/Compose-Material-3-Expressive-Catalog",
+      "description": "Official AndroidX Compose Material 3 Catalog extracted from AOSP — official M3 component showcase",
+      "ui_keywords": ["material3", "expressive", "catalog", "official"],
+      "feature_keywords": ["reference", "showcase", "components", "demo"],
+      "why_useful": "Official AndroidX source — get M3 component implementation details straight from Google"
+    },
+    {
+      "name": "deepdenoiser",
+      "path": ".inspirations/deepdenoiser",
+      "description": "Offline AI audio denoiser using DeepFilterNet3 model via ONNX Runtime on-device",
+      "ui_keywords": ["modern", "clean", "simple"],
+      "feature_keywords": ["audio", "noise-suppression", "denoiser", "ai", "onnx", "media"],
+      "why_useful": "React Native app but the ONNX/audio processing logic is useful reference for noise suppression"
+    },
+    {
+      "name": "essentials",
+      "path": ".inspirations/essentials",
+      "description": "Feature-packed Android toolbox — sound/haptic controls, security, privacy, display tweaks, widgets, Quick Settings tiles",
+      "ui_keywords": ["material3", "pixel-style"],
+      "feature_keywords": ["tools", "utility", "pixel", "mods", "shizuku", "root", "accessibility", "widgets", "quick-settings"],
+      "why_useful": "Comprehensive system-level Android tool reference, Shizuku/Root patterns, WearOS companion"
+    },
+    {
+      "name": "fluffychat",
+      "path": ".inspirations/fluffychat",
+      "description": "Cross-platform Matrix chat client with e2ee, Spaces, voice messages — Flutter-based",
+      "ui_keywords": ["cute", "material-you", "dark mode", "expressive"],
+      "feature_keywords": ["chat", "messaging", "matrix", "e2ee", "cross-platform", "flutter"],
+      "why_useful": "Great example of cute/expressive chat UI design (Flutter, but UI patterns translate)"
+    },
+    {
+      "name": "HydroTracker",
+      "path": ".inspirations/HydroTracker",
+      "description": "Water intake tracker with Health Connect sync, widgets, science-based hydration calculations",
+      "ui_keywords": ["material3", "expressive", "dark mode", "dynamic colors"],
+      "feature_keywords": ["health", "water", "hydration", "tracking", "health-connect", "widgets", "reminders"],
+      "why_useful": "M3 Expressive design with Health Connect API, widgets, Vico charts — clean MVVM"
+    },
+    {
+      "name": "June",
+      "path": ".inspirations/June",
+      "description": "Multimedia journaling app with photos, videos, maps, music links, mood tracking, WebDAV sync",
+      "ui_keywords": ["material3", "material-you", "expressive", "dynamic colors"],
+      "feature_keywords": ["journal", "diary", "multimedia", "notes", "privacy", "cloud-sync", "mood-tracking", "maps"],
+      "why_useful": "MVVM Clean Architecture with Koin DI, MapLibre maps, Media3 video, WebDAV sync, offline-first"
+    },
+    {
+      "name": "LastChat",
+      "path": ".inspirations/LastChat",
+      "description": "AI assistant with multi-provider LLM support, RAG memory, Python/JS engines, image gen, TTS",
+      "ui_keywords": ["material-you3", "expressive", "android16", "haptic"],
+      "feature_keywords": ["ai", "chat", "assistant", "llm", "rag", "python", "javascript", "web-search", "tts", "image-generation"],
+      "why_useful": "Full-featured AI chat app — RAG memory, on-device Python/JS engines, MCP support, M3 Expressive premium haptics"
+    },
+    {
+      "name": "LTECleanerFOSS",
+      "path": ".inspirations/LTECleanerFOSS",
+      "description": "Phone cleaner that removes logs, caches, temp files, empty folders — no ads, minimal",
+      "ui_keywords": ["minimal", "simple"],
+      "feature_keywords": ["cleaner", "utility", "privacy", "cache", "logs"],
+      "why_useful": "Simple focused utility, legacy View-based UI (small APK approach)"
+    },
+    {
+      "name": "Material_3_Expressive_List",
+      "path": ".inspirations/Material_3_Expressive_List",
+      "description": "Curated M3 expressive components — expressive buttons, split buttons, FAB menus, floating toolbars, sliders",
+      "ui_keywords": ["material3", "expressive", "animated", "modern"],
+      "feature_keywords": ["reference", "showcase", "components", "demo", "animation"],
+      "why_useful": "Self-contained M3 expressive component demos, great for learning expressive animation patterns"
+    },
+    {
+      "name": "material-3-expressive-catalog",
+      "path": ".inspirations/material-3-expressive-catalog",
+      "description": "M3 expressive component catalog — buttons, progress indicators, bottom app bar, FAB menus, floating toolbars",
+      "ui_keywords": ["material3", "expressive", "modern"],
+      "feature_keywords": ["reference", "showcase", "components", "demo", "catalog"],
+      "why_useful": "Hilt DI + Jetpack Navigation, interactive component demos with GIFs, good architecture reference"
+    },
+    {
+      "name": "Momentum",
+      "path": ".inspirations/Momentum",
+      "description": "Daily photo montage app with face stabilization, calendar montage maker, time-lapse selfies",
+      "ui_keywords": ["material3", "dynamic colors"],
+      "feature_keywords": ["photography", "montage", "face-detection", "time-lapse", "mediapipe", "calendar"],
+      "why_useful": "Multi-module with MediaPipe face detection, MaterialKolor theming, offline-first architecture"
+    },
+    {
+      "name": "mpvRex",
+      "path": ".inspirations/mpvRex",
+      "description": "Feature-rich Android video player based on libmpv with subtitle seeking, Pip, Shorts mode",
+      "ui_keywords": ["material-you", "dark mode", "themed", "adaptive"],
+      "feature_keywords": ["video", "player", "mpv", "subtitles", "pip", "audio", "thumbnails"],
+      "why_useful": "Native video player with libmpv, Material You themed controls, vertical Shorts mode"
+    },
+    {
+      "name": "Omni",
+      "path": ".inspirations/Omni",
+      "description": "Lightweight toolbox — compass, spirit level, ruler, flashlight — no spyware, no bloat",
+      "ui_keywords": ["material3", "lightweight", "no-bloat"],
+      "feature_keywords": ["tools", "utility", "compass", "level", "ruler", "flashlight"],
+      "why_useful": "Minimalist Compose + Fragment hybrid, Quick Settings tile pattern, clean small app architecture"
+    },
+    {
+      "name": "OpenCord",
+      "path": ".inspirations/OpenCord",
+      "description": "DISCONTINUED — Material You reimplementation of Discord Android client with plugin support",
+      "ui_keywords": ["material-you", "themed"],
+      "feature_keywords": ["chat", "discord", "messaging", "social"],
+      "why_useful": "Reverse-engineered Discord client patterns in Kotlin/Compose (discontinued — code reference only)"
+    },
+    {
+      "name": "podium",
+      "path": ".inspirations/podium",
+      "description": "Modern podcast app with downloads, Apple Podcasts discovery, Android Auto, gpodder sync",
+      "ui_keywords": ["material3", "expressive", "modern"],
+      "feature_keywords": ["podcast", "audio", "android-auto", "sync", "gpodder", "discovery"],
+      "why_useful": "M3 Expressive design, Apple Podcasts integration, Android Auto support, sync patterns"
+    },
+    {
+      "name": "rethink-app",
+      "path": ".inspirations/rethink-app",
+      "description": "DNS + Firewall + VPN — combines WireGuard, OpenSnitch firewall, pi-hole DNS filtering, network monitor",
+      "ui_keywords": ["functional"],
+      "feature_keywords": ["dns", "vpn", "firewall", "network", "privacy", "security", "wireguard", "monitor"],
+      "why_useful": "Extremely sophisticated Go-based network stack, DNS-over-HTTPS/TLS/DNSCrypt, per-app firewall rules"
+    },
+    {
+      "name": "RivoPhoneApp",
+      "path": ".inspirations/RivoPhoneApp",
+      "description": "Open-source Android dialer with T9 search, call history, M3 Expressive UI, native in-call screen",
+      "ui_keywords": ["material3", "expressive", "modern", "clean"],
+      "feature_keywords": ["phone", "dialer", "calls", "communication", "t9"],
+      "why_useful": "Clean M3 Expressive dialer replacement, T9 search, proximity sensor handling, calls UI patterns"
+    },
+    {
+      "name": "shappky",
+      "path": ".inspirations/shappky",
+      "description": "Shell App Killer — stops background apps via Shizuku/Root to save memory and reduce heat",
+      "ui_keywords": ["simplified", "practical"],
+      "feature_keywords": ["utility", "performance", "memory", "shizuku", "root", "task-killer"],
+      "why_useful": "Simple focused Shizuku/Root utility, Quick Settings tile, system app protection"
+    },
+    {
+      "name": "Tomato",
+      "path": ".inspirations/Tomato",
+      "description": "Minimalist Pomodoro timer with detailed statistics, Now Bar/Live Updates on Android 16+",
+      "ui_keywords": ["material3", "expressive", "minimalist", "dynamic colors"],
+      "feature_keywords": ["productivity", "pomodoro", "timer", "statistics", "android16", "now-bar"],
+      "why_useful": "M3 Expressive with Google Sans Flex, Vico charts, MaterialKolor, Android 16 Live Updates"
+    },
+    {
+      "name": "Toolkit-Tiles",
+      "path": ".inspirations/Toolkit-Tiles",
+      "description": "24+ Quick Settings tiles — bubble level, compass, lux meter, coin flip, dice, DNS switcher, breathing exercise",
+      "ui_keywords": ["material3"],
+      "feature_keywords": ["tools", "utility", "quick-settings", "sensors", "measurement", "wellbeing"],
+      "why_useful": "All-in Quick Settings tile-based architecture, no main UI for most features — clever pattern"
+    },
+    {
+      "name": "WikiReader",
+      "path": ".inspirations/WikiReader",
+      "description": "Distraction-free Wikipedia reader with 300+ languages, offline saves, data saver, M3 Expressive",
+      "ui_keywords": ["material3", "expressive", "immersive", "customizable"],
+      "feature_keywords": ["wikipedia", "reading", "reference", "offline", "education"],
+      "why_useful": "M3 Expressive with MaterialKolor, fast loading (text before images), 300+ languages, data saver"
+    },
+    {
+      "name": "YoukiDex-Android-Desktop",
+      "path": ".inspirations/YoukiDex-Android-Desktop",
+      "description": "Desktop experience overlay — floating dock, freeform windows, app drawer, system tray, hot corners",
+      "ui_keywords": ["material-you", "themed", "transparent", "customizable"],
+      "feature_keywords": ["desktop", "launcher", "dock", "multitasking", "productivity", "freeform", "shizuku"],
+      "why_useful": "Accessibility Service + overlay desktop, freeform window management, multi-display, icon packs"
+    },
+    {
+      "name": "Zenith",
+      "path": ".inspirations/Zenith",
+      "description": "Digital wellbeing assistant — breaks addictive scrolling with mindful pauses, app shields, bedtime mode",
+      "ui_keywords": ["material3", "expressive", "fluid motion", "adaptive typography"],
+      "feature_keywords": ["wellbeing", "productivity", "digital-detox", "app-blocker", "screen-time", "mindfulness"],
+      "why_useful": "M3 Expressive with GSFlex typography, Accessibility Service for app detection, floating HUD, interactive widgets"
+    }
+  ]
+}

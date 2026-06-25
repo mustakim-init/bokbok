@@ -50,7 +50,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -77,7 +76,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,10 +84,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
-import com.mustakim.bokbok.R
 import com.mustakim.bokbok.state.RoomStateManager
 import com.mustakim.bokbok.ui.screens.common.MainScaffold
-import com.mustakim.bokbok.ui.screens.common.TopBar
 import com.mustakim.bokbok.ui.shared.BokBokIconButton
 import com.mustakim.bokbok.viewmodel.ChatUiModel
 import com.mustakim.bokbok.viewmodel.FriendsUiState
@@ -168,7 +164,8 @@ fun ChatsScreen(
         }
     }
 
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val color1 = MaterialTheme.colorScheme.primary
+    val color2 = MaterialTheme.colorScheme.secondary
 
     MainScaffold(
         navController = navController,
@@ -178,57 +175,39 @@ fun ChatsScreen(
         isStatic = true,
         notificationCount = 0,
         userViewModel = userViewModel,
-        customTopBar = { passedScrollBehavior ->
-            TopBar(
-                title = "Chats",
-                userViewModel = userViewModel,
-                scrollBehavior = passedScrollBehavior,
-                useFlexibleTopBar = false,
-                isStatic = true,
-                navigationIcon = {
-                    BokBokIconButton(onClick = { /* Menu */ }) {
-                        Icon(painterResource(id = R.drawable.more_horiz), contentDescription = "Menu")
+        containerColor = Color.Transparent,
+        background = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithCache {
+                        onDrawBehind {
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
+                                    center = Offset(size.width * 0.15f, size.height * 0.1f),
+                                    radius = size.width * 0.8f
+                                )
+                            )
+                            drawRect(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
+                                    center = Offset(size.width * 0.85f, size.height * 0.25f),
+                                    radius = size.width * 0.7f
+                                )
+                            )
+                        }
                     }
-                },
-                onNotificationsClick = { navController.navigate("notifications") },
-                onProfileClick = { navController.navigate("profile") },
-                actions = {
-                    BokBokIconButton(onClick = { /* Add Friend */ }) {
-                        Icon(painterResource(id = R.drawable.add_circle), contentDescription = "Add Friend")
-                    }
-                }
             )
         }
     ) { paddingValues ->
         // Track root container position so we can compute offsets relative to it
         var rootPosition by remember { mutableStateOf(IntOffset.Zero) }
 
-        // M3E Mesh gradient background layer
-        val color1 = MaterialTheme.colorScheme.primary
-        val color2 = MaterialTheme.colorScheme.secondary
-
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .drawWithCache {
-                    onDrawBehind {
-                        drawRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(color1.copy(alpha = 0.12f), Color.Transparent),
-                                center = Offset(size.width * 0.15f, size.height * 0.1f),
-                                radius = size.width * 0.8f
-                            )
-                        )
-                        drawRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(color2.copy(alpha = 0.1f), Color.Transparent),
-                                center = Offset(size.width * 0.85f, size.height * 0.25f),
-                                radius = size.width * 0.7f
-                            )
-                        )
-                    }
-                }
                 .onGloballyPositioned { coords ->
                     val pos = coords.positionInWindow()
                     rootPosition = IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
